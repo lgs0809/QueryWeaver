@@ -1,0 +1,38 @@
+# Copy this file to .env.local and replace all placeholder values.
+# .env.local is ignored by Git and is loaded only by the local startup scripts.
+# Use a trusted OIDC issuer and a Base64-encoded random 32-byte encryption key.
+QUERYWEAVER_JWT_ISSUER_URI=https://identity.example/realms/queryweaver
+QUERYWEAVER_SECRET_ENCRYPTION_KEY=[BASE64_32_BYTE_KEY]
+QUERYWEAVER_EXECUTION_INTERNAL_TOKEN=[RANDOM_32_PLUS_CHARACTER_VALUE]
+QUERYWEAVER_FLYWAY_ENABLED=true
+QUERYWEAVER_MIGRATE_PLAINTEXT_SECRETS=true
+
+# Start in dry-run, inspect retention batches, then explicitly switch to false.
+QUERYWEAVER_RETENTION_ENABLED=true
+QUERYWEAVER_RETENTION_DRY_RUN=true
+QUERYWEAVER_RETENTION_TERMINAL_RUN_DAYS=90
+QUERYWEAVER_RETENTION_BATCH_SIZE=100
+QUERYWEAVER_RETENTION_BATCH_AUDIT_DAYS=365
+QUERYWEAVER_RETENTION_SCAN_DELAY_MS=3600000
+QUERYWEAVER_RETENTION_LEASE_DURATION_SECONDS=600
+
+OPENAI_BASE_URL=https://your-openai-compatible-endpoint.example/v1
+OPENAI_API_KEY=[REDACTED_SECRET]
+OPENAI_CHAT_MODEL=replace-with-chat-model
+OPENAI_CHAT_COMPLETIONS_PATH=/chat/completions
+
+# External OpenAI-compatible embedding endpoint (recommended for a portable install).
+QUERYWEAVER_EMBEDDING_BASE_URL=https://your-openai-compatible-embedding-endpoint.example/v1
+QUERYWEAVER_MANAGE_EMBEDDING_MODEL=false
+OPENAI_EMBEDDING_API_KEY=[REDACTED_SECRET]
+OPENAI_EMBEDDING_MODEL=replace-with-embedding-model
+# Leave empty to infer /embeddings for a /v1 Base URL, otherwise /v1/embeddings.
+OPENAI_EMBEDDINGS_PATH=
+
+# Optional local helper. Uncomment these only when you already provide a compatible
+# local embedding-model Docker image/service.
+# QUERYWEAVER_EMBEDDING_BASE_URL=http://host.docker.internal:8110
+# QUERYWEAVER_MANAGE_EMBEDDING_MODEL=auto
+# EMBEDDING_MODEL_BIND_ADDRESS=127.0.0.1
+# EMBEDDING_MODEL_HOST_PORT=8110
+# EMBEDDING_MODEL_EMBEDDING_ONLY=false

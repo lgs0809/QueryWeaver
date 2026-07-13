@@ -1,0 +1,33 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: ${QUERYWEAVER_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/queryweaver?stringtype=unspecified}
+    username: ${QUERYWEAVER_DATASOURCE_USERNAME:postgres}
+    password: ${QUERYWEAVER_DATASOURCE_PASSWORD:postgres}
+    driver-class-name: ${QUERYWEAVER_DATASOURCE_DRIVER:org.postgresql.Driver}
+
+cn:
+  lgs:
+    queryweaver:
+      code-executor:
+        code-pool-executor: ${QUERYWEAVER_CODE_EXECUTOR:local}
+      file:
+        type: local
+      sql-execution:
+        require-time-filter: false
+        reject-full-table-scan: false
+
+queryweaver:
+  operator:
+    development-mode: true
+    default-operator: ${QUERYWEAVER_OPERATOR_DEFAULT_OPERATOR:local-operator}
+    default-role: ${QUERYWEAVER_OPERATOR_DEFAULT_ROLE:ADMIN}
+
+logging:
+  level:
+    cn.lgs.queryweaver.service: debug
+    cn.lgs.queryweaver.workflow.node: debug
+    com.alibaba.cloud.ai.mapper: debug
+    org.springframework.jdbc: debug

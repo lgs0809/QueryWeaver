@@ -1,0 +1,905 @@
+<!--
+ * Copyright 2024-2026 the original author or authors.
+ * Licensed under the Apache License, Version 2.0.
+ -->
+<template>
+  <el-drawer
+    :model-value="modelValue"
+    title="查询诊断与修复"
+    size="min(860px, 94vw)"
+    @close="emit('update:modelValue', false)"
+  >
+    <div v-loading="loading" class="diagnosis-workbench">
+      <el-alert v-if="error" type="error" show-icon :closable="false" title="诊断信息加载失败">
+        <template #default>
+          <div class="inline-action">
+            <span>{{ error }}</span>
+            <el-button size="small" @click="load">重新诊断</el-button>
+          </div>
+        </template>
+      </el-alert>
+
+      <template v-if="diagnosis">
+        <section class="diagnosis-hero" :class="rootCauseTone">
+          <div>
+            <span class="eyebrow">自动归因</span>
+            <h2>{{ rootCauseLabel(diagnosis.rootCause) }}</h2>
+            <p>{{ diagnosis.summary }}</p>
+            <small v-if="diagnosis.question">原问题：{{ diagnosis.question }}</small>
+          </div>
+          <div class="hero-tags">
+            <el-tag :type="confidenceType" effect="plain">
+              {{ confidenceLabel(diagnosis.confidence) }}
+            </el-tag>
+            <el-tag effect="plain">Run {{ diagnosis.runStatus }}</el-tag>
+          </div>
+        </section>
+
+        <section class="workbench-section">
+          <div class="section-heading">
+            <div>
+              <span class="section-index">01</span>
+              <h3>异常定位</h3>
+            </div>
+            <small>只使用持久化执行事实，不展示或猜测模型 Chain-of-Thought</small>
+          </div>
+          <div class="stage-grid">
+            <article
+              v-for="stage in diagnosis.stages"
+              :key="stage.code"
+              :class="stage.state.toLowerCase()"
+            >
+              <span class="stage-icon" aria-hidden="true">{{ stageIcon(stage.state) }}</span>
+              <div>
+                <strong>{{ stage.label }}</strong>
+                <p>{{ stage.summary || stageStateLabel(stage.state) }}</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section v-if="hasSemanticEvidence" class="workbench-section">
+          <div class="section-heading">
+            <div>
+              <span class="section-index">02</span>
+              <h3>召回与最终绑定</h3>
+            </div>
+            <small v-if="!diagnosis.retrievalCandidates.length">当前角色只展示最终绑定摘要</small>
+          </div>
+
+          <div v-if="selectedAssetRows.length" class="selected-assets">
+            <span>最终选择</span>
+            <el-tag
+              v-for="item in selectedAssetRows"
+              :key="`${item.type}-${item.key}`"
+              effect="plain"
+            >
+              {{ item.type }} · {{ item.key }}
+            </el-tag>
+          </div>
+
+          <el-table
+            v-if="diagnosis.retrievalCandidates.length"
+            :data="diagnosis.retrievalCandidates.slice(0, 30)"
+            size="small"
+            border
+          >
+            <el-table-column label="候选资产" min-width="210">
+              <template #default="scope">
+                <strong>{{ scope.row.assetKey }}</strong>
+                <div class="muted">
+                  {{ scope.row.assetType }} · {{ scope.row.modelCode || '-' }}
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="RRF" width="110">
+              <template #default="scope">{{ Number(scope.row.rrfScore || 0).toFixed(4) }}</template>
+            </el-table-column>
+            <el-table-column label="通道排名" min-width="220">
+              <template #default="scope">{{ compactRanks(scope.row.channelRanks) }}</template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <section class="workbench-section">
+          <div class="section-heading">
+            <div>
+              <span class="section-index">03</span>
+              <h3>最小修复</h3>
+            </div>
+            <small>优先局部修复；只有项目级语义变化才进入治理发布</small>
+          </div>
+
+          <el-tabs v-model="repairTab" class="repair-tabs">
+            <el-tab-pane label="语义映射" name="binding">
+              <el-alert
+                v-if="!actionEnabled('CORRECT_BINDING')"
+                type="info"
+                :closable="false"
+                show-icon
+                title="当前角色可查看诊断，但语义纠错需要项目 Editor 权限。"
+              />
+              <el-form label-position="top" class="repair-form">
+                <el-form-item label="错误的是哪类业务含义">
+                  <el-select
+                    v-model="bindingForm.assetType"
+                    :disabled="!actionEnabled('CORRECT_BINDING')"
+                    @change="loadCorrectionOptions"
+                  >
+                    <el-option label="指标" value="METRIC" />
+                    <el-option label="维度" value="DIMENSION" />
+                    <el-option label="枚举值" value="ENUM_VALUE" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="原问题中的错误词组">
+                  <el-input
+                    v-model="bindingForm.rawExpression"
+                    :disabled="!actionEnabled('CORRECT_BINDING')"
+                    placeholder="例如：销售额、有效订单、华北"
+                  />
+                </el-form-item>
+                <el-form-item label="正确业务资产">
+                  <el-select
+                    v-model="bindingForm.assetKey"
+                    filterable
+                    :loading="optionsLoading"
+                    :disabled="!actionEnabled('CORRECT_BINDING')"
+                    placeholder="选择受治理资产"
+                  >
+                    <el-option
+                      v-for="option in correctionOptions"
+                      :key="option.assetKey"
+                      :value="option.assetKey"
+                      :label="`${option.businessLabel} · ${option.assetKey}`"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="影响范围">
+                  <el-radio-group
+                    v-model="bindingForm.scope"
+                    :disabled="!actionEnabled('CORRECT_BINDING')"
+                  >
+                    <el-radio-button value="QUERY">仅本次</el-radio-button>
+                    <el-radio-button value="USER">记住我的选择</el-radio-button>
+                    <el-radio-button value="PROJECT">提交项目公共别名</el-radio-button>
+                  </el-radio-group>
+                </el-form-item>
+                <div class="repair-submit">
+                  <span>
+                    QUERY / USER 会立即按正确 Binding 重跑；PROJECT 会额外创建受治理 Alias
+                    Candidate。
+                  </span>
+                  <el-button
+                    type="primary"
+                    :loading="mutating"
+                    :disabled="!canSubmitBinding"
+                    @click="submitBindingCorrection"
+                  >
+                    修正并重新查询
+                  </el-button>
+                </div>
+              </el-form>
+            </el-tab-pane>
+
+            <el-tab-pane label="业务定义" name="definition">
+              <el-alert
+                v-if="!actionEnabled('PROPOSE_DEFINITION')"
+                type="info"
+                :closable="false"
+                show-icon
+                title="项目级定义修正需要 Editor 权限，并且必须经过 Replay 与发布门禁。"
+              />
+              <el-form label-position="top" class="repair-form">
+                <el-form-item label="问题类型">
+                  <el-select
+                    v-model="definitionForm.category"
+                    :disabled="!actionEnabled('PROPOSE_DEFINITION')"
+                  >
+                    <el-option label="指标/业务定义" value="DEFINITION" />
+                    <el-option label="时间口径" value="TIME" />
+                    <el-option label="过滤规则" value="FILTER" />
+                    <el-option label="表关系" value="RELATIONSHIP" />
+                    <el-option label="规划策略" value="PLANNING" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item
+                  :label="definitionForm.category === 'PLANNING' ? '正确规划原则' : '正确业务规则'"
+                >
+                  <el-input
+                    v-model="definitionForm.correctionText"
+                    type="textarea"
+                    :autosize="{ minRows: 3, maxRows: 7 }"
+                    :disabled="!actionEnabled('PROPOSE_DEFINITION')"
+                    :placeholder="
+                      definitionForm.category === 'PLANNING'
+                        ? '说明这次规划哪里不合理，以及在什么情况下应该如何规划；系统只生成待回放审核的 Planning Policy Candidate。'
+                        : '写清正确口径，例如：有效支付金额只统计支付成功且未全额退款的订单。'
+                    "
+                  />
+                </el-form-item>
+                <div class="repair-submit">
+                  <span>不会直接改正式 Catalog；先形成 Candidate，再转成可审计 Patch。</span>
+                  <el-button
+                    type="primary"
+                    :loading="mutating"
+                    :disabled="!canSubmitDefinition"
+                    @click="submitDefinitionCorrection"
+                  >
+                    创建治理修复
+                  </el-button>
+                </div>
+              </el-form>
+            </el-tab-pane>
+          </el-tabs>
+        </section>
+
+        <section v-if="diagnosis.governance" class="workbench-section governance-section">
+          <div class="section-heading">
+            <div>
+              <span class="section-index">04</span>
+              <h3>定向回归与发布</h3>
+            </div>
+            <el-tag effect="plain">{{ governanceStatusLabel(diagnosis.governance.status) }}</el-tag>
+          </div>
+
+          <div class="governance-facts">
+            <div>
+              <span>修复资产</span>
+              <strong>
+                {{ diagnosis.governance.assetType }} · {{ diagnosis.governance.assetKey }}
+              </strong>
+            </div>
+            <div>
+              <span>风险级别</span>
+              <strong>{{ diagnosis.governance.riskLevel }}</strong>
+            </div>
+            <div v-if="diagnosis.governance.impact">
+              <span>直接受影响 Case</span>
+              <strong>{{ diagnosis.governance.impact.referencedAffectedCases }}</strong>
+            </div>
+            <div v-if="diagnosis.governance.impact">
+              <span>本次 Replay 样本</span>
+              <strong>{{ diagnosis.governance.impact.totalSelectedCases }}</strong>
+            </div>
+          </div>
+
+          <el-alert
+            v-if="diagnosis.governance.impact"
+            type="info"
+            :closable="false"
+            show-icon
+            :title="impactDescription"
+          />
+
+          <div
+            v-if="Object.keys(diagnosis.governance.replayResultCounts || {}).length"
+            class="replay-results"
+          >
+            <span>Replay 结果</span>
+            <el-tag
+              v-for="(count, status) in diagnosis.governance.replayResultCounts"
+              :key="status"
+              effect="plain"
+            >
+              {{ status }} {{ count }}
+            </el-tag>
+          </div>
+
+          <div class="governance-actions">
+            <template v-for="action in governanceActions" :key="action.code">
+              <el-button
+                :type="primaryGovernanceAction(action.code) ? 'primary' : 'default'"
+                :disabled="!action.enabled"
+                :loading="mutating && activeMutation === action.code"
+                @click="runGovernanceAction(action.code)"
+              >
+                {{ action.label }}
+              </el-button>
+            </template>
+          </div>
+          <p class="permission-hint">
+            灰色动作表示当前角色未达到所需权限；服务端仍会再次校验，不依赖前端隐藏按钮。
+          </p>
+        </section>
+
+        <el-collapse v-if="diagnosis.advanced" class="advanced-evidence">
+          <el-collapse-item title="高级诊断证据（管理员）" name="advanced">
+            <el-descriptions :column="1" border size="small">
+              <el-descriptions-item label="Run Error Code">
+                {{ diagnosis.advanced.runErrorCode || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="Current Node">
+                {{ diagnosis.advanced.currentNode || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="Historical Query Cases">
+                {{ diagnosis.advanced.historicalExampleIds.join(', ') || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="Persisted Event Types">
+                {{ diagnosis.advanced.eventTypes.join(' → ') || '-' }}
+              </el-descriptions-item>
+            </el-descriptions>
+          </el-collapse-item>
+        </el-collapse>
+      </template>
+    </div>
+  </el-drawer>
+</template>
+
+<script setup lang="ts">
+  import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+  import { ElMessage, ElMessageBox } from 'element-plus';
+  import {
+    queryWeaverService,
+    type QueryCorrectionOption,
+    type QueryDiagnosis,
+    type SemanticBindingScope,
+  } from '@/services/queryweaver';
+
+  const props = defineProps<{
+    modelValue: boolean;
+    runId?: string;
+  }>();
+
+  const emit = defineEmits<{
+    'update:modelValue': [value: boolean];
+    rerun: [runId: string];
+    'open-evolution': [candidateId: string];
+  }>();
+
+  const diagnosis = ref<QueryDiagnosis>();
+  const loading = ref(false);
+  const error = ref('');
+  const mutating = ref(false);
+  const activeMutation = ref('');
+  const repairTab = ref<'binding' | 'definition'>('binding');
+  const correctionOptions = ref<QueryCorrectionOption[]>([]);
+  const optionsLoading = ref(false);
+  let replayPollTimer: number | undefined;
+  let replayPollCount = 0;
+
+  const bindingForm = reactive({
+    assetType: 'METRIC' as 'METRIC' | 'DIMENSION' | 'ENUM_VALUE',
+    rawExpression: '',
+    assetKey: '',
+    scope: 'QUERY' as SemanticBindingScope,
+  });
+  const definitionForm = reactive({
+    category: 'DEFINITION' as 'DEFINITION' | 'TIME' | 'FILTER' | 'RELATIONSHIP' | 'PLANNING',
+    correctionText: '',
+  });
+
+  const selectedAssetRows = computed(() => {
+    const selected = diagnosis.value?.selectedAssets;
+    if (!selected) return [];
+    return [
+      ...(selected.metricCodes || []).map(key => ({ type: 'METRIC', key })),
+      ...(selected.dimensionCodes || []).map(key => ({ type: 'DIMENSION', key })),
+      ...(selected.ruleCodes || []).map(key => ({ type: 'RULE', key })),
+      ...(selected.relationshipCodes || []).map(key => ({ type: 'RELATIONSHIP', key })),
+      ...(selected.grainCodes || []).map(key => ({ type: 'GRAIN', key })),
+    ];
+  });
+  const hasSemanticEvidence = computed(
+    () =>
+      selectedAssetRows.value.length > 0 || Boolean(diagnosis.value?.retrievalCandidates.length),
+  );
+  const confidenceType = computed(() => {
+    if (diagnosis.value?.confidence === 'HIGH') return 'success';
+    if (diagnosis.value?.confidence === 'MEDIUM') return 'warning';
+    return 'info';
+  });
+  const rootCauseTone = computed(() => {
+    if (diagnosis.value?.rootCause === 'NO_CONFIRMED_FAILURE') return 'neutral';
+    if (diagnosis.value?.rootCause === 'UNKNOWN') return 'warning';
+    return 'problem';
+  });
+  const governanceActions = computed(() =>
+    (diagnosis.value?.repairActions || []).filter(action =>
+      [
+        'OPEN_EVOLUTION',
+        'REVIEW_CANDIDATE',
+        'CREATE_DRAFT',
+        'START_REPLAY',
+        'READY_FOR_PUBLISH',
+        'PUBLISH_DRAFT',
+        'ACTIVATE_DRAFT',
+      ].includes(action.code),
+    ),
+  );
+  const canSubmitBinding = computed(
+    () =>
+      actionEnabled('CORRECT_BINDING') &&
+      Boolean(bindingForm.rawExpression.trim()) &&
+      Boolean(bindingForm.assetKey),
+  );
+  const canSubmitDefinition = computed(
+    () => actionEnabled('PROPOSE_DEFINITION') && Boolean(definitionForm.correctionText.trim()),
+  );
+  const impactDescription = computed(() => {
+    const impact = diagnosis.value?.governance?.impact;
+    if (!impact) return '';
+    return `系统会优先覆盖 ${impact.referencedAffectedCases} 个直接引用受改资产的 Case，并补 ${impact.selectedRepresentativeCases} 个 canonical shape 代表样本；本次最多 ${impact.maxCases} 条，不声称“无需回归”。`;
+  });
+
+  const load = async () => {
+    if (!props.runId) return;
+    loading.value = true;
+    error.value = '';
+    try {
+      diagnosis.value = await queryWeaverService.diagnosis(props.runId);
+      if (!bindingForm.rawExpression && diagnosis.value.question) {
+        bindingForm.rawExpression = diagnosis.value.question;
+      }
+      if (actionEnabled('CORRECT_BINDING') && correctionOptions.value.length === 0) {
+        await loadCorrectionOptions();
+      }
+      scheduleReplayRefresh();
+    } catch (caught) {
+      error.value = caught instanceof Error ? caught.message : '查询诊断失败';
+    } finally {
+      loading.value = false;
+    }
+  };
+
+  const loadCorrectionOptions = async () => {
+    if (!props.runId || !actionEnabled('CORRECT_BINDING')) return;
+    optionsLoading.value = true;
+    bindingForm.assetKey = '';
+    try {
+      correctionOptions.value = (
+        await queryWeaverService.correctionOptions(props.runId, bindingForm.assetType)
+      ).options;
+    } catch (caught) {
+      ElMessage.error(caught instanceof Error ? caught.message : '业务资产加载失败');
+    } finally {
+      optionsLoading.value = false;
+    }
+  };
+
+  const submitBindingCorrection = async () => {
+    if (!diagnosis.value?.conversationId || !canSubmitBinding.value) return;
+    const option = correctionOptions.value.find(item => item.assetKey === bindingForm.assetKey);
+    if (!option) return;
+    mutating.value = true;
+    activeMutation.value = 'CORRECT_BINDING';
+    try {
+      const result = await queryWeaverService.correctBinding(
+        diagnosis.value.projectId,
+        diagnosis.value.conversationId,
+        diagnosis.value.runId,
+        {
+          rawExpression: bindingForm.rawExpression.trim(),
+          assetType: bindingForm.assetType,
+          assetKey: option.assetKey,
+          businessLabel: option.businessLabel,
+          scope: bindingForm.scope,
+          idempotencyKey: crypto.randomUUID(),
+        },
+      );
+      ElMessage.success(
+        bindingForm.scope === 'PROJECT'
+          ? '已按正确映射重新查询，并创建项目 Alias 治理建议'
+          : '已按正确映射重新查询',
+      );
+      emit('rerun', result.rerunId);
+      await load();
+    } catch (caught) {
+      ElMessage.error(caught instanceof Error ? caught.message : '语义映射修正失败');
+    } finally {
+      mutating.value = false;
+      activeMutation.value = '';
+    }
+  };
+
+  const submitDefinitionCorrection = async () => {
+    if (!diagnosis.value?.conversationId || !canSubmitDefinition.value) return;
+    mutating.value = true;
+    activeMutation.value = 'PROPOSE_DEFINITION';
+    try {
+      await queryWeaverService.proposeDefinitionCorrection(
+        diagnosis.value.projectId,
+        diagnosis.value.conversationId,
+        diagnosis.value.runId,
+        definitionForm.category,
+        definitionForm.correctionText.trim(),
+      );
+      ElMessage.success('已创建 Semantic Evolution 修复建议');
+      await load();
+    } catch (caught) {
+      ElMessage.error(caught instanceof Error ? caught.message : '定义修正提交失败');
+    } finally {
+      mutating.value = false;
+      activeMutation.value = '';
+    }
+  };
+
+  const runGovernanceAction = async (code: string) => {
+    const governance = diagnosis.value?.governance;
+    if (!diagnosis.value || !governance) return;
+    if (code === 'OPEN_EVOLUTION') {
+      emit('open-evolution', governance.candidateId);
+      return;
+    }
+    const action = diagnosis.value.repairActions.find(item => item.code === code);
+    if (!action?.enabled) return;
+    mutating.value = true;
+    activeMutation.value = code;
+    try {
+      if (code === 'REVIEW_CANDIDATE') {
+        await queryWeaverService.reviewSemanticEvolution(
+          governance.candidateId,
+          true,
+          `Query diagnosis confirmed from run ${diagnosis.value.runId}`,
+        );
+        ElMessage.success('修复建议已审核通过');
+      } else if (code === 'CREATE_DRAFT') {
+        const version = await ElMessageBox.prompt(
+          '为修复草稿输入语义版本号，例如 2.1.0',
+          '创建修复草稿',
+          {
+            inputPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/,
+            inputErrorMessage: '版本号必须使用 x.x.x 格式',
+          },
+        );
+        await queryWeaverService.createSemanticEvolutionDraft(
+          governance.candidateId,
+          version.value.trim(),
+        );
+        ElMessage.success('修复 Draft 已创建并应用 Patch');
+      } else if (code === 'START_REPLAY') {
+        await queryWeaverService.replaySemanticEvolution(governance.candidateId);
+        ElMessage.success('定向 Replay 已启动，会在后台持久执行');
+      } else if (code === 'READY_FOR_PUBLISH') {
+        await queryWeaverService.readySemanticEvolution(governance.candidateId);
+        ElMessage.success('已通过 Replay 门禁，等待发布');
+      } else if (code === 'PUBLISH_DRAFT' && governance.targetDraftVersionId) {
+        await queryWeaverService.publishProjectVersion(
+          diagnosis.value.projectId,
+          governance.targetDraftVersionId,
+        );
+        ElMessage.success('修复版本已发布');
+      } else if (code === 'ACTIVATE_DRAFT' && governance.targetDraftVersionId) {
+        await queryWeaverService.activateProjectVersion(
+          diagnosis.value.projectId,
+          governance.targetDraftVersionId,
+        );
+        ElMessage.success('修复版本已激活，新会话立即使用新版本');
+      }
+      await refreshAfterGovernance();
+    } catch (caught) {
+      if (caught instanceof Error && caught.message === 'cancel') return;
+      ElMessage.error(caught instanceof Error ? caught.message : '治理操作失败');
+    } finally {
+      mutating.value = false;
+      activeMutation.value = '';
+    }
+  };
+
+  const refreshAfterGovernance = async () => {
+    await load();
+    if (diagnosis.value?.governance?.status === 'REPLAY_RUNNING') scheduleReplayRefresh();
+  };
+
+  const scheduleReplayRefresh = () => {
+    if (replayPollTimer) window.clearTimeout(replayPollTimer);
+    if (diagnosis.value?.governance?.status !== 'REPLAY_RUNNING') {
+      replayPollCount = 0;
+      return;
+    }
+    if (replayPollCount >= 80) return;
+    replayPollCount += 1;
+    replayPollTimer = window.setTimeout(() => void load(), 1500);
+  };
+
+  const actionEnabled = (code: string) =>
+    Boolean(diagnosis.value?.repairActions.find(action => action.code === code)?.enabled);
+  const compactRanks = (ranks: Record<string, number>) =>
+    Object.entries(ranks || {})
+      .sort(([, left], [, right]) => left - right)
+      .map(([channel, rank]) => `${channel} #${rank}`)
+      .join(' · ') || '-';
+  const stageIcon = (state: string) => {
+    if (state === 'PASSED') return '✓';
+    if (state === 'FAILED') return '×';
+    if (state === 'WAITING') return '!';
+    return '?';
+  };
+  const stageStateLabel = (state: string) => {
+    if (state === 'PASSED') return '已通过';
+    if (state === 'FAILED') return '失败';
+    if (state === 'WAITING') return '等待确认';
+    return '证据不足';
+  };
+  const rootCauseLabel = (value: string) => {
+    const labels: Record<string, string> = {
+      RETRIEVAL_MISS: '召回缺失',
+      CANDIDATE_BUILD_EMPTY: '候选构建失败',
+      PLANNER_SELECTION_ERROR: 'Planner 选择错误',
+      PLANNER_REJECTED: 'Planner 输出被治理拒绝',
+      CLARIFICATION_REQUIRED: '需要业务澄清',
+      SEMANTIC_DEFINITION_GAP: '业务定义缺口',
+      PLAN_RESOLUTION_ERROR: 'Typed Plan 解析失败',
+      SQL_COMPILATION_ERROR: 'SQL 编译失败',
+      SQL_GUARD_ERROR: 'SQL 安全/准入拒绝',
+      SQL_EXECUTION_ERROR: 'SQL / 数据源执行失败',
+      MODEL_GATEWAY_ERROR: '模型调用层异常',
+      NO_CONFIRMED_FAILURE: '尚无已确认异常',
+      UNKNOWN: '暂时无法稳定归因',
+    };
+    return labels[value] || value;
+  };
+  const confidenceLabel = (value: string) => {
+    if (value === 'HIGH') return '高置信归因';
+    if (value === 'MEDIUM') return '中置信归因';
+    return '低置信归因';
+  };
+  const governanceStatusLabel = (value: string) => {
+    const labels: Record<string, string> = {
+      CANDIDATE: '修复建议待审核',
+      APPROVED: '已审核，待创建 Draft',
+      DRAFT_CREATED: 'Draft 已创建',
+      PATCH_APPLIED: 'Patch 已应用，待 Replay',
+      REPLAY_RUNNING: '定向 Replay 进行中',
+      REPLAY_PASSED: 'Replay 通过',
+      REPLAY_FAILED: 'Replay 未通过',
+      READY_FOR_PUBLISH: '等待发布',
+      PUBLISHED: '修复版本已发布',
+      STALE: '修复建议已过期',
+      REJECTED: '修复建议已驳回',
+    };
+    return labels[value] || value;
+  };
+  const primaryGovernanceAction = (code: string) =>
+    [
+      'REVIEW_CANDIDATE',
+      'CREATE_DRAFT',
+      'START_REPLAY',
+      'READY_FOR_PUBLISH',
+      'PUBLISH_DRAFT',
+      'ACTIVATE_DRAFT',
+    ].includes(code);
+
+  watch(
+    () => [props.modelValue, props.runId] as const,
+    ([open]) => {
+      if (open && props.runId) void load();
+    },
+    { immediate: true },
+  );
+
+  onBeforeUnmount(() => {
+    if (replayPollTimer) window.clearTimeout(replayPollTimer);
+  });
+</script>
+
+<style scoped>
+  .diagnosis-workbench {
+    display: grid;
+    gap: 18px;
+    padding-bottom: 28px;
+  }
+  .inline-action,
+  .section-heading,
+  .repair-submit,
+  .selected-assets,
+  .replay-results,
+  .governance-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .diagnosis-hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 20px;
+    border: 1px solid #fed7aa;
+    border-radius: 16px;
+    background: #fffaf5;
+  }
+  .diagnosis-hero.problem {
+    border-color: #fecaca;
+    background: #fff7f7;
+  }
+  .diagnosis-hero.neutral {
+    border-color: #dbeafe;
+    background: #f8fbff;
+  }
+  .diagnosis-hero h2 {
+    margin: 4px 0 8px;
+    color: #0f172a;
+    font-size: 22px;
+  }
+  .diagnosis-hero p {
+    max-width: 620px;
+    margin: 0;
+    color: #475569;
+    line-height: 1.65;
+  }
+  .diagnosis-hero small,
+  .muted,
+  .section-heading small,
+  .permission-hint {
+    color: #94a3b8;
+    font-size: 12px;
+  }
+  .diagnosis-hero small {
+    display: block;
+    margin-top: 8px;
+  }
+  .eyebrow,
+  .section-index {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+  }
+  .hero-tags {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .workbench-section {
+    padding: 18px;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #fff;
+  }
+  .section-heading {
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }
+  .section-heading > div {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .section-heading h3 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 17px;
+  }
+  .stage-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .stage-grid article {
+    display: flex;
+    min-width: 0;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+  }
+  .stage-grid article.failed {
+    border-color: #fecaca;
+    background: #fff7f7;
+  }
+  .stage-grid article.waiting {
+    border-color: #fde68a;
+    background: #fffbeb;
+  }
+  .stage-grid article.passed .stage-icon {
+    background: #dcfce7;
+    color: #15803d;
+  }
+  .stage-grid article.failed .stage-icon {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+  .stage-grid article.waiting .stage-icon {
+    background: #fef3c7;
+    color: #b45309;
+  }
+  .stage-icon {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 50%;
+    background: #e2e8f0;
+    color: #64748b;
+    font-weight: 800;
+  }
+  .stage-grid strong {
+    color: #334155;
+    font-size: 13px;
+  }
+  .stage-grid p {
+    margin: 4px 0 0;
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .selected-assets {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .selected-assets > span,
+  .replay-results > span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .repair-form {
+    padding-top: 8px;
+  }
+  .repair-form :deep(.el-select) {
+    width: 100%;
+  }
+  .repair-submit {
+    align-items: flex-end;
+    padding-top: 4px;
+  }
+  .repair-submit span {
+    max-width: 560px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .governance-section {
+    border-color: #bfdbfe;
+    background: #fbfdff;
+  }
+  .governance-facts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .governance-facts > div {
+    display: grid;
+    gap: 4px;
+    padding: 12px;
+    border-radius: 10px;
+    background: #f1f5f9;
+  }
+  .governance-facts span {
+    color: #64748b;
+    font-size: 11px;
+  }
+  .governance-facts strong {
+    color: #0f172a;
+    font-size: 13px;
+  }
+  .replay-results {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-top: 14px;
+  }
+  .governance-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  .permission-hint {
+    margin: 10px 0 0;
+  }
+  .advanced-evidence {
+    border-top: 1px solid #e2e8f0;
+  }
+  @media (max-width: 760px) {
+    .diagnosis-hero,
+    .section-heading,
+    .repair-submit,
+    .inline-action {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .hero-tags {
+      justify-content: flex-start;
+    }
+    .stage-grid,
+    .governance-facts {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

@@ -1,0 +1,24 @@
+# Copyright 2024-2026 the original author or authors.
+# Licensed under the Apache License, Version 2.0.
+#
+# Build the jar with:
+#   ./mvnw -pl backend -am -DskipTests package
+#
+# The runtime image intentionally contains only a JRE and curl. Python user code is
+# executed by the isolated execution image through the execution worker; it does not
+# belong in the QueryWeaver application image.
+FROM eclipse-temurin:17-jre-jammy
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY backend/target/queryweaver.jar /app/queryweaver.jar
+
+EXPOSE 8065
+
+ENTRYPOINT ["java", "-jar", "queryweaver.jar", "--spring.config.location=classpath:application.yml,optional:file:/app/config/application.yml"]

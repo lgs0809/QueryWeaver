@@ -1,0 +1,1145 @@
+<!--
+ * Copyright 2024-2026 the original author or authors.
+ * Licensed under the Apache License, Version 2.0.
+ -->
+<template>
+  <section class="governance" v-loading="loading">
+    <div class="toolbar">
+      <div>
+        <h2>业务模型建议</h2>
+        <p>
+          系统把真实查询、纠错和独立证据整理成可审核的业务模型改进建议；正式版本不会被直接修改。
+        </p>
+      </div>
+      <div class="filters">
+        <el-select v-model="status" @change="load">
+          <el-option label="全部状态" value="" />
+          <el-option
+            v-for="item in statuses"
+            :key="item"
+            :label="statusLabel(item)"
+            :value="item"
+          />
+        </el-select>
+        <el-button @click="load">刷新</el-button>
+      </div>
+    </div>
+
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      title="批准建议只会进入草稿；自动回归结果、人工证明和最终发布决定始终作为三个独立治理事实保留。"
+    />
+
+    <el-table :data="candidates" empty-text="暂无语义演进候选">
+      <el-table-column label="学习建议" min-width="320">
+        <template #default="scope">
+          <strong>{{ suggestionTitle(scope.row) }}</strong>
+          <div class="subtle">{{ suggestionDescription(scope.row) }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="来自" min-width="210">
+        <template #default="scope">
+          <strong>{{ scope.row.evidence_count || 0 }} 次使用</strong>
+          <div class="subtle">
+            {{ scope.row.distinct_user_count || 0 }} 个用户 ·
+            {{ scope.row.distinct_root_evidence_count || 0 }} 个独立证据
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="证据质量" width="150">
+        <template #default="scope">
+          <strong>{{ percent(scope.row.confidence) }}</strong>
+          <div>
+            <el-tag size="small" :type="riskType(scope.row.risk_level)">
+              {{ riskLabel(scope.row.risk_level) }}
+            </el-tag>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="覆盖与验证" min-width="230">
+        <template #default="scope">
+          <strong>{{ scope.row.distinct_conversation_count || 0 }} 个独立会话</strong>
+          <div class="subtle">{{ replaySummaryText(scope.row.id) }}</div>
+          <div v-if="scope.row.status === 'REPLAY_RUNNING'" class="subtle">
+            回归进度 {{ replayFor(scope.row.id)?.progress || 0 }}%
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="状态" width="170">
+        <template #default="scope">
+          <el-tag :type="statusType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag>
+          <div v-if="scope.row.status === 'REPLAY_RUNNING'" class="subtle">
+            {{ replayFor(scope.row.id)?.progress || 0 }}% ·
+            {{ replayFor(scope.row.id)?.currentLevel || '准备中' }}
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" min-width="390" fixed="right">
+        <template #default="scope">
+          <el-button link type="primary" @click="open(scope.row)">查看详情</el-button>
+          <template v-if="canGovern">
+            <template v-if="scope.row.status === 'CANDIDATE'">
+              <el-button
+                link
+                type="success"
+                :disabled="isTrueAmbiguity(scope.row)"
+                @click="review(scope.row, true)"
+              >
+                批准
+              </el-button>
+              <el-button link @click="review(scope.row, false)">忽略</el-button>
+            </template>
+            <el-button
+              v-if="scope.row.status === 'APPROVED'"
+              link
+              type="primary"
+              :disabled="isTrueAmbiguity(scope.row)"
+              @click="createDraft(scope.row)"
+            >
+              应用到草稿
+            </el-button>
+            <el-button
+              v-if="['PATCH_APPLIED', 'REPLAY_FAILED'].includes(scope.row.status)"
+              link
+              type="success"
+              @click="startReplay(scope.row)"
+            >
+              运行回归验证
+            </el-button>
+            <el-button
+              v-if="scope.row.status === 'REPLAY_RUNNING'"
+              link
+              type="danger"
+              @click="cancelReplay(scope.row)"
+            >
+              取消回归
+            </el-button>
+            <el-dropdown
+              v-if="['PATCH_APPLIED', 'REPLAY_FAILED'].includes(scope.row.status)"
+              trigger="click"
+              @command="manualReplayCommand(scope.row, $event)"
+            >
+              <el-button link type="warning">高级治理</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="pass">登记替代证明或风险例外</el-dropdown-item>
+                  <el-dropdown-item command="fail">登记人工拒绝</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-button
+              v-if="scope.row.status === 'REPLAY_PASSED'"
+              link
+              type="success"
+              @click="ready(scope.row)"
+            >
+              提交发布门禁
+            </el-button>
+            <el-button
+              v-if="activeStatus(scope.row.status)"
+              link
+              type="warning"
+              @click="stale(scope.row)"
+            >
+              标记过期
+            </el-button>
+          </template>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <el-drawer v-model="drawerVisible" title="语义候选审核" size="76%">
+      <template v-if="selected">
+        <el-alert
+          v-if="isTrueAmbiguity(selected)"
+          type="error"
+          :closable="false"
+          show-icon
+          title="真实歧义需要显式补充语义材料并完成消歧，不能自动批准、创建草稿或应用 Patch。"
+        />
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="候选类型">
+            {{ selected.candidate_type }}
+          </el-descriptions-item>
+          <el-descriptions-item label="状态">
+            {{ statusLabel(selected.status) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="资产">
+            {{ selected.asset_type }} / {{ selected.asset_key }}
+          </el-descriptions-item>
+          <el-descriptions-item label="审核人">
+            {{ selected.reviewed_by || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Mapping Classification">
+            <el-tag :type="mappingType(selected.mapping_classification)">
+              {{ mappingLabel(selected.mapping_classification) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="主导 / 冲突 / 熵">
+            {{ percent(distribution(selected).dominantRatio) }} /
+            {{ percent(distribution(selected).conflictRatio) }} /
+            {{ decimal(distribution(selected).normalizedEntropy) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="独立会话 / 用户">
+            {{ selected.distinct_conversation_count || 0 }} /
+            {{ selected.distinct_user_count || 0 }}
+          </el-descriptions-item>
+          <el-descriptions-item label="根证据 / 时间窗口">
+            {{ selected.distinct_root_evidence_count || 0 }} /
+            {{ selected.distinct_time_window_count || 0 }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Patch Hash">
+            <code>{{ selected.patch_hash || '-' }}</code>
+          </el-descriptions-item>
+          <el-descriptions-item label="原子应用时间">
+            {{ formatTime(selected.applied_time) }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <h3>Resolution Distribution</h3>
+        <el-table :data="resolutionDistribution" size="small" empty-text="暂无解析分布">
+          <el-table-column prop="resolution" label="解析目标" min-width="260" />
+          <el-table-column prop="count" label="独立根证据数" width="140" />
+          <el-table-column label="占比" width="120">
+            <template #default="scope">{{ percent(scope.row.ratio) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <div class="section-title">
+          <div>
+            <h3>Semantic Patch Operations</h3>
+            <p>来源版本与 Catalog Hash 固定不可编辑；CANDIDATE 状态可修改 Operation。</p>
+          </div>
+          <div class="actions" v-if="canGovern && selected.status === 'CANDIDATE'">
+            <el-button :disabled="isTrueAmbiguity(selected)" @click="runPreflight">
+              Preflight
+            </el-button>
+            <el-button
+              type="primary"
+              :loading="savingPatch"
+              :disabled="isTrueAmbiguity(selected)"
+              @click="savePatch"
+            >
+              保存 Patch
+            </el-button>
+          </div>
+        </div>
+
+        <el-descriptions :column="2" border class="source-lock">
+          <el-descriptions-item label="sourceVersionId">
+            {{ patch.sourceVersionId }}
+          </el-descriptions-item>
+          <el-descriptions-item label="sourceCatalogHash">
+            <code>{{ patch.sourceCatalogHash }}</code>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-alert
+          v-if="clientValidation.length"
+          type="error"
+          :closable="false"
+          show-icon
+          :title="`前端 Schema 校验失败（${clientValidation.length} 项）`"
+        >
+          <ul>
+            <li v-for="item in clientValidation" :key="item">{{ item }}</li>
+          </ul>
+        </el-alert>
+        <div v-if="preflight" class="preflight">
+          <el-alert
+            :type="preflight.valid ? 'success' : 'error'"
+            :closable="false"
+            show-icon
+            :title="preflight.valid ? '服务端 Preflight 通过' : '服务端 Preflight 未通过'"
+          />
+          <el-table :data="[...preflight.errors, ...preflight.warnings]" size="small">
+            <el-table-column prop="severity" label="级别" width="90" />
+            <el-table-column prop="code" label="代码" width="220" />
+            <el-table-column prop="assetKey" label="资产" width="220" />
+            <el-table-column prop="message" label="说明" min-width="320" />
+          </el-table>
+        </div>
+
+        <div
+          v-for="(operation, index) in patch.operations"
+          :key="`${operation.assetKey}-${index}`"
+          class="operation-card"
+          :class="{ 'high-risk': isHighRisk(operation) }"
+        >
+          <div class="operation-head">
+            <strong>#{{ index + 1 }} {{ operation.operation }}</strong>
+            <el-tag v-if="isHighRisk(operation)" type="danger" size="small">高风险字段</el-tag>
+          </div>
+          <el-form
+            label-position="top"
+            :disabled="selected.status !== 'CANDIDATE' || isTrueAmbiguity(selected)"
+          >
+            <div class="form-grid">
+              <el-form-item label="operation">
+                <el-select v-model="operation.operation" filterable>
+                  <el-option
+                    v-for="name in operationNames"
+                    :key="name"
+                    :label="name"
+                    :value="name"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="assetType">
+                <el-input v-model="operation.assetType" />
+              </el-form-item>
+              <el-form-item label="assetKey">
+                <el-input v-model="operation.assetKey" />
+              </el-form-item>
+              <el-form-item label="expectedCurrentFingerprint">
+                <el-input v-model="operation.expectedCurrentFingerprint" />
+              </el-form-item>
+            </div>
+            <el-form-item label="values (JSON)">
+              <el-input
+                v-model="operationValues[index]"
+                type="textarea"
+                :rows="6"
+                @blur="syncOperationValues(index)"
+              />
+            </el-form-item>
+            <el-form-item label="evidenceCaseIds（逗号分隔）">
+              <el-input v-model="operationEvidence[index]" @blur="syncOperationEvidence(index)" />
+            </el-form-item>
+          </el-form>
+        </div>
+
+        <h3>资产级 Diff</h3>
+        <el-table :data="assetDiff" empty-text="Patch 中没有 Operation">
+          <el-table-column prop="assetType" label="资产类型" width="150" />
+          <el-table-column prop="assetKey" label="资产 Key" min-width="200" />
+          <el-table-column prop="operation" label="变更" width="190" />
+          <el-table-column label="Source Catalog" min-width="220">
+            <template #default="scope">
+              <code>{{ scope.row.before }}</code>
+            </template>
+          </el-table-column>
+          <el-table-column label="Patch 后 Draft" min-width="280">
+            <template #default="scope">
+              <pre>{{ scope.row.after }}</pre>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h3>Automated Replay Results</h3>
+        <p class="section-note">
+          机器 Replay 事实按 execution 追加保存；人工证明不会改写为机器 PASS。
+        </p>
+        <el-progress
+          v-if="selected.status === 'REPLAY_RUNNING'"
+          :percentage="replayFor(selected.id)?.progress || 0"
+          :status="replayFor(selected.id)?.cancelRequested ? 'exception' : undefined"
+        />
+        <el-descriptions v-if="replayFor(selected.id)" :column="2" border>
+          <el-descriptions-item label="Replay Run">
+            {{ replayFor(selected.id)?.replayRunId }}
+          </el-descriptions-item>
+          <el-descriptions-item label="状态">
+            {{ replayFor(selected.id)?.status }}
+          </el-descriptions-item>
+          <el-descriptions-item label="当前案例">
+            {{ replayFor(selected.id)?.currentCaseId || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="当前层级">
+            {{ replayFor(selected.id)?.currentLevel || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="错误" :span="2">
+            {{ replayFor(selected.id)?.errorMessage || '-' }}
+          </el-descriptions-item>
+        </el-descriptions>
+        <el-table :data="replayLevels" empty-text="暂无机器 Replay 结果">
+          <el-table-column prop="level" label="Replay Level" width="190" />
+          <el-table-column prop="status" label="机器状态" width="150">
+            <template #default="scope">
+              <el-tag :type="replayStatusType(scope.row.status)">{{ scope.row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="error" label="错误" min-width="220" />
+          <el-table-column label="机器证明" min-width="320">
+            <template #default="scope">
+              <pre>{{ prettyValue(scope.row.proof) }}</pre>
+            </template>
+          </el-table-column>
+        </el-table>
+        <h4>Replay Summary</h4>
+        <pre>{{ pretty(selected.replay_summary_json) }}</pre>
+
+        <h3>Manual Attestations</h3>
+        <p class="section-note">
+          人工记录只表达风险例外、替代证明或拒绝，不改变机器 Replay 原始事实。
+        </p>
+        <el-table :data="manualAttestations" empty-text="暂无人工 Attestation">
+          <el-table-column prop="attestation_type" label="类型" width="170" />
+          <el-table-column prop="decision" label="人工决定" width="220" />
+          <el-table-column prop="operator" label="操作者" width="160" />
+          <el-table-column prop="reason" label="原因" min-width="260" />
+          <el-table-column label="时间" width="180">
+            <template #default="scope">
+              {{ formatTime(String(scope.row.create_time || '')) }}
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h3>Release Decisions</h3>
+        <p class="section-note">发布门禁决定独立于机器结果和人工 Attestation 保存。</p>
+        <el-table :data="releaseDecisions" empty-text="暂无 Release Decision">
+          <el-table-column prop="decision" label="决定" width="120" />
+          <el-table-column prop="policy_code" label="Policy Code" width="230" />
+          <el-table-column prop="automated_replay_result" label="机器事实" width="150" />
+          <el-table-column prop="reason" label="依据" min-width="280" />
+          <el-table-column label="时间" width="180">
+            <template #default="scope">
+              {{ formatTime(String(scope.row.create_time || '')) }}
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h3>证据摘要</h3>
+        <pre>{{ pretty(selected.evidence_summary) }}</pre>
+        <h3>证据链</h3>
+        <el-table :data="selected.evidence || []" empty-text="暂无证据">
+          <el-table-column prop="evidence_type" label="类型" width="180" />
+          <el-table-column prop="episode_id" label="Episode" width="180" />
+          <el-table-column prop="weight" label="权重" width="100" />
+          <el-table-column label="证据" min-width="320">
+            <template #default="scope">
+              <code>{{ compact(scope.row.evidence_json) }}</code>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h3>不可变审计事件</h3>
+        <el-table :data="selected.events || []" empty-text="暂无审计事件">
+          <el-table-column prop="sequence" label="#" width="70" />
+          <el-table-column prop="event_type" label="事件" width="210" />
+          <el-table-column label="状态" width="210">
+            <template #default="scope">
+              {{ scope.row.from_status || '-' }} → {{ scope.row.to_status || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="actor" label="操作者" width="160" />
+          <el-table-column prop="create_time" label="时间" min-width="180" />
+        </el-table>
+      </template>
+    </el-drawer>
+  </section>
+</template>
+
+<script setup lang="ts">
+  import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+  import { ElMessage, ElMessageBox } from 'element-plus';
+  import {
+    queryWeaverService,
+    type SemanticEvolutionCandidate,
+    type SemanticPatch,
+    type SemanticPatchOperation,
+    type SemanticPatchValidationReport,
+    type SemanticReplayRun,
+  } from '@/services/queryweaver';
+
+  const props = defineProps<{
+    projectId: number;
+    canGovern?: boolean;
+    focusCandidateId?: string;
+  }>();
+  const canGovern = computed(() => props.canGovern !== false);
+  const candidates = ref<SemanticEvolutionCandidate[]>([]);
+  const selected = ref<SemanticEvolutionCandidate>();
+  const openedFocusCandidateId = ref('');
+  const status = ref('');
+  const loading = ref(false);
+  const savingPatch = ref(false);
+  const drawerVisible = ref(false);
+  const preflight = ref<SemanticPatchValidationReport>();
+  const operationValues = ref<string[]>([]);
+  const operationEvidence = ref<string[]>([]);
+  const replayRuns = ref<Record<string, SemanticReplayRun>>({});
+  const automatedReplayResults = ref<Array<Record<string, unknown>>>([]);
+  const manualAttestations = ref<Array<Record<string, unknown>>>([]);
+  const releaseDecisions = ref<Array<Record<string, unknown>>>([]);
+  let replayPollTimer: ReturnType<typeof setInterval> | undefined;
+
+  const statuses = [
+    'CANDIDATE',
+    'APPROVED',
+    'DRAFT_CREATED',
+    'PATCH_APPLIED',
+    'REPLAY_RUNNING',
+    'REPLAY_PASSED',
+    'REPLAY_FAILED',
+    'READY_FOR_PUBLISH',
+    'PUBLISHED',
+    'REJECTED',
+    'STALE',
+  ];
+  const operationNames: SemanticPatchOperation['operation'][] = [
+    'ADD_COLUMN_SYNONYM',
+    'ADD_ENUM_ALIAS',
+    'ADD_ENUM_VALUE',
+    'ADD_METRIC',
+    'UPDATE_METRIC',
+    'ADD_DIMENSION',
+    'UPDATE_DIMENSION',
+    'ADD_RELATIONSHIP',
+    'UPDATE_RELATIONSHIP',
+    'ADD_GRAIN',
+    'UPDATE_GRAIN',
+    'ADD_RULE',
+    'UPDATE_RULE',
+    'ADD',
+    'UPDATE',
+  ];
+  const levelNames = [
+    'ASSET',
+    'IR',
+    'SQL',
+    'EXECUTION',
+    'GOLDEN_ASSET',
+    'GOLDEN_IR',
+    'GOLDEN_SQL',
+    'GOLDEN_EXECUTION',
+  ];
+  const patch = ref<SemanticPatch>({
+    schemaVersion: 1,
+    sourceVersionId: 0,
+    sourceCatalogHash: '',
+    operations: [],
+  });
+
+  type MappingDistributionView = {
+    dominantRatio: number;
+    conflictRatio: number;
+    normalizedEntropy: number;
+    resolutionCounts: Record<string, number>;
+    independentEvidenceCount: number;
+  };
+
+  const distribution = (candidate: SemanticEvolutionCandidate): MappingDistributionView => {
+    try {
+      const parsed = JSON.parse(
+        candidate.evidence_distribution_json || '{}',
+      ) as Partial<MappingDistributionView>;
+      return {
+        dominantRatio: Number(parsed.dominantRatio || 0),
+        conflictRatio: Number(parsed.conflictRatio || 0),
+        normalizedEntropy: Number(parsed.normalizedEntropy || 0),
+        resolutionCounts: parsed.resolutionCounts || {},
+        independentEvidenceCount: Number(
+          parsed.independentEvidenceCount || candidate.distinct_root_evidence_count || 0,
+        ),
+      };
+    } catch {
+      return {
+        dominantRatio: 0,
+        conflictRatio: 0,
+        normalizedEntropy: 0,
+        resolutionCounts: {},
+        independentEvidenceCount: Number(candidate.distinct_root_evidence_count || 0),
+      };
+    }
+  };
+
+  const hydratePatch = (candidate: SemanticEvolutionCandidate) => {
+    try {
+      patch.value = JSON.parse(candidate.patch_json) as SemanticPatch;
+    } catch {
+      patch.value = {
+        schemaVersion: 1,
+        sourceVersionId: candidate.source_version_id,
+        sourceCatalogHash: candidate.source_catalog_hash,
+        operations: [],
+      };
+    }
+    operationValues.value = patch.value.operations.map(item =>
+      JSON.stringify(item.values || {}, null, 2),
+    );
+    operationEvidence.value = patch.value.operations.map(item =>
+      (item.evidenceCaseIds || []).join(', '),
+    );
+    preflight.value = undefined;
+  };
+
+  const syncOperationValues = (index: number) => {
+    try {
+      const parsed = JSON.parse(operationValues.value[index] || '{}');
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object')
+        throw new Error('values 必须是 JSON 对象');
+      patch.value.operations[index].values = parsed;
+    } catch (error) {
+      ElMessage.error(
+        error instanceof Error ? error.message : `Operation #${index + 1} values JSON 无效`,
+      );
+    }
+  };
+  const syncOperationEvidence = (index: number) => {
+    patch.value.operations[index].evidenceCaseIds = (operationEvidence.value[index] || '')
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean);
+  };
+  const syncEditors = () => {
+    patch.value.operations.forEach((_, index) => {
+      syncOperationValues(index);
+      syncOperationEvidence(index);
+    });
+  };
+
+  const clientValidation = computed(() => {
+    const errors: string[] = [];
+    if (patch.value.schemaVersion !== 1) errors.push('schemaVersion 必须为 1');
+    if (!patch.value.sourceVersionId) errors.push('sourceVersionId 缺失');
+    if (!patch.value.sourceCatalogHash?.trim()) errors.push('sourceCatalogHash 缺失');
+    if (!patch.value.operations.length) errors.push('至少需要一个 Operation');
+    const seen = new Set<string>();
+    patch.value.operations.forEach((operation, index) => {
+      const prefix = `Operation #${index + 1}`;
+      if (!operationNames.includes(operation.operation))
+        errors.push(`${prefix} operation 不受支持`);
+      if (!operation.assetType?.trim()) errors.push(`${prefix} assetType 缺失`);
+      if (!operation.assetKey?.trim()) errors.push(`${prefix} assetKey 缺失`);
+      if (!operation.values || Array.isArray(operation.values))
+        errors.push(`${prefix} values 必须为对象`);
+      const isAdd = operation.operation === 'ADD' || operation.operation.startsWith('ADD_');
+      if (isAdd && operation.expectedCurrentFingerprint)
+        errors.push(`${prefix} ADD 不得携带旧 Fingerprint`);
+      if (!isAdd && !operation.expectedCurrentFingerprint)
+        errors.push(`${prefix} UPDATE 必须携带 Fingerprint`);
+      const key = `${operation.operation}:${operation.assetType}:${operation.assetKey}`;
+      if (seen.has(key)) errors.push(`${prefix} 与同一 Patch 中其他 Operation 重复`);
+      seen.add(key);
+    });
+    return errors;
+  });
+
+  const assetDiff = computed(() =>
+    patch.value.operations.map(operation => {
+      const server = selected.value?.assetDiff?.find(
+        item =>
+          item.operation === operation.operation &&
+          item.assetType === operation.assetType &&
+          item.assetKey === operation.assetKey,
+      );
+      const before = server?.before || {};
+      const after = { ...before, ...(operation.values || {}) };
+      return {
+        operation: operation.operation,
+        assetType: operation.assetType,
+        assetKey: operation.assetKey,
+        before: Object.keys(before).length ? JSON.stringify(before, null, 2) : '不存在（ADD）',
+        after: JSON.stringify(after, null, 2),
+      };
+    }),
+  );
+
+  const resolutionDistribution = computed(() => {
+    if (!selected.value) return [];
+    const value = distribution(selected.value);
+    const total =
+      value.independentEvidenceCount ||
+      Object.values(value.resolutionCounts).reduce((sum, count) => sum + Number(count || 0), 0);
+    return Object.entries(value.resolutionCounts)
+      .map(([resolution, count]) => ({
+        resolution: resolution === '__CONFLICT__' ? '同一根证据存在竞争解析' : resolution,
+        count: Number(count || 0),
+        ratio: total ? Number(count || 0) / total : 0,
+      }))
+      .sort(
+        (left, right) =>
+          right.count - left.count || left.resolution.localeCompare(right.resolution),
+      );
+  });
+
+  const replayLevels = computed(() => {
+    const results = automatedReplayResults.value;
+    return levelNames.map(level => {
+      const rows = results.filter(row => String(row.replay_level || row.level || '') === level);
+      const latest = rows[rows.length - 1] || {};
+      return {
+        level,
+        status: String(latest.status || 'NOT_RUN'),
+        error: String(latest.error_message || latest.error || '-'),
+        proof: latest.proof_json || latest.proof || latest.result_json || '-',
+      };
+    });
+  });
+
+  const load = async () => {
+    loading.value = true;
+    try {
+      candidates.value = await queryWeaverService.semanticEvolutionCandidates(
+        props.projectId,
+        status.value,
+      );
+      await resumeKnownReplays();
+      if (props.focusCandidateId && openedFocusCandidateId.value !== props.focusCandidateId) {
+        openedFocusCandidateId.value = props.focusCandidateId;
+        const target =
+          candidates.value.find(item => item.id === props.focusCandidateId) ||
+          ({ id: props.focusCandidateId } as SemanticEvolutionCandidate);
+        await open(target);
+      }
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '语义候选加载失败');
+    } finally {
+      loading.value = false;
+    }
+  };
+  const loadReplayGovernance = async (candidateId: string) => {
+    [automatedReplayResults.value, manualAttestations.value, releaseDecisions.value] =
+      await Promise.all([
+        queryWeaverService.semanticEvolutionReplayResults(candidateId),
+        queryWeaverService.semanticEvolutionAttestations(candidateId),
+        queryWeaverService.semanticEvolutionReleaseDecisions(candidateId),
+      ]);
+  };
+  const open = async (candidate: SemanticEvolutionCandidate) => {
+    drawerVisible.value = true;
+    try {
+      selected.value = await queryWeaverService.semanticEvolutionCandidate(candidate.id);
+      hydratePatch(selected.value);
+      await Promise.all([refreshReplay(candidate.id), loadReplayGovernance(candidate.id)]);
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '候选详情加载失败');
+    }
+  };
+  const reloadSelected = async () => {
+    if (!selected.value) return;
+    selected.value = await queryWeaverService.semanticEvolutionCandidate(selected.value.id);
+    hydratePatch(selected.value);
+    await loadReplayGovernance(selected.value.id);
+  };
+  const runPreflight = async () => {
+    if (selected.value && isTrueAmbiguity(selected.value)) {
+      ElMessage.error('真实歧义必须先完成显式语义消歧，不能执行 Patch Preflight');
+      return false;
+    }
+    syncEditors();
+    if (clientValidation.value.length) {
+      ElMessage.error('请先修复前端 Schema 校验错误');
+      return false;
+    }
+    preflight.value = isPolicyCandidate(selected.value!)
+      ? await queryWeaverService.preflightMultiSourcePolicyPatch(selected.value!.id, patch.value)
+      : await queryWeaverService.preflightSemanticEvolutionPatch(selected.value!.id, patch.value);
+    if (!preflight.value.valid) ElMessage.error('服务端 Preflight 未通过');
+    else ElMessage.success('Preflight 通过');
+    return preflight.value.valid;
+  };
+  const savePatch = async () => {
+    if (!selected.value || !(await runPreflight())) return;
+    savingPatch.value = true;
+    try {
+      if (isPolicyCandidate(selected.value)) {
+        await queryWeaverService.updateMultiSourcePolicyPatch(selected.value.id, patch.value);
+      } else {
+        await queryWeaverService.updateSemanticEvolutionPatch(selected.value.id, patch.value);
+      }
+      await reloadSelected();
+      await load();
+      ElMessage.success('Patch 已保存并从服务端重新加载');
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : 'Patch 保存失败');
+    } finally {
+      savingPatch.value = false;
+    }
+  };
+  const review = async (candidate: SemanticEvolutionCandidate, approved: boolean) => {
+    if (approved && isTrueAmbiguity(candidate)) {
+      ElMessage.error('真实歧义不能直接批准；请补充语义材料并完成显式消歧');
+      return;
+    }
+    try {
+      let comment = '';
+      if (!approved) {
+        const response = await ElMessageBox.prompt('说明拒绝原因。', '拒绝语义候选', {
+          inputType: 'textarea',
+          inputValidator: value => Boolean(value.trim()) || '必须填写原因',
+        });
+        comment = response.value;
+      } else {
+        selected.value = await queryWeaverService.semanticEvolutionCandidate(candidate.id);
+        hydratePatch(selected.value);
+        if (!(await runPreflight())) return;
+        await ElMessageBox.confirm(
+          '批准后只允许创建 Clone Draft；创建 Draft 时 Patch 会被原子应用，仍需系统 Replay 与发布门禁。',
+          '批准语义候选',
+          { type: 'warning' },
+        );
+      }
+      await queryWeaverService.reviewSemanticEvolution(candidate.id, approved, comment);
+      ElMessage.success(approved ? '候选已批准' : '候选已拒绝');
+      await load();
+    } catch (error) {
+      if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
+    }
+  };
+  const createDraft = async (candidate: SemanticEvolutionCandidate) => {
+    if (isTrueAmbiguity(candidate)) {
+      ElMessage.error('真实歧义不能创建或应用草稿；请先完成显式语义消歧');
+      return;
+    }
+    try {
+      const response = await ElMessageBox.prompt(
+        '输入新的用户可见版本号，例如 1.2.0。Patch 将在短事务内原子应用到 Clone Draft。',
+        '创建并应用 Clone Draft',
+        { inputValidator: value => Boolean(value.trim()) || '版本号不能为空' },
+      );
+      await queryWeaverService.createSemanticEvolutionDraft(candidate.id, response.value.trim());
+      ElMessage.success('Clone Draft 已创建，Patch 已自动原子应用');
+      await load();
+    } catch (error) {
+      if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
+    }
+  };
+  const startReplay = async (candidate: SemanticEvolutionCandidate) => {
+    try {
+      const run = await queryWeaverService.replaySemanticEvolution(candidate.id);
+      replayRuns.value[candidate.id] = run;
+      localStorage.setItem(replayStorageKey(candidate.id), run.replayRunId);
+      ElMessage.success(`系统 Replay 已进入后台：${run.replayRunId}`);
+      await load();
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : 'Replay 启动失败');
+    }
+  };
+  const cancelReplay = async (candidate: SemanticEvolutionCandidate) => {
+    const run = replayFor(candidate.id);
+    if (!run) {
+      ElMessage.error('未找到可恢复的 Replay Run ID');
+      return;
+    }
+    await ElMessageBox.confirm(
+      '取消会持久化取消状态，并尝试取消正在执行的 JDBC Statement。',
+      '取消系统 Replay',
+      {
+        type: 'warning',
+      },
+    );
+    replayRuns.value[candidate.id] = await queryWeaverService.cancelSemanticEvolutionReplay(
+      run.replayRunId,
+    );
+    ElMessage.success('Replay 取消请求已提交');
+  };
+  const refreshReplay = async (candidateId: string) => {
+    const replayRunId =
+      replayRuns.value[candidateId]?.replayRunId ||
+      localStorage.getItem(replayStorageKey(candidateId));
+    if (!replayRunId) return;
+    try {
+      const run = await queryWeaverService.semanticEvolutionReplayRun(replayRunId);
+      replayRuns.value[candidateId] = run;
+      if (isReplayTerminal(run.status)) {
+        localStorage.removeItem(replayStorageKey(candidateId));
+        if (selected.value?.id === candidateId) await reloadSelected();
+      }
+    } catch {
+      localStorage.removeItem(replayStorageKey(candidateId));
+    }
+  };
+  const resumeKnownReplays = async () => {
+    await Promise.all(
+      candidates.value
+        .filter(
+          candidate =>
+            candidate.status === 'REPLAY_RUNNING' ||
+            localStorage.getItem(replayStorageKey(candidate.id)),
+        )
+        .map(candidate => refreshReplay(candidate.id)),
+    );
+  };
+  const pollReplays = async () => {
+    const running = candidates.value.filter(
+      candidate =>
+        candidate.status === 'REPLAY_RUNNING' ||
+        replayRuns.value[candidate.id]?.status === 'RUNNING',
+    );
+    await Promise.all(running.map(candidate => refreshReplay(candidate.id)));
+    if (running.some(candidate => isReplayTerminal(replayRuns.value[candidate.id]?.status)))
+      await load();
+  };
+  const recordReplay = async (candidate: SemanticEvolutionCandidate, passed: boolean) => {
+    try {
+      const response = await ElMessageBox.prompt(
+        '该记录不会改写机器 Replay 事实。请填写替代证明、风险接受或人工拒绝的完整依据。',
+        passed ? '登记人工证明 / 风险例外' : '登记人工拒绝',
+        {
+          inputType: 'textarea',
+          inputValidator: value => Boolean(value.trim()) || '必须填写审计摘要',
+        },
+      );
+      await queryWeaverService.recordSemanticEvolutionReplay(candidate.id, passed, response.value);
+      ElMessage.success('人工 Attestation 与 Release Decision 已独立登记');
+      await Promise.all([load(), loadReplayGovernance(candidate.id)]);
+    } catch (error) {
+      if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
+    }
+  };
+  const manualReplayCommand = (candidate: SemanticEvolutionCandidate, command: unknown) =>
+    recordReplay(candidate, command === 'pass');
+  const ready = async (candidate: SemanticEvolutionCandidate) => {
+    await action(
+      () => queryWeaverService.readySemanticEvolution(candidate.id),
+      '学习建议已提交发布门禁，等待独立发布决定',
+    );
+  };
+  const stale = async (candidate: SemanticEvolutionCandidate) => {
+    try {
+      const response = await ElMessageBox.prompt(
+        '说明过期原因，例如 Catalog Hash 已变化。',
+        '标记候选过期',
+        {
+          inputType: 'textarea',
+          inputValidator: value => Boolean(value.trim()) || '必须填写原因',
+        },
+      );
+      await action(
+        () => queryWeaverService.staleSemanticEvolution(candidate.id, response.value),
+        '候选已标记过期',
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
+    }
+  };
+  const action = async (operation: () => Promise<SemanticEvolutionCandidate>, success: string) => {
+    try {
+      await operation();
+      ElMessage.success(success);
+      await load();
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '操作失败');
+    }
+  };
+
+  const replayFor = (candidateId: string) => replayRuns.value[candidateId];
+  const replayStorageKey = (candidateId: string) => `qw-semantic-replay:${candidateId}`;
+  const isReplayTerminal = (value?: string) =>
+    ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(value || '');
+  const isHighRisk = (operation: SemanticPatchOperation) =>
+    (selected.value && isPolicyCandidate(selected.value)) ||
+    ['METRIC', 'RELATIONSHIP', 'GRAIN', 'RULE'].includes(operation.assetType?.toUpperCase()) ||
+    /formula|expression|join|cardinality|grain/i.test(JSON.stringify(operation.values || {}));
+  const isPolicyCandidate = (candidate: SemanticEvolutionCandidate) =>
+    candidate.asset_type?.startsWith('POLICY_') ||
+    ['DATASOURCE_AUTHORITY_INCORRECT', 'MULTI_SOURCE_POLICY_INCORRECT'].includes(
+      candidate.candidate_type,
+    );
+  const isTrueAmbiguity = (candidate: SemanticEvolutionCandidate) =>
+    candidate.mapping_classification === 'TRUE_AMBIGUITY';
+  const suggestionTitle = (candidate: SemanticEvolutionCandidate) => {
+    const asset = candidate.asset_key || '业务资产';
+    const labels: Record<string, string> = {
+      ALIAS: `统一“${asset}”的业务叫法`,
+      ENUM: `完善“${asset}”的枚举含义`,
+      ENUM_VALUE: `完善“${asset}”的枚举含义`,
+      METRIC: `修正指标“${asset}”`,
+      DIMENSION: `修正维度“${asset}”`,
+      RELATIONSHIP: `修正“${asset}”的业务关系`,
+      GRAIN: `修正“${asset}”的数据粒度`,
+      RULE: `完善业务规则“${asset}”`,
+    };
+    return labels[String(candidate.asset_type || '').toUpperCase()] || `改进“${asset}”的业务理解`;
+  };
+  const suggestionDescription = (candidate: SemanticEvolutionCandidate) =>
+    isTrueAmbiguity(candidate)
+      ? '现有独立证据仍指向多个含义，需要补充业务材料或人工确认。'
+      : `基于 ${candidate.distinct_root_evidence_count || 0} 个独立证据形成，批准后只进入草稿，不会直接修改正式版本。`;
+  const replaySummaryText = (candidateId: string) => {
+    const candidate = candidates.value.find(item => item.id === candidateId);
+    if (
+      candidate?.status === 'REPLAY_PASSED' ||
+      candidate?.status === 'READY_FOR_PUBLISH' ||
+      candidate?.status === 'PUBLISHED'
+    ) {
+      return '自动回归通过';
+    }
+    if (candidate?.status === 'REPLAY_FAILED') return '自动回归存在失败';
+    if (candidate?.status === 'REPLAY_RUNNING')
+      return `自动回归 ${replayFor(candidateId)?.progress || 0}%`;
+    return '尚未运行自动回归';
+  };
+  const mappingLabels: Record<string, string> = {
+    STABLE_MAPPING: '稳定映射',
+    TRUE_AMBIGUITY: '真实歧义',
+    LOW_SAMPLE: '样本不足',
+  };
+  const mappingLabel = (value?: string) => (value ? mappingLabels[value] || value : '未分类');
+  const mappingType = (value?: string) =>
+    value === 'STABLE_MAPPING' ? 'success' : value === 'TRUE_AMBIGUITY' ? 'danger' : 'warning';
+  const activeStatus = (value: string) =>
+    [
+      'CANDIDATE',
+      'APPROVED',
+      'DRAFT_CREATED',
+      'PATCH_APPLIED',
+      'REPLAY_RUNNING',
+      'REPLAY_PASSED',
+      'REPLAY_FAILED',
+      'READY_FOR_PUBLISH',
+    ].includes(value);
+  const statusLabels: Record<string, string> = {
+    CANDIDATE: '待审核',
+    APPROVED: '已批准',
+    DRAFT_CREATED: '草稿已创建',
+    PATCH_APPLIED: '已写入草稿',
+    REPLAY_RUNNING: '回归验证中',
+    REPLAY_PASSED: '回归通过',
+    REPLAY_FAILED: '回归失败',
+    READY_FOR_PUBLISH: '等待发布决定',
+    PUBLISHED: '已发布',
+    REJECTED: '已忽略',
+    STALE: '已过期',
+  };
+  const statusLabel = (value: string) => statusLabels[value] || value;
+  const statusType = (value: string) =>
+    ['PUBLISHED', 'REPLAY_PASSED', 'READY_FOR_PUBLISH'].includes(value)
+      ? 'success'
+      : ['REJECTED', 'REPLAY_FAILED'].includes(value)
+        ? 'danger'
+        : value === 'STALE'
+          ? 'info'
+          : 'warning';
+  const replayStatusType = (value: string) =>
+    value === 'PASSED'
+      ? 'success'
+      : ['FAILED', 'REVIEW_REQUIRED'].includes(value)
+        ? 'danger'
+        : 'info';
+  const riskType = (value: string) =>
+    value === 'HIGH' ? 'danger' : value === 'MEDIUM' ? 'warning' : 'success';
+  const riskLabel = (value: string) =>
+    value === 'HIGH' ? '高风险' : value === 'MEDIUM' ? '中风险' : '低风险';
+  const percent = (value?: number) => `${(Number(value || 0) * 100).toFixed(0)}%`;
+  const decimal = (value?: number) => Number(value || 0).toFixed(3);
+  const formatTime = (value?: string) => (value ? new Date(value).toLocaleString('zh-CN') : '-');
+  const pretty = (value?: string) => {
+    try {
+      return JSON.stringify(JSON.parse(value || '{}'), null, 2);
+    } catch {
+      return value || '-';
+    }
+  };
+  const prettyValue = (value: unknown) => {
+    if (typeof value === 'string') return pretty(value);
+    return JSON.stringify(value ?? '-', null, 2);
+  };
+  const compact = (value?: string) => {
+    try {
+      return JSON.stringify(JSON.parse(value || '{}'));
+    } catch {
+      return value || '-';
+    }
+  };
+
+  onMounted(async () => {
+    await load();
+    replayPollTimer = setInterval(() => void pollReplays(), 2000);
+  });
+  onBeforeUnmount(() => {
+    if (replayPollTimer) clearInterval(replayPollTimer);
+  });
+</script>
+
+<style scoped>
+  .governance {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .toolbar,
+  .section-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: flex-start;
+  }
+  .toolbar h2,
+  .section-title h3 {
+    margin: 0 0 6px;
+    color: #0f172a;
+  }
+  .toolbar p,
+  .section-title p,
+  .section-note {
+    margin: 0;
+    color: #64748b;
+  }
+  .filters,
+  .actions {
+    display: flex;
+    gap: 10px;
+  }
+  .filters .el-select {
+    width: 180px;
+  }
+  .subtle {
+    margin-top: 5px;
+    color: #94a3b8;
+    font-size: 12px;
+  }
+  .source-lock {
+    margin: 12px 0 16px;
+  }
+  .preflight {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0;
+  }
+  .operation-card {
+    padding: 16px;
+    margin-top: 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+  }
+  .operation-card.high-risk {
+    border-color: #fca5a5;
+    background: #fffafa;
+  }
+  .operation-head {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+  }
+  pre {
+    max-height: 260px;
+    margin: 0;
+    padding: 10px;
+    overflow: auto;
+    border-radius: 8px;
+    background: #f8fafc;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  code {
+    white-space: normal;
+    word-break: break-all;
+    font-size: 12px;
+  }
+  h3 {
+    margin: 24px 0 10px;
+  }
+  h4 {
+    margin-bottom: 8px;
+  }
+  @media (max-width: 900px) {
+    .toolbar,
+    .section-title {
+      flex-direction: column;
+    }
+    .form-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

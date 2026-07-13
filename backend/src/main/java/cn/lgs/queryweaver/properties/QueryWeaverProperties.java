@@ -1,0 +1,133 @@
+/*
+ * Copyright 2024-2026 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package cn.lgs.queryweaver.properties;
+
+import cn.lgs.queryweaver.constant.Constant;
+import cn.lgs.queryweaver.service.llm.LlmServiceEnum;
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@Getter
+@Setter
+@ConfigurationProperties(prefix = Constant.PROJECT_PROPERTIES_PREFIX)
+public class QueryWeaverProperties {
+
+	private LlmServiceEnum llmServiceType = LlmServiceEnum.STREAM;
+
+	/**
+	 * cn.lgs.queryweaver.embedding-batch.encoding-type=cl100k_base
+	 * cn.lgs.queryweaver.embedding-batch.max-token-count=2000
+	 * cn.lgs.queryweaver.embedding-batch.reserve-percentage=0.2
+	 * cn.lgs.queryweaver.embedding-batch.max-text-count=10
+	 */
+	private SqlExecutionPolicy sqlExecution = new SqlExecutionPolicy();
+
+	private ReportTemplate reportTemplate = new ReportTemplate();
+
+	/**
+	 * sql执行失败重试次数
+	 */
+	private int maxSqlRetryCount = 10;
+
+	/**
+	 * sql优化最多次数
+	 */
+	private int maxSqlOptimizeCount = 10;
+
+	/**
+	 * sql优化分数阈值
+	 */
+	private double sqlScoreThreshold = 0.95;
+
+	/**
+	 * 最多保留的对话轮数
+	 */
+	private int maxturnhistory = 5;
+
+	/**
+	 * 单次规划最大长度限制
+	 */
+	private int maxplanlength = 2000;
+
+	// 每张表的最大预估列数
+	private int maxColumnsPerTable = 50;
+
+	/**
+	 * 是否启用SQL执行结果图表判断，默认启用
+	 */
+	private boolean enableSqlResultChart = true;
+
+	/**
+	 * 执行SQL结果图表化超时时间，默认3000ms
+	 */
+	private Long enrichSqlResultTimeout = 3000L;
+
+	@Getter
+	@Setter
+	public static class SqlExecutionPolicy {
+
+		/** Maximum rows returned by a single SQL execution. */
+		private int maxRows = 1000;
+
+		/** JDBC query timeout in seconds. */
+		private int queryTimeoutSeconds = 30;
+
+		/** Maximum generated SQL text length before execution. */
+		private int maxSqlLength = 100000;
+
+		/** Whether supported dialects must pass EXPLAIN before execution. */
+		private boolean explainEnabled = true;
+
+		/** Whether a limited preview execution is required before full execution. */
+		private boolean previewEnabled = true;
+
+		/** Maximum rows returned by preview execution. */
+		private int previewRows = 50;
+
+		/** Query timeout for EXPLAIN and preview execution. */
+		private int preflightTimeoutSeconds = 10;
+
+		/** Maximum number of physical tables referenced by one query. */
+		private int maxJoinTables = 8;
+
+		/** Maximum row count reported by EXPLAIN before execution is rejected. */
+		private long maxEstimatedRows = 10000000L;
+
+		/** Whether the SQL must constrain one of the semantic time columns. */
+		private boolean requireTimeFilter = false;
+
+		/** Maximum literal date range accepted when both range endpoints are present. */
+		private int maxTimeRangeDays = 366;
+
+		/** Whether a full table scan reported by EXPLAIN must be rejected. */
+		private boolean rejectFullTableScan = false;
+
+	}
+
+	@Getter
+	@Setter
+	public static class ReportTemplate {
+
+		// Marked.js (Markdown 解析器) 南方科技大学开源软件镜像站
+		private String markedUrl = "https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/marked/12.0.0/marked.min.js";
+
+		// ECharts (图表库) 南方科技大学开源软件镜像站
+		private String echartsUrl = "https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/echarts/5.5.0/echarts.min.js";
+
+	}
+
+}

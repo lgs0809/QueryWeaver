@@ -1,0 +1,38 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${QUERYWEAVER_JWT_ISSUER_URI}
+
+cn:
+  lgs:
+    queryweaver:
+      code-executor:
+        code-pool-executor: ${QUERYWEAVER_CODE_EXECUTOR:docker}
+      sql-execution:
+        require-time-filter: true
+        reject-full-table-scan: true
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+queryweaver:
+  mcp:
+    enabled: false
+  security:
+    enabled: true
+  operator:
+    development-mode: false
+
+logging:
+  level:
+    root: info
+    cn.lgs.queryweaver: info
+    org.springframework.jdbc: warn

@@ -1,0 +1,838 @@
+<!--
+ * Copyright 2024-2026 the original author or authors.
+ * Licensed under the Apache License, Version 2.0.
+ -->
+<template>
+  <BaseLayout>
+    <section class="detail-page" v-loading="loading">
+      <div class="detail-heading">
+        <div>
+          <el-button link :icon="ArrowLeft" @click="router.push('/projects')">返回项目</el-button>
+          <h1>{{ projectView?.project.name || '项目详情' }}</h1>
+          <p>{{ projectView?.project.description || projectView?.project.businessDomain }}</p>
+        </div>
+        <div class="heading-actions">
+          <el-button v-if="canManageMembers" @click="membersDialogVisible = true">
+            项目成员
+          </el-button>
+          <el-tag v-if="health" :type="health.queryReady ? 'success' : 'warning'" effect="plain">
+            {{ health.queryReady ? '可以问数' : '准备中' }}
+          </el-tag>
+          <el-button
+            type="primary"
+            :disabled="
+              health
+                ? !health.queryReady && !primaryAction
+                : !projectView?.project.activePublishedVersionId
+            "
+            @click="handlePrimaryAction"
+          >
+            {{ primaryActionLabel }}
+          </el-button>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="healthError"
+        class="health-error-alert"
+        type="warning"
+        show-icon
+        :closable="false"
+        title="项目状态暂时无法完整读取"
+      >
+        <template #default>
+          <div class="health-error-content">
+            <span>{{ healthError }}。已有正式版本和页面数据仍可继续查看。</span>
+            <el-button size="small" :loading="healthLoading" @click="loadHealth">
+              重新读取状态
+            </el-button>
+          </div>
+        </template>
+      </el-alert>
+
+      <ProjectLifecycle
+        :health="health"
+        :show-action="!firstRunMode"
+        @action="handleLifecycleAction"
+      />
+
+      <el-card v-if="firstRunMode" shadow="never" class="first-run-card">
+        <div class="first-run-heading">
+          <div>
+            <span>首次设置引导</span>
+            <h2>{{ firstRunActionLabel }}</h2>
+            <p>{{ firstRunDescription }}</p>
+          </div>
+          <el-button link @click="exitFirstRun">退出引导</el-button>
+        </div>
+        <div class="first-run-action">
+          <span>{{ firstRunActionHint }}</span>
+          <el-button
+            type="primary"
+            :loading="firstRunSubmitting"
+            :disabled="!firstRunActionAllowed"
+            @click="continueFirstRun"
+          >
+            {{ firstRunActionLabel }}
+          </el-button>
+        </div>
+      </el-card>
+
+      <el-card shadow="never" class="content-card">
+        <el-tabs v-model="activeSection" class="primary-tabs" @tab-change="syncSectionRoute">
+          <el-tab-pane label="概览" name="overview">
+            <ProjectOverview
+              :health="health"
+              :loading="healthLoading"
+              :error="healthError"
+              :can-edit="canEditProject"
+              :can-review="canReviewProject"
+              @navigate="navigateSection"
+              @chat="openChat"
+            />
+          </el-tab-pane>
+
+          <el-tab-pane v-if="canManageMembers" label="外部 Agent" name="external" lazy>
+            <ProjectMcpDeployment
+              :project-id="projectId"
+              :can-manage="canManageMembers"
+              :query-ready="Boolean(health?.queryReady)"
+            />
+          </el-tab-pane>
+
+          <el-tab-pane v-if="canEditProject" label="准备" name="prepare" lazy>
+            <el-alert
+              class="group-intro"
+              type="info"
+              show-icon
+              :closable="false"
+              title="从数据连接和业务资料形成业务模型，只在无法安全推断时要求业务确认。"
+            />
+            <el-tabs v-model="prepareTab" class="secondary-tabs" @tab-change="syncPrepareTabRoute">
+              <el-tab-pane label="数据连接" name="datasources" lazy>
+                <ProjectDatasourceBindings
+                  :project-id="projectId"
+                  :versions="versions"
+                  :can-edit="canEditProject"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="业务资料" name="documents" lazy>
+                <ProjectDocuments
+                  :project-id="projectId"
+                  :versions="versions"
+                  :can-edit="canEditProject"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="业务模型" name="semantic" lazy>
+                <ProjectSemanticWorkspace
+                  :project-id="projectId"
+                  :versions="versions"
+                  :can-edit="canEditProject"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="待确认问题" name="grill" lazy>
+                <ProjectGrillMe
+                  :project-id="projectId"
+                  :versions="versions"
+                  :can-edit="canEditProject"
+                  @completed="handleOnboardingCompleted"
+                />
+              </el-tab-pane>
+            </el-tabs>
+          </el-tab-pane>
+
+          <el-tab-pane v-if="canReviewProject" label="改进" name="improve" lazy>
+            <el-alert
+              class="group-intro"
+              type="info"
+              show-icon
+              :closable="false"
+              title="这里汇总系统从真实查询、纠错和运行轨迹中形成的改进信号；正式业务模型仍需经过验证、回归和发布。"
+            />
+            <el-tabs v-model="improveTab" class="secondary-tabs">
+              <el-tab-pane label="改进建议" name="inbox" lazy>
+                <ProjectLearningInbox :project-id="projectId" @open="openImprovementDetail" />
+              </el-tab-pane>
+              <el-tab-pane label="业务模型建议" name="semantic" lazy>
+                <ProjectSemanticEvolution
+                  :project-id="projectId"
+                  :can-govern="canReviewProject"
+                  :focus-candidate-id="evolutionCandidateId"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="已验证案例" name="examples" lazy>
+                <ProjectQueryExamples
+                  :project-id="projectId"
+                  :versions="versions"
+                  :active-version-id="projectView?.project.activePublishedVersionId"
+                  :can-govern="canReviewProject"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="运行优化" name="optimization" lazy>
+                <ProjectRuntimeOptimization
+                  :project-id="projectId"
+                  :can-govern="canReviewProject"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="高级执行证据" name="trajectory" lazy>
+                <ProjectTrajectory
+                  :project-id="projectId"
+                  :versions="versions"
+                  :active-version-id="projectView?.project.activePublishedVersionId"
+                />
+              </el-tab-pane>
+            </el-tabs>
+          </el-tab-pane>
+
+          <el-tab-pane v-if="canReviewProject" label="验证与发布" name="governance" lazy>
+            <el-tabs
+              v-model="governanceTab"
+              class="secondary-tabs"
+              @tab-change="syncGovernanceTabRoute"
+            >
+              <el-tab-pane label="测试与回归" name="test" lazy>
+                <div class="section-copy">
+                  <h2>验证业务模型</h2>
+                  <p>
+                    使用现有评估与 Replay 事实验证业务模型变更，不把自动回归结果等同于人工发布决策。
+                  </p>
+                </div>
+                <ProjectEvaluations
+                  :project-id="projectId"
+                  :versions="versions"
+                  :active-version-id="projectView?.project.activePublishedVersionId"
+                  :can-run="canReviewProject"
+                />
+              </el-tab-pane>
+
+              <el-tab-pane label="发布与版本" name="release" lazy>
+                <div class="tab-toolbar release-toolbar">
+                  <div>
+                    <h2>发布与版本</h2>
+                    <p>
+                      新修改进入草稿，通过验证和发布门禁后再成为正式业务模型；旧会话仍固定原版本。
+                    </p>
+                  </div>
+                  <el-button v-if="canEditProject" @click="versionDialogVisible = true">
+                    创建新版本
+                  </el-button>
+                </div>
+                <ProjectReleaseCenter
+                  :project-id="projectId"
+                  :can-publish="canPublishProject"
+                  @changed="load"
+                />
+              </el-tab-pane>
+            </el-tabs>
+          </el-tab-pane>
+        </el-tabs>
+      </el-card>
+
+      <ProjectMembersDialog
+        v-if="canManageMembers"
+        v-model="membersDialogVisible"
+        :project-id="projectId"
+      />
+
+      <el-dialog v-model="versionDialogVisible" title="创建业务模型草稿" width="520px">
+        <el-form label-position="top">
+          <el-form-item label="版本号" required>
+            <el-input v-model="versionForm.versionNumber" placeholder="2.1.0" />
+          </el-form-item>
+          <el-form-item label="创建方式" required>
+            <el-radio-group v-model="versionForm.creationMode">
+              <el-radio value="CLONE">基于历史版本继续修改</el-radio>
+              <el-radio value="BLANK">从空白业务模型开始</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="versionForm.creationMode === 'CLONE'" label="基于版本" required>
+            <el-select v-model="versionForm.parentVersionId" placeholder="选择历史版本">
+              <el-option
+                v-for="item in versions"
+                :key="item.id"
+                :label="`v${item.versionNumber} · ${versionStatusLabel(item.status)}`"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="versionDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="creatingVersion" @click="createVersion">
+            创建草稿
+          </el-button>
+        </template>
+      </el-dialog>
+    </section>
+  </BaseLayout>
+</template>
+
+<script setup lang="ts">
+  import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue';
+  import { useRoute, useRouter } from 'vue-router';
+  import { ElMessage } from 'element-plus';
+  import { ArrowLeft } from '@element-plus/icons-vue';
+  import BaseLayout from '@/layouts/BaseLayout.vue';
+  import ProjectLifecycle from '@/components/project/ProjectLifecycle.vue';
+  import { platformContext } from '@/services/platformContext';
+  import {
+    canEditProject as canEditProjectCapability,
+    canManageProject as canManageProjectCapability,
+    canReviewProject as canReviewProjectCapability,
+    projectSectionVisible,
+  } from '@/services/projectCapabilities.mjs';
+  import ProjectMembersDialog from '@/components/project/ProjectMembersDialog.vue';
+  import ProjectOverview from '@/components/project/ProjectOverview.vue';
+  import {
+    projectDetailSectionForTarget,
+    projectDetailSubsectionForTarget,
+    projectPrimaryAction,
+    type ProjectHealthAction,
+  } from '@/services/projectExperience';
+  import {
+    queryWeaverService,
+    type OperatorView,
+    type ProjectAccessView,
+    type ProjectHealth,
+    type ProjectInitializationView,
+    type ProjectVersionCreationMode,
+    type SemanticProjectVersion,
+  } from '@/services/queryweaver';
+
+  const ProjectDatasourceBindings = defineAsyncComponent(
+    () => import('@/components/project/ProjectDatasourceBindings.vue'),
+  );
+  const ProjectDocuments = defineAsyncComponent(
+    () => import('@/components/project/ProjectDocuments.vue'),
+  );
+  const ProjectEvaluations = defineAsyncComponent(
+    () => import('@/components/project/ProjectEvaluations.vue'),
+  );
+  const ProjectGrillMe = defineAsyncComponent(
+    () => import('@/components/project/ProjectGrillMe.vue'),
+  );
+  const ProjectLearningInbox = defineAsyncComponent(
+    () => import('@/components/project/ProjectLearningInbox.vue'),
+  );
+  const ProjectMcpDeployment = defineAsyncComponent(
+    () => import('@/components/project/ProjectMcpDeployment.vue'),
+  );
+  const ProjectQueryExamples = defineAsyncComponent(
+    () => import('@/components/project/ProjectQueryExamples.vue'),
+  );
+  const ProjectReleaseCenter = defineAsyncComponent(
+    () => import('@/components/project/ProjectReleaseCenter.vue'),
+  );
+  const ProjectRuntimeOptimization = defineAsyncComponent(
+    () => import('@/components/project/ProjectRuntimeOptimization.vue'),
+  );
+  const ProjectSemanticEvolution = defineAsyncComponent(
+    () => import('@/components/project/ProjectSemanticEvolution.vue'),
+  );
+  const ProjectSemanticWorkspace = defineAsyncComponent(
+    () => import('@/components/project/ProjectSemanticWorkspace.vue'),
+  );
+  const ProjectTrajectory = defineAsyncComponent(
+    () => import('@/components/project/ProjectTrajectory.vue'),
+  );
+
+  type ProjectSection = 'overview' | 'external' | 'prepare' | 'improve' | 'governance';
+
+  const route = useRoute();
+  const router = useRouter();
+  const projectId = Number(route.params.id);
+  const evolutionCandidateId = computed(() => {
+    const value = String(route.query.candidateId || '').trim();
+    return value || undefined;
+  });
+  const projectView = ref<ProjectInitializationView>();
+  const projectAccess = ref<ProjectAccessView>();
+  const operator = ref<OperatorView>();
+  const health = ref<ProjectHealth>();
+  const healthLoading = ref(false);
+  const healthError = ref('');
+  const versions = ref<SemanticProjectVersion[]>([]);
+  const loading = ref(false);
+
+  const legacySectionMap: Record<string, ProjectSection> = {
+    overview: 'overview',
+    external: 'external',
+    mcp: 'external',
+    integration: 'external',
+    prepare: 'prepare',
+    data: 'prepare',
+    business: 'prepare',
+    datasources: 'prepare',
+    documents: 'prepare',
+    semantic: 'prepare',
+    grill: 'prepare',
+    improve: 'improve',
+    inbox: 'improve',
+    examples: 'improve',
+    trajectory: 'improve',
+    evolution: 'improve',
+    optimization: 'improve',
+    governance: 'governance',
+    test: 'governance',
+    evaluations: 'governance',
+    release: 'governance',
+    versions: 'governance',
+    releases: 'governance',
+  };
+  const requestedSection = String(route.query.section || route.query.tab || 'overview');
+  const activeSection = ref<ProjectSection>(legacySectionMap[requestedSection] || 'overview');
+  const prepareTab = ref(
+    ['datasources', 'documents', 'semantic', 'grill'].includes(requestedSection)
+      ? requestedSection
+      : requestedSection === 'business'
+        ? 'semantic'
+        : 'datasources',
+  );
+  const requestedImproveTab = requestedSection === 'evolution' ? 'semantic' : requestedSection;
+  const improveTab = ref(
+    ['inbox', 'semantic', 'examples', 'trajectory', 'optimization'].includes(requestedImproveTab)
+      ? requestedImproveTab
+      : 'inbox',
+  );
+  const governanceTab = ref(
+    ['release', 'versions', 'releases'].includes(requestedSection) ? 'release' : 'test',
+  );
+  const versionDialogVisible = ref(route.query.action === 'create-version');
+  const creatingVersion = ref(false);
+  const versionForm = reactive({
+    versionNumber: '',
+    creationMode: 'CLONE' as ProjectVersionCreationMode,
+    parentVersionId: undefined as number | undefined,
+  });
+  const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+  const membersDialogVisible = ref(false);
+  const canEditProject = computed(() =>
+    canEditProjectCapability(
+      projectAccess.value?.accessRole,
+      operator.value?.role,
+      projectAccess.value?.globalAdmin,
+    ),
+  );
+  const canReviewProject = computed(() =>
+    canReviewProjectCapability(
+      projectAccess.value?.accessRole,
+      operator.value?.role,
+      projectAccess.value?.globalAdmin,
+    ),
+  );
+  const canPublishProject = computed(
+    () =>
+      Boolean(projectAccess.value?.globalAdmin) ||
+      (['EDITOR', 'OWNER'].includes(projectAccess.value?.accessRole || '') &&
+        ['PUBLISHER', 'ADMIN'].includes(operator.value?.role || '')),
+  );
+  const canManageMembers = computed(() =>
+    canManageProjectCapability(
+      projectAccess.value?.accessRole,
+      operator.value?.role,
+      projectAccess.value?.globalAdmin,
+    ),
+  );
+  const sectionVisible = (section: ProjectSection) =>
+    projectSectionVisible(section, {
+      edit: canEditProject.value,
+      review: canReviewProject.value,
+      manage: canManageMembers.value,
+    });
+  const primaryAction = computed(() => projectPrimaryAction(health.value));
+  const primaryActionLabel = computed(() => {
+    if (
+      health.value?.queryReady ||
+      (!health.value && projectView.value?.project.activePublishedVersionId)
+    ) {
+      return '开始问数';
+    }
+    return primaryAction.value?.label || '继续准备';
+  });
+  const firstRunSubmitting = ref(false);
+  const firstRunMode = computed(() => route.query.onboarding === '1' && !health.value?.queryReady);
+  const firstRunRulesReady = computed(
+    () =>
+      Boolean(health.value?.understanding.catalogReady) &&
+      (health.value?.understanding.openGapCount || 0) === 0 &&
+      (health.value?.understanding.unresolvedConflictCount || 0) === 0,
+  );
+  const firstRunDescription = computed(() => {
+    if (!health.value) return '正在读取项目准备状态。';
+    if (!firstRunRulesReady.value)
+      return `系统已完成基础理解，还需要确认 ${health.value.understanding.openGapCount} 个业务问题和 ${health.value.understanding.unresolvedConflictCount} 个冲突。`;
+    if (health.value.workingVersion?.status === 'DRAFT')
+      return '关键业务规则已确认，下一步验证当前业务模型。';
+    if (
+      health.value.workingVersion?.status === 'VALIDATED' ||
+      health.value.workingVersion?.status === 'READY'
+    )
+      return '业务模型已经通过验证，下一步发布并激活供新会话使用。';
+    if (health.value.workingVersion?.status === 'PUBLISHED')
+      return '业务模型已经发布，下一步激活并开始第一次问数。';
+    return '按照当前项目事实完成剩余准备步骤。';
+  });
+  const firstRunActionLabel = computed(() => {
+    if (!health.value || !firstRunRulesReady.value) return '继续确认业务规则';
+    if (health.value.workingVersion?.status === 'DRAFT') return '验证业务模型';
+    if (
+      health.value.workingVersion?.status === 'VALIDATED' ||
+      health.value.workingVersion?.status === 'READY'
+    )
+      return '发布并继续';
+    if (health.value.workingVersion?.status === 'PUBLISHED') return '激活并开始问数';
+    return '继续设置';
+  });
+  const firstRunActionAllowed = computed(() => {
+    if (!health.value || !firstRunRulesReady.value) return canEditProject.value;
+    const status = health.value.workingVersion?.status;
+    if (status === 'DRAFT') return canReviewProject.value;
+    if (status === 'VALIDATED' || status === 'READY' || status === 'PUBLISHED') {
+      return canPublishProject.value;
+    }
+    return canEditProject.value;
+  });
+  const firstRunActionHint = computed(() => {
+    if (!firstRunActionAllowed.value) {
+      if (health.value?.workingVersion?.status === 'DRAFT')
+        return '需要项目编辑权限和 Reviewer 以上全局角色才能验证业务模型。';
+      if (
+        ['VALIDATED', 'READY', 'PUBLISHED'].includes(health.value?.workingVersion?.status || '')
+      ) {
+        return '需要项目编辑权限和 Publisher 以上全局角色才能发布或激活业务模型。';
+      }
+      return '当前账号只有查看权限，业务规则确认需要项目编辑权限。';
+    }
+    return health.value?.nextActions[0]?.description || '系统只会执行当前事实允许的下一步。';
+  });
+
+  const loadHealth = async () => {
+    healthLoading.value = true;
+    healthError.value = '';
+    try {
+      health.value = await queryWeaverService.projectHealth(projectId);
+    } catch (error) {
+      healthError.value = error instanceof Error ? error.message : '项目健康信息加载失败';
+    } finally {
+      healthLoading.value = false;
+    }
+  };
+
+  const load = async () => {
+    loading.value = true;
+    try {
+      const [nextProjectView, nextProjectAccess, nextOperator, nextVersions] = await Promise.all([
+        queryWeaverService.project(projectId),
+        queryWeaverService.projectAccess(projectId),
+        platformContext.operator(),
+        queryWeaverService.projectVersions(projectId),
+      ]);
+      projectView.value = nextProjectView;
+      projectAccess.value = nextProjectAccess;
+      operator.value = nextOperator;
+      versions.value = nextVersions;
+      if (!sectionVisible(activeSection.value)) {
+        activeSection.value = 'overview';
+        void router.replace({ query: { ...route.query, section: 'overview', tab: undefined } });
+      }
+      versionForm.parentVersionId =
+        projectView.value.project.activePublishedVersionId || versions.value[0]?.id;
+      await loadHealth();
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '项目详情加载失败');
+    } finally {
+      loading.value = false;
+    }
+  };
+
+  const syncSectionRoute = (name: string | number) => {
+    void router.replace({ query: { ...route.query, section: String(name), tab: undefined } });
+  };
+
+  const syncPrepareTabRoute = (name: string | number) => {
+    activeSection.value = 'prepare';
+    syncSectionRoute(name);
+  };
+
+  const syncGovernanceTabRoute = (name: string | number) => {
+    activeSection.value = 'governance';
+    syncSectionRoute(name);
+  };
+
+  const openChat = () => router.push({ path: '/chat', query: { projectId } });
+
+  const navigateSection = (target: ProjectHealthAction['target']) => {
+    if (target === 'chat') {
+      void openChat();
+      return;
+    }
+    const section = projectDetailSectionForTarget(target);
+    if (section === 'chat') {
+      void openChat();
+      return;
+    }
+    activeSection.value = section;
+    const subsection = projectDetailSubsectionForTarget(target);
+    if (section === 'prepare' && subsection) prepareTab.value = subsection;
+    if (section === 'governance' && subsection) governanceTab.value = subsection;
+    if (section === 'improve' && subsection) improveTab.value = subsection;
+    syncSectionRoute(subsection || section);
+  };
+
+  const handleLifecycleAction = (target: ProjectHealthAction['target']) => navigateSection(target);
+
+  const handlePrimaryAction = () => {
+    if (
+      health.value?.queryReady ||
+      (!health.value && projectView.value?.project.activePublishedVersionId)
+    ) {
+      void openChat();
+      return;
+    }
+    if (primaryAction.value) navigateSection(primaryAction.value.target);
+  };
+
+  const openImprovementDetail = (target: 'semantic' | 'examples' | 'optimization') => {
+    activeSection.value = 'improve';
+    improveTab.value = target;
+    syncSectionRoute(target === 'semantic' ? 'evolution' : target);
+  };
+
+  const exitFirstRun = () =>
+    router.replace({
+      query: { ...route.query, onboarding: undefined, section: activeSection.value },
+    });
+
+  const handleOnboardingCompleted = async () => {
+    await load();
+    if (health.value?.understanding.catalogReady) activeSection.value = 'overview';
+  };
+
+  const continueFirstRun = async () => {
+    if (!health.value) return;
+    if (!firstRunRulesReady.value) {
+      activeSection.value = 'prepare';
+      prepareTab.value = 'grill';
+      syncSectionRoute('grill');
+      return;
+    }
+    const working = health.value.workingVersion;
+    if (!working) return;
+    firstRunSubmitting.value = true;
+    try {
+      if (working.status === 'DRAFT') {
+        await queryWeaverService.validateProjectVersion(projectId, working.id);
+        ElMessage.success('业务模型验证通过');
+        await load();
+        return;
+      }
+      if (working.status === 'VALIDATED' || working.status === 'READY') {
+        await queryWeaverService.publishProjectVersion(projectId, working.id);
+        await load();
+        if (health.value?.queryReady) {
+          ElMessage.success('业务模型已发布并激活，可以开始第一次问数');
+          await openChat();
+        } else {
+          ElMessage.success('业务模型已发布，下一步激活正式版本');
+        }
+        return;
+      }
+      if (working.status === 'PUBLISHED') {
+        await queryWeaverService.activateProjectVersion(projectId, working.id);
+        ElMessage.success('业务模型已激活，可以开始问数');
+        await openChat();
+        return;
+      }
+      const target = health.value.nextActions[0]?.target;
+      if (target === 'chat') await openChat();
+      else if (target) navigateSection(target);
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '当前步骤未完成');
+    } finally {
+      firstRunSubmitting.value = false;
+    }
+  };
+
+  const createVersion = async () => {
+    if (!versionPattern.test(versionForm.versionNumber)) {
+      ElMessage.warning('版本号必须使用 x.x.x 格式');
+      return;
+    }
+    if (versionForm.creationMode === 'CLONE' && !versionForm.parentVersionId) {
+      ElMessage.warning('请选择要继承的历史版本');
+      return;
+    }
+    creatingVersion.value = true;
+    try {
+      await queryWeaverService.createProjectVersion(projectId, {
+        versionNumber: versionForm.versionNumber,
+        creationMode: versionForm.creationMode,
+        parentVersionId:
+          versionForm.creationMode === 'CLONE' ? versionForm.parentVersionId : undefined,
+        source: 'project-detail',
+      });
+      ElMessage.success('业务模型草稿已创建');
+      versionDialogVisible.value = false;
+      await load();
+      activeSection.value = 'governance';
+      governanceTab.value = 'release';
+      syncSectionRoute('release');
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '版本创建失败');
+    } finally {
+      creatingVersion.value = false;
+    }
+  };
+
+  const versionStatusLabel = (status: string) => {
+    if (status === 'DRAFT') return '草稿';
+    if (status === 'VALIDATED' || status === 'READY') return '验证通过';
+    if (status === 'PUBLISHED') return '已发布';
+    if (status === 'ARCHIVED') return '已归档';
+    return status;
+  };
+  onMounted(load);
+</script>
+
+<style scoped>
+  .detail-page {
+    max-width: 1440px;
+    min-height: 600px;
+    margin: 0 auto;
+    padding: 30px;
+  }
+  .detail-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+  }
+  .detail-heading h1 {
+    margin: 10px 0 6px;
+    color: #0f172a;
+    font-size: 30px;
+  }
+  .detail-heading p {
+    margin: 0;
+    color: #64748b;
+  }
+  .heading-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 34px;
+  }
+  .health-error-alert {
+    margin-top: 20px;
+  }
+  .health-error-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .first-run-card {
+    margin-top: 22px;
+    border-color: #bfdbfe;
+    border-radius: 16px;
+    background: #f8fbff;
+  }
+  .first-run-heading,
+  .first-run-action {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+  }
+  .first-run-heading {
+    margin-bottom: 18px;
+  }
+  .first-run-heading span {
+    color: #2563eb;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .first-run-heading h2 {
+    margin: 5px 0 6px;
+    color: #0f172a;
+    font-size: 20px;
+  }
+  .first-run-heading p,
+  .first-run-action span {
+    margin: 0;
+    color: #64748b;
+    line-height: 1.6;
+  }
+  .first-run-action {
+    align-items: center;
+    margin-top: 18px;
+  }
+  .content-card {
+    min-height: 520px;
+    margin-top: 22px;
+    border-radius: 16px;
+  }
+  .primary-tabs :deep(> .el-tabs__header .el-tabs__item) {
+    height: 48px;
+    padding: 0 22px;
+    font-weight: 600;
+  }
+  .secondary-tabs {
+    margin-top: 4px;
+  }
+  .secondary-tabs :deep(.el-tabs__item) {
+    font-weight: 500;
+  }
+  .group-intro {
+    margin: 4px 0 16px;
+  }
+  .section-copy,
+  .tab-toolbar {
+    margin-bottom: 18px;
+  }
+  .section-copy h2,
+  .tab-toolbar h2,
+  .release-placeholder h2 {
+    margin: 0 0 6px;
+    color: #0f172a;
+    font-size: 18px;
+  }
+  .section-copy p,
+  .tab-toolbar p,
+  .release-placeholder p {
+    margin: 0;
+    color: #64748b;
+    line-height: 1.6;
+  }
+  .tab-toolbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .subtle {
+    color: #94a3b8;
+    font-size: 12px;
+  }
+  .release-placeholder {
+    padding: 8px 0;
+  }
+  @media (max-width: 800px) {
+    .detail-page {
+      padding: 18px 10px;
+    }
+    .detail-heading,
+    .tab-toolbar {
+      flex-direction: column;
+    }
+    .heading-actions {
+      margin-top: 0;
+    }
+    .health-error-content,
+    .first-run-heading,
+    .first-run-action {
+      align-items: stretch;
+      flex-direction: column;
+    }
+  }
+</style>

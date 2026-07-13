@@ -1,0 +1,155 @@
+/*
+ * Copyright 2024-2026 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package cn.lgs.queryweaver.learning;
+
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+/** Transaction boundary for Query Case recall and outcome usage facts. */
+@Service
+public class QueryCaseUsageService {
+
+	private final JdbcTemplate jdbc;
+
+	private final QueryCaseQuarantineService quarantineService;
+
+	public QueryCaseUsageService(JdbcTemplate jdbc, QueryCaseQuarantineService quarantineService) {
+		this.jdbc = jdbc;
+		this.quarantineService = quarantineService;
+	}
+
+	@Transactional
+	public void recordHintUsage(String runId, QueryCaseHints hints) {
+		if (!StringUtils.hasText(runId) || hints == null || hints.sourceExampleIds().isEmpty()) {
+			return;
+		}
+		for (String caseId : new LinkedHashSet<>(hints.sourceExampleIds())) {
+			String id = UUID
+				.nameUUIDFromBytes(("query-case-usage:" + runId + ":" + caseId).getBytes(StandardCharsets.UTF_8))
+				.toString();
+			jdbc.update("""
+					INSERT INTO qw_query_case_usage
+					(id, run_id, query_example_id, recalled, adopted, failed_after_recall,
+					 create_time, update_time)
+					VALUES (?, ?, ?, TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+					ON CONFLICT (run_id, query_example_id) DO NOTHING
+					""", id, runId, caseId);
+		}
+	}
+
+	@Transactional
+	public void recordEpisodeOutcome(String episodeId, String outcome) {
+		if (!StringUtils.hasText(episodeId) || !StringUtils.hasText(outcome)) {
+			return;
+		}
+		boolean failed = "FAILED".equalsIgnoreCase(outcome);
+		for (Map<String, Object> usage : jdbc.queryForList("""
+				SELECT u.* FROM qw_query_case_usage u
+				JOIN qw_query_run r ON r.run_id = u.run_id
+				WHERE r.episode_id = ?
+				""", episodeId)) {
+			String usageId = Objects.toString(usage.get("id"));
+			String queryCaseId = Objects.toString(usage.get("query_example_id"));
+			String runId = Objects.toString(usage.get("run_id"));
+			boolean issue = failed || hasClarificationOrRepair(runId);
+			if (failed) {
+				int changed = jdbc.update("""
+						UPDATE qw_query_case_usage
+						SET failed_after_recall = TRUE, outcome = 'FAILED', update_time = CURRENT_TIMESTAMP
+						WHERE id = ? AND failed_after_recall = FALSE
+						""", usageId);
+				if (changed == 1) {
+					jdbc.update("""
+							UPDATE qw_query_example
+							SET failed_after_recall_count = failed_after_recall_count + 1,
+							    update_time = CURRENT_TIMESTAMP WHERE id = ?
+							""", queryCaseId);
+				}
+			}
+			else {
+				jdbc.update("""
+						UPDATE qw_query_case_usage SET outcome = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?
+						""", outcome.toUpperCase(Locale.ROOT), usageId);
+			}
+			jdbc.update(issue ? """
+					UPDATE qw_query_example
+					SET consecutive_recall_issue_count = consecutive_recall_issue_count + 1,
+					    update_time = CURRENT_TIMESTAMP WHERE id = ?
+					""" : """
+					UPDATE qw_query_example SET consecutive_recall_issue_count = 0,
+					    update_time = CURRENT_TIMESTAMP WHERE id = ?
+					""", queryCaseId);
+			quarantineService.evaluate(queryCaseId);
+		}
+	}
+
+	@Transactional
+	public void recordEpisodeAdoption(String episodeId, boolean adopted) {
+		if (!adopted || !StringUtils.hasText(episodeId)) {
+			return;
+		}
+		for (Map<String, Object> usage : jdbc.queryForList("""
+				SELECT u.* FROM qw_query_case_usage u
+				JOIN qw_query_run r ON r.run_id = u.run_id
+				WHERE r.episode_id = ?
+				""", episodeId)) {
+			int changed = jdbc.update("""
+					UPDATE qw_query_case_usage SET adopted = TRUE, update_time = CURRENT_TIMESTAMP
+					WHERE id = ? AND adopted = FALSE
+					""", usage.get("id"));
+			if (changed == 1) {
+				jdbc.update("""
+						UPDATE qw_query_example SET adopted_count = adopted_count + 1,
+						 update_time = CURRENT_TIMESTAMP WHERE id = ?
+						""", usage.get("query_example_id"));
+			}
+		}
+	}
+
+	@Transactional
+	public void recordRecall(String queryCaseId) {
+		jdbc.update("""
+				UPDATE qw_query_example SET recall_count = recall_count + 1,
+				 last_recalled_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP WHERE id = ?
+				""", queryCaseId);
+	}
+
+	private boolean hasClarificationOrRepair(String runId) {
+		if (!StringUtils.hasText(runId)) {
+			return false;
+		}
+		Integer clarifications = jdbc.queryForObject("SELECT COUNT(*) FROM qw_runtime_clarification WHERE run_id = ?",
+				Integer.class, runId);
+		if (clarifications != null && clarifications > 0) {
+			return true;
+		}
+		Integer repairs = jdbc.queryForObject("""
+				SELECT COUNT(*) FROM qw_node_trace n
+				JOIN qw_query_run r ON r.attempt_id = n.attempt_id
+				WHERE r.run_id = ? AND n.correction_type IS NOT NULL
+				""", Integer.class, runId);
+		return repairs != null && repairs > 0;
+	}
+
+}

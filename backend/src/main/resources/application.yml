@@ -1,0 +1,223 @@
+server:
+  port: 8065
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  health:
+    elasticsearch:
+      enabled: false
+  metrics:
+    tags:
+      application: queryweaver
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+# Shared defaults are fail-closed. Local-only credentials and unsafe conveniences live in application-local.yml.
+queryweaver:
+  instance-id: ${HOSTNAME:local}
+  mcp:
+    enabled: ${QUERYWEAVER_MCP_ENABLED:true}
+    external:
+      public-base-url: ${QUERYWEAVER_MCP_PUBLIC_BASE_URL:http://localhost:8065}
+      endpoint-path: ${QUERYWEAVER_MCP_ENDPOINT:/mcp}
+      credential-ttl-days: ${QUERYWEAVER_MCP_CREDENTIAL_TTL_DAYS:90}
+      retry-window-seconds: ${QUERYWEAVER_MCP_RETRY_WINDOW_SECONDS:300}
+  runtime-role: ${QUERYWEAVER_RUNTIME_ROLE:application}
+  security:
+    enabled: ${QUERYWEAVER_SECURITY_ENABLED:false}
+    principal-claim: ${QUERYWEAVER_SECURITY_PRINCIPAL_CLAIM:sub}
+    role-claim: ${QUERYWEAVER_SECURITY_ROLE_CLAIM:roles}
+    authority-prefix: ROLE_QUERYWEAVER_
+  secrets:
+    encryption-key: ${QUERYWEAVER_SECRET_ENCRYPTION_KEY:}
+    migrate-plaintext: ${QUERYWEAVER_MIGRATE_PLAINTEXT_SECRETS:true}
+  operator:
+    development-mode: ${QUERYWEAVER_OPERATOR_DEVELOPMENT_MODE:false}
+    default-operator: ${QUERYWEAVER_OPERATOR_DEFAULT_OPERATOR:local-operator}
+    default-role: ${QUERYWEAVER_OPERATOR_DEFAULT_ROLE:ADMIN}
+  model-client:
+    connection-max-retries: ${QUERYWEAVER_MODEL_CONNECTION_MAX_RETRIES:3}
+    connection-initial-backoff: ${QUERYWEAVER_MODEL_CONNECTION_INITIAL_BACKOFF:250ms}
+    connection-max-backoff: ${QUERYWEAVER_MODEL_CONNECTION_MAX_BACKOFF:2s}
+    connection-retry-jitter: ${QUERYWEAVER_MODEL_CONNECTION_RETRY_JITTER:0.2}
+  context:
+    recent-turn-count: ${QUERYWEAVER_CONTEXT_RECENT_TURNS:6}
+    compression-enabled: ${QUERYWEAVER_CONTEXT_COMPRESSION_ENABLED:true}
+    compression-trigger-ratio: ${QUERYWEAVER_CONTEXT_COMPRESSION_TRIGGER_RATIO:0.70}
+    minimum-compressible-turns: ${QUERYWEAVER_CONTEXT_MINIMUM_COMPRESSIBLE_TURNS:4}
+    compression-max-batch-turns: ${QUERYWEAVER_CONTEXT_COMPRESSION_MAX_BATCH_TURNS:20}
+    compressed-summary-max-chars: ${QUERYWEAVER_CONTEXT_COMPRESSED_SUMMARY_MAX_CHARS:300}
+    compressed-correction-max-count: ${QUERYWEAVER_CONTEXT_COMPRESSED_CORRECTION_MAX_COUNT:5}
+    compressed-question-max-count: ${QUERYWEAVER_CONTEXT_COMPRESSED_QUESTION_MAX_COUNT:3}
+    retrieval-candidate-count: ${QUERYWEAVER_CONTEXT_RETRIEVAL_CANDIDATES:50}
+    retrieved-turn-count: ${QUERYWEAVER_CONTEXT_RETRIEVED_TURNS:3}
+    min-relevance-score: ${QUERYWEAVER_CONTEXT_MIN_RELEVANCE:0.08}
+    explicit-reference-boost: ${QUERYWEAVER_CONTEXT_REFERENCE_BOOST:0.35}
+    query-enhance-max-tokens: ${QUERYWEAVER_CONTEXT_ENHANCE_MAX_TOKENS:3000}
+    feasibility-max-tokens: ${QUERYWEAVER_CONTEXT_FEASIBILITY_MAX_TOKENS:2200}
+    general-max-tokens: ${QUERYWEAVER_CONTEXT_GENERAL_MAX_TOKENS:3000}
+    max-result-preview-rows: ${QUERYWEAVER_CONTEXT_RESULT_PREVIEW_ROWS:3}
+    max-result-summary-tokens: ${QUERYWEAVER_CONTEXT_RESULT_MAX_TOKENS:600}
+    fallback-planner-max-tokens: ${QUERYWEAVER_CONTEXT_FALLBACK_PLAN_MAX_TOKENS:500}
+  semantic:
+    matching:
+      metric-term-aliases:
+        gmv:
+          - 成交金额
+          - 交易金额
+  run:
+    recovery-scan-ms: 10000
+    lease-renew-ms: 10000
+  retention:
+    enabled: ${QUERYWEAVER_RETENTION_ENABLED:false}
+    dry-run: ${QUERYWEAVER_RETENTION_DRY_RUN:true}
+    terminal-run-days: ${QUERYWEAVER_RETENTION_TERMINAL_RUN_DAYS:90}
+    batch-size: ${QUERYWEAVER_RETENTION_BATCH_SIZE:100}
+    batch-audit-days: ${QUERYWEAVER_RETENTION_BATCH_AUDIT_DAYS:365}
+    scan-delay-ms: ${QUERYWEAVER_RETENTION_SCAN_DELAY_MS:3600000}
+    lease-duration-seconds: ${QUERYWEAVER_RETENTION_LEASE_DURATION_SECONDS:600}
+  concurrency:
+    interactive-query:
+      max-concurrent: 20
+      queue-capacity: 100
+      queue-timeout-ms: 5000
+      task-timeout-ms: 150000
+    initialization:
+      max-concurrent: 4
+      queue-capacity: 20
+      queue-timeout-ms: 10000
+      task-timeout-ms: 600000
+    evaluation:
+      max-concurrent: 2
+      queue-capacity: 20
+      queue-timeout-ms: 10000
+      task-timeout-ms: 600000
+    sql-execution:
+      max-concurrent: 30
+      queue-capacity: 100
+      queue-timeout-ms: 5000
+      task-timeout-ms: 120000
+    sql-limits:
+      global-max-concurrent: 30
+      default-per-datasource: 5
+      default-per-project: 10
+      default-per-user: 3
+      acquire-timeout-ms: 5000
+      failure-threshold: 5
+      circuit-open-ms: 30000
+
+spring:
+  datasource:
+    url: ${QUERYWEAVER_DATASOURCE_URL}
+    username: ${QUERYWEAVER_DATASOURCE_USERNAME}
+    password: ${QUERYWEAVER_DATASOURCE_PASSWORD:}
+    driver-class-name: ${QUERYWEAVER_DATASOURCE_DRIVER:org.postgresql.Driver}
+    type: com.alibaba.druid.pool.DruidDataSource
+    validation-query: SELECT 1
+    test-while-idle: true
+    test-on-borrow: false
+    test-on-return: false
+  flyway:
+    enabled: ${QUERYWEAVER_FLYWAY_ENABLED:true}
+    locations: classpath:db/migration/{vendor}
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-on-migrate: true
+    validate-migration-naming: true
+    clean-disabled: true
+    out-of-order: false
+    connect-retries: 10
+  ai:
+    mcp:
+      server:
+        enabled: ${QUERYWEAVER_MCP_ENABLED:true}
+        name: queryweaver-project-data
+        version: 1.0.0
+        protocol: STREAMABLE
+        type: ASYNC
+        tool-callback-converter: false
+        annotation-scanner:
+          enabled: false
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: ${QUERYWEAVER_MCP_ENDPOINT:/mcp}
+  codec:
+    max-in-memory-size: ${QUERYWEAVER_HTTP_MAX_IN_MEMORY_SIZE:12MB}
+  webflux:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+      enabled: true
+
+cn:
+  lgs:
+    queryweaver:
+      llm-service-type: stream
+      code-executor:
+        code-pool-executor: ${QUERYWEAVER_CODE_EXECUTOR:docker}
+        remote-url: ${QUERYWEAVER_EXECUTION_REMOTE_URL:}
+        internal-token: ${QUERYWEAVER_EXECUTION_INTERNAL_TOKEN:}
+        max-code-bytes: ${QUERYWEAVER_EXECUTION_MAX_CODE_BYTES:1048576}
+        max-input-bytes: ${QUERYWEAVER_EXECUTION_MAX_INPUT_BYTES:5242880}
+        max-requirement-bytes: ${QUERYWEAVER_EXECUTION_MAX_REQUIREMENT_BYTES:65536}
+        pids-limit: ${QUERYWEAVER_EXECUTION_PIDS_LIMIT:64}
+        run-as-user: ${QUERYWEAVER_EXECUTION_RUN_AS_USER:65534:65534}
+        read-only-root-filesystem: ${QUERYWEAVER_EXECUTION_READ_ONLY_ROOT:true}
+        tmpfs-size-mb: ${QUERYWEAVER_EXECUTION_TMPFS_SIZE_MB:128}
+        python-max-tries-count: 5
+      file:
+        type: ${QUERYWEAVER_FILE_TYPE:local}
+        path-prefix: queryweaver
+        path: uploads
+        imageSize: 2097152
+        oss:
+          access-key-id: ${OSS_ACCESS_KEY_ID:}
+          access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+          endpoint: ${OSS_ENDPOINT:}
+          bucket-name: ${OSS_BUCKET_NAME:}
+          custom-domain: ${OSS_CUSTOM_DOMAIN:}
+      max-sql-retry-count: 10
+      sql-execution:
+        max-rows: 1000
+        query-timeout-seconds: 30
+        max-sql-length: 100000
+        explain-enabled: true
+        preview-enabled: true
+        preview-rows: 50
+        preflight-timeout-seconds: 10
+        max-join-tables: 8
+        max-estimated-rows: 10000000
+        require-time-filter: true
+        max-time-range-days: 366
+        reject-full-table-scan: true
+      langfuse:
+        enabled: ${LANGFUSE_ENABLED:false}
+        host: ${LANGFUSE_HOST:}
+        public-key: ${LANGFUSE_PUBLIC_KEY:}
+        secret-key: ${LANGFUSE_SECRET_KEY:}
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+logging:
+  level:
+    cn.lgs.queryweaver: info
+    org.springframework.jdbc: info
