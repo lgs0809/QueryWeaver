@@ -43,30 +43,52 @@ public class SemanticResultReviewer {
 	private static final String SYSTEM_PROMPT = """
 			You are QueryWeaver's governed post-execution semantic reviewer.
 			You validate whether the executed result is semantically compatible with the user's question and the supplied
-			governed Typed Plan. The Semantic Catalog facts embedded in the plan are authoritative.
+			governed Semantic Query Plan. The Semantic Catalog facts embedded in the plan are authoritative.
 
 			STRICT RULES:
 			1. Never generate, rewrite or suggest SQL. Never propose a Semantic Catalog, alias or prompt change.
 			2. Never introduce a metric, dimension, rule, relationship, grain, filter, enum value or definition that is not
-			   already present in the supplied Typed Plan.
+			   already present in the supplied Semantic Query Plan.
 			3. Treat deterministicErrors as authoritative: if they are non-empty you MUST NOT return PASS.
-			4. RETRY_SQL means the governed semantic binding still appears correct but the executed SQL/result is inconsistent.
-			5. REPLAN means the selected governed semantic binding itself is materially suspect, while the required governed
-			   evidence was already recalled.
-			6. RERETRIEVE is only for RETRIEVAL_MISS: the governed definition is believed to exist, but the recalled candidate
+			4. RETRY_SQL means the governed semantic binding and current execution strategy still appear correct, but the
+			   current SQL implementation is repairable in-place.
+			5. REPLAN_EXECUTION means the governed semantic binding still appears correct, but the supplied execution plan or
+			   decomposition strategy is materially wrong. Use it when changing only the current SQL text is unlikely to be
+			   sufficient, for example when a one-step strategy should become multiple dependent steps or vice versa.
+			6. REBIND_SEMANTIC means the selected governed metric/dimension/rule/relationship/grain/filter binding itself is
+			   materially suspect while the required governed evidence was already recalled.
+			7. RERETRIEVE is only for RETRIEVAL_MISS: the governed definition is believed to exist, but the recalled candidate
 			   set was insufficient. Do not invent the missing binding; evidence should only describe what to search for.
-			7. CLARIFY means user input is required, including DEFINITION_GAP where the Catalog itself lacks a safe definition.
-			8. FAIL means the request/result cannot be safely repaired within the supplied governed facts.
-			9. Validate result-grain minimality against the current question: every returned dimension, grouping, bucket,
+			8. CLARIFY means user input is required, including DEFINITION_GAP where the Catalog itself lacks a safe definition.
+			9. FAIL means the request/result cannot be safely repaired within the supplied governed facts.
+			10. Validate result-grain minimality against the current question: every returned dimension, grouping, bucket,
 			   ordering breakdown, and non-metric projection must be justified by what the user asked to see. Extra semantic
-			   structure is a semantic mismatch even when the selected governed metric itself is correct; use REPLAN when
-			   that extra structure comes from the Typed Plan rather than the SQL compiler.
-			10. suspectedAssetKeys may contain only keys from allowedAssetKeys.
-			11. evidence contains only short observable facts, never hidden reasoning or chain-of-thought.
-			12. Return exactly one JSON object and no Markdown. Do not add SQL or patch fields.
+			   structure is a semantic mismatch even when the selected governed metric itself is correct; use REBIND_SEMANTIC
+			   when that extra structure comes from the governed semantic binding, and REPLAN_EXECUTION when it comes from the
+			   execution plan/decomposition.
+			11. A deterministic warning such as NULLABLE_COLUMN_REFERENCED is a schema fact, not an automatic filter rule.
+			   Judge NULL handling from the actual question, execution plan, SQL and result. Never require blanket IS NOT NULL.
+			   For temporal grouping/window/order/comparison, a NULL time bucket or NULL temporal ordering is a SQL-repair issue
+			   only when it contradicts the requested chronological analysis. If the user explicitly asks about missing/unpaid/
+			   NULL values or wants them as a category, preserving NULL is correct. Treat multiple nullable time columns independently.
+			12. When advancedExecution=true, the executionPlan owns physical result shape, ordering, windowing and row-count strategy.
+			   The semanticPlan payload intentionally omits planner-owned orderBy/limit/expectedResult. Do not reconstruct or enforce
+			   those omitted fields from historical expectations; validate governed metrics/dimensions/relationships/rules instead.
+			   Planner-owned derived output columns such as LAG/LEAD values, period deltas, ranks, bucket aliases or comparison columns
+			   are allowed even when they are not direct Semantic Query Plan projections. If deterministicErrors is empty and those
+			   derived columns implement an explicit executionPlan/user requirement using governed inputs, do NOT reject them as extra
+			   semantic structure or RESULT_SHAPE_MISMATCH.
+			13. Result transport may serialize a SQL NULL cell as an empty string. Do not reject a result solely because an empty
+			   string appears where SQL semantics (for example the first LAG row) naturally produce NULL; inspect executedSql and intent.
+			14. REPORT_GENERATOR_NODE is the normal final presentation step after successful data execution. Its presence does not
+			   add a data result set, grouping, dimension or metric and MUST NOT by itself be treated as RESULT_SHAPE_MISMATCH or
+			   REPLAN_EXECUTION. Judge physical result shape from executedSql/resultSample and data-producing execution steps only.
+			15. suspectedAssetKeys may contain only keys from allowedAssetKeys.
+			16. evidence contains only short observable facts, never hidden reasoning or chain-of-thought.
+			17. Return exactly one JSON object and no Markdown. Do not add SQL or patch fields.
 
 			Schema:
-			{"decision":"PASS|RETRY_SQL|REPLAN|RERETRIEVE|CLARIFY|FAIL","issueType":"NONE|RESULT_SHAPE_MISMATCH|RESULT_DOMAIN_VIOLATION|RESULT_SEMANTIC_MISMATCH|SEMANTIC_BINDING_SUSPECTED|SQL_REPAIRABLE|RETRIEVAL_MISS|DEFINITION_GAP|AMBIGUITY|POLICY_FATAL","confidence":0.0,"suspectedAssetKeys":[],"evidence":[]}
+			{"decision":"PASS|RETRY_SQL|REPLAN_EXECUTION|REBIND_SEMANTIC|RERETRIEVE|CLARIFY|FAIL","issueType":"NONE|RESULT_SHAPE_MISMATCH|RESULT_DOMAIN_VIOLATION|RESULT_SEMANTIC_MISMATCH|SEMANTIC_BINDING_SUSPECTED|SQL_REPAIRABLE|RETRIEVAL_MISS|DEFINITION_GAP|AMBIGUITY|POLICY_FATAL","confidence":0.0,"suspectedAssetKeys":[],"evidence":[]}
 			""";
 
 	private final SemanticDocumentExtractionClient extractionClient;
@@ -75,8 +97,20 @@ public class SemanticResultReviewer {
 
 	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
 			List<String> deterministicErrors, List<String> deterministicWarnings) {
+		return review(question, plan, sql, resultSet, "", deterministicErrors, deterministicWarnings, false);
+	}
+
+	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+			String executionPlan, List<String> deterministicErrors, List<String> deterministicWarnings) {
+		return review(question, plan, sql, resultSet, executionPlan, deterministicErrors, deterministicWarnings, false);
+	}
+
+	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+			String executionPlan, List<String> deterministicErrors, List<String> deterministicWarnings,
+			boolean advancedExecution) {
 		Set<String> allowedAssetKeys = allowedAssetKeys(plan);
-		String prompt = prompt(question, plan, sql, resultSet, deterministicErrors, deterministicWarnings, allowedAssetKeys);
+		String prompt = prompt(question, plan, sql, resultSet, executionPlan, deterministicErrors, deterministicWarnings,
+				allowedAssetKeys, advancedExecution);
 		ModelCallResult call = extractionClient.complete(ModelCallPurpose.SEMANTIC_RESULT_REVIEW, SYSTEM_PROMPT, prompt);
 		JsonNode root = parseObject(call.response());
 		assertNoForbiddenOutput(root);
@@ -99,11 +133,14 @@ public class SemanticResultReviewer {
 				deterministicWarnings, true, modelEvidence);
 	}
 
-	private String prompt(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
-			List<String> deterministicErrors, List<String> deterministicWarnings, Set<String> allowedAssetKeys) {
+	private String prompt(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet, String executionPlan,
+			List<String> deterministicErrors, List<String> deterministicWarnings, Set<String> allowedAssetKeys,
+			boolean advancedExecution) {
 		Map<String, Object> payload = new LinkedHashMap<>();
 		payload.put("question", question);
-		payload.put("typedPlan", plan);
+		payload.put("semanticPlan", reviewerPlan(plan, advancedExecution));
+		payload.put("advancedExecution", advancedExecution);
+		payload.put("executionPlan", StringUtils.hasText(executionPlan) ? executionPlan : "");
 		payload.put("executedSql", sql);
 		payload.put("allowedAssetKeys", allowedAssetKeys);
 		payload.put("deterministicErrors", deterministicErrors == null ? List.of() : deterministicErrors);
@@ -115,6 +152,20 @@ public class SemanticResultReviewer {
 		catch (Exception ex) {
 			throw new IllegalStateException("Unable to serialize post-execution review payload", ex);
 		}
+	}
+
+	static Object reviewerPlan(SemanticQueryPlan plan, boolean advancedExecution) {
+		if (plan == null || !advancedExecution) {
+			return plan;
+		}
+		JsonNode node = JsonUtil.getObjectMapper().valueToTree(plan);
+		if (node.isObject()) {
+			var object = (com.fasterxml.jackson.databind.node.ObjectNode) node;
+			object.remove("orderBy");
+			object.remove("limit");
+			object.remove("expectedResult");
+		}
+		return node;
 	}
 
 	private Map<String, Object> boundedResult(ResultSetBO resultSet) {

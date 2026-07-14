@@ -23,6 +23,7 @@ import cn.lgs.queryweaver.semantic.domain.BusinessQueryScenario;
 import cn.lgs.queryweaver.semantic.domain.BusinessQueryScenarioRepository;
 import cn.lgs.queryweaver.semantic.domain.ProjectEvidence;
 import cn.lgs.queryweaver.semantic.domain.ProjectEvidenceRepository;
+import cn.lgs.queryweaver.semantic.domain.RelationshipCardinality;
 import cn.lgs.queryweaver.semantic.domain.ScenarioResolution;
 import cn.lgs.queryweaver.semantic.domain.ScenarioResolution.Status;
 import cn.lgs.queryweaver.semantic.domain.ScenarioResolutionRepository;
@@ -40,6 +41,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
@@ -55,6 +57,7 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -75,7 +78,10 @@ public class ScenarioResolutionService {
 
 	private static final int STRONG_AUTO_BIND_SCORE = 90;
 
-	private static final Set<String> DERIVED_METRIC_AGGREGATIONS = Set.of("SUM", "AVG", "MIN", "MAX");
+	private static final Set<String> DERIVED_METRIC_AGGREGATIONS = Set.of("SUM", "AVG", "MIN", "MAX", "COUNT",
+			"COUNT_DISTINCT");
+
+	private static final Set<String> RELATIONSHIP_JOIN_TYPES = Set.of("INNER", "LEFT", "RIGHT", "FULL");
 
 	private static final Pattern DERIVED_METRIC_TOKEN = Pattern
 		.compile("\\s*([A-Za-z_][A-Za-z0-9_$]*|\\d+(?:\\.\\d+)?|[()+\\-*/])\\s*");
@@ -133,7 +139,12 @@ public class ScenarioResolutionService {
 			}
 			if ("MISSING_REQUIRED_SEMANTIC".equals(gap.getGapType())) {
 				applyMissingSemanticDefinition(gap, gapEvidence, response, other);
+				ManualBinding createdBinding = createdDefinitionBinding(response.path("definition"), other);
 				for (GapTargetRef target : gapTargets(gapEvidence)) {
+					ScenarioResolution current = get(target.scenarioId());
+					Map<String, ManualBinding> manual = readManualBindings(current.getManualBindingsJson());
+					manual.put(target.requirementKey(), createdBinding);
+					resolutionRepository.updateManualBindings(target.scenarioId(), json(manual));
 					refreshScenario(target.scenarioId());
 				}
 				return;
@@ -192,22 +203,22 @@ public class ScenarioResolutionService {
 		}
 
 		for (String measure : requirement.measures()) {
-			resolveProbe(scenario, probe("MEASURE", measure, metricCandidates(measure, catalog, evidence)), manual,
+			resolveProbe(scenario, probe("MEASURE", measure, metricCandidates(measure, catalog, evidence)), manual, catalog,
 					resolved, candidateBindings, unresolved, requiredModels);
 		}
 		for (String attribute : distinct(requirement.attributes(), requirement.groupings())) {
 			resolveProbe(scenario, probe("DIMENSION", attribute, dimensionCandidates(attribute, catalog, evidence)),
-					manual, resolved, candidateBindings, unresolved, requiredModels);
+					manual, catalog, resolved, candidateBindings, unresolved, requiredModels);
 		}
 		for (String filter : requirement.filters()) {
-			resolveProbe(scenario, probe("FILTER", filter, filterCandidates(filter, catalog, evidence)), manual,
+			resolveProbe(scenario, probe("FILTER", filter, filterCandidates(filter, catalog, evidence)), manual, catalog,
 					resolved, candidateBindings, unresolved, requiredModels);
 		}
 		for (String sorting : requirement.sorting()) {
 			List<BindingCandidate> candidates = new ArrayList<>();
 			candidates.addAll(metricCandidates(sorting, catalog, evidence));
 			candidates.addAll(dimensionCandidates(sorting, catalog, evidence));
-			resolveProbe(scenario, probe("SORTING", sorting, bestCandidates(candidates)), manual, resolved,
+			resolveProbe(scenario, probe("SORTING", sorting, bestCandidates(candidates)), manual, catalog, resolved,
 					candidateBindings, unresolved, requiredModels);
 		}
 
@@ -215,14 +226,29 @@ public class ScenarioResolutionService {
 			String timeRequirement = String.join("；", requirement.timeConstraints());
 			resolveProbe(scenario,
 					probe("TIME", timeRequirement, timeCandidates(catalog, resolved, requiredModels, evidence, timeRequirement)),
-					manual, resolved, candidateBindings, unresolved, requiredModels);
+					manual, catalog, resolved, candidateBindings, unresolved, requiredModels);
 		}
 
-		if (requiredModels.size() > 1 && !connected(requiredModels, catalog.getRelationships())) {
+		if (requiredModels.size() > 1) {
 			RequirementProbe relationship = probe("RELATIONSHIP", String.join("、", requiredModels), List.of());
-			candidateBindings.add(relationship);
-			unresolved.add(new UnresolvedRequirement(relationship.requirementKey(), relationship.requirementType(),
-					relationship.requirementText(), "MISSING_REQUIRED_SEMANTIC", "所需业务资产跨模型但当前没有可验证的关系路径"));
+			ManualBinding selectedRelationship = manual.get(relationship.requirementKey());
+			if (!connected(requiredModels, catalog.getRelationships())) {
+				candidateBindings.add(relationship);
+				unresolved.add(new UnresolvedRequirement(relationship.requirementKey(), relationship.requirementType(),
+						relationship.requirementText(), "MISSING_REQUIRED_SEMANTIC", "所需业务资产跨模型但当前没有可验证的关系路径"));
+			}
+			else if (selectedRelationship != null && "RELATIONSHIP".equals(selectedRelationship.assetType())) {
+				BindingCandidate selectedCandidate = manualCatalogCandidate(selectedRelationship, catalog);
+				if (selectedCandidate == null) {
+					candidateBindings.add(relationship);
+					unresolved.add(new UnresolvedRequirement(relationship.requirementKey(), relationship.requirementType(),
+							relationship.requirementText(), "MISSING_REQUIRED_SEMANTIC",
+							"用户确认的关系已不存在或未启用：" + selectedRelationship.assetKey()));
+				}
+				else {
+					addResolved(relationship, selectedCandidate, "MANUAL", resolved, requiredModels);
+				}
+			}
 		}
 
 		Status status = unresolved.stream().anyMatch(value -> "UNSUPPORTED_QUERY_CAPABILITY".equals(value.reason()))
@@ -257,8 +283,8 @@ public class ScenarioResolutionService {
 	}
 
 	private void resolveProbe(BusinessQueryScenario scenario, RequirementProbe probe, Map<String, ManualBinding> manual,
-			List<ResolvedBinding> resolved, List<RequirementProbe> candidates, List<UnresolvedRequirement> unresolved,
-			Set<String> requiredModels) {
+			SemanticCatalogSnapshot catalog, List<ResolvedBinding> resolved, List<RequirementProbe> candidates,
+			List<UnresolvedRequirement> unresolved, Set<String> requiredModels) {
 		candidates.add(probe);
 		ManualBinding selected = manual.get(probe.requirementKey());
 		if (selected != null && selected.other()) {
@@ -272,7 +298,7 @@ public class ScenarioResolutionService {
 				.filter(candidate -> Objects.equals(candidate.assetType(), selected.assetType())
 						&& Objects.equals(candidate.assetKey(), selected.assetKey()))
 				.findFirst()
-				.orElse(null);
+				.orElseGet(() -> manualCatalogCandidate(selected, catalog));
 			if (manualCandidate != null) {
 				addResolved(probe, manualCandidate, "MANUAL", resolved, requiredModels);
 				return;
@@ -292,12 +318,126 @@ public class ScenarioResolutionService {
 				reason, detail));
 	}
 
+	private BindingCandidate manualCatalogCandidate(ManualBinding selected, SemanticCatalogSnapshot catalog) {
+		if (selected == null || catalog == null || !hasText(selected.assetType()) || !hasText(selected.assetKey())) {
+			return null;
+		}
+		return switch (selected.assetType()) {
+			case "METRIC" -> catalog.getMetrics()
+				.stream()
+				.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
+				.filter(asset -> selected.assetKey().equals(asset.getMetricCode()))
+				.findFirst()
+				.map(asset -> new BindingCandidate("METRIC", asset.getMetricCode(),
+						firstText(asset.getBusinessName(), asset.getMetricCode()), asset.getModelCode(),
+						firstText(selected.optionLabel(), asset.getBusinessName(), asset.getMetricCode()), 100,
+						"manual binding to enabled Catalog metric"))
+				.orElse(null);
+			case "DIMENSION" -> catalog.getDimensions()
+				.stream()
+				.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
+				.filter(asset -> selected.assetKey().equals(asset.getDimensionCode()))
+				.findFirst()
+				.map(asset -> new BindingCandidate("DIMENSION", asset.getDimensionCode(),
+						firstText(asset.getBusinessName(), asset.getDimensionCode()), asset.getModelCode(),
+						firstText(selected.optionLabel(), asset.getBusinessName(), asset.getDimensionCode()), 100,
+						"manual binding to enabled Catalog dimension"))
+				.orElse(null);
+			case "RULE" -> catalog.getRules()
+				.stream()
+				.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
+				.filter(asset -> selected.assetKey().equals(asset.getRuleCode()))
+				.findFirst()
+				.map(asset -> new BindingCandidate("RULE", asset.getRuleCode(),
+						firstText(asset.getBusinessName(), asset.getRuleCode()), asset.getModelCode(),
+						firstText(selected.optionLabel(), asset.getBusinessName(), asset.getRuleCode()), 100,
+						"manual binding to enabled Catalog rule"))
+				.orElse(null);
+			case "ENUM_VALUE" -> catalog.getEnumValues()
+				.stream()
+				.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
+				.filter(asset -> selected.assetKey().equals(enumKey(asset)))
+				.findFirst()
+				.map(asset -> new BindingCandidate("ENUM_VALUE", enumKey(asset),
+						firstText(asset.getBusinessName(), asset.getValueCode()), asset.getModelCode(),
+						firstText(selected.optionLabel(), asset.getBusinessName(), asset.getValueCode()), 100,
+						"manual binding to enabled Catalog enum value"))
+				.orElse(null);
+			case "TIME_COLUMN" -> catalog.getColumns()
+				.stream()
+				.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
+				.filter(asset -> asset.getRole() == SemanticColumnRole.TIME)
+				.filter(asset -> selected.assetKey().equals(asset.getModelCode() + ":" + asset.getColumnName()))
+				.findFirst()
+				.map(asset -> new BindingCandidate("TIME_COLUMN", selected.assetKey(),
+						firstText(asset.getBusinessName(), asset.getColumnName()), asset.getModelCode(),
+						firstText(selected.optionLabel(), asset.getBusinessName(), asset.getColumnName()), 100,
+						"manual binding to enabled Catalog time column"))
+				.orElse(null);
+			case "RELATIONSHIP" -> catalog.getRelationships()
+				.stream()
+				.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
+				.filter(asset -> selected.assetKey().equals(asset.getRelationshipCode()))
+				.findFirst()
+				.map(asset -> new BindingCandidate("RELATIONSHIP", asset.getRelationshipCode(), asset.getRelationshipCode(),
+						asset.getSourceModelCode(), firstText(selected.optionLabel(), asset.getRelationshipCode()), 100,
+						"manual binding to enabled Catalog relationship"))
+				.orElse(null);
+			default -> null;
+		};
+	}
+
 	private void addResolved(RequirementProbe probe, BindingCandidate candidate, String source,
 			List<ResolvedBinding> resolved, Set<String> requiredModels) {
 		resolved.add(new ResolvedBinding(probe.requirementKey(), probe.requirementType(), probe.requirementText(),
 				candidate.assetType(), candidate.assetKey(), candidate.businessName(), candidate.modelCode(), source));
 		if (hasText(candidate.modelCode())) {
 			requiredModels.add(candidate.modelCode());
+		}
+	}
+
+	private ManualBinding createdDefinitionBinding(JsonNode definition, String other) {
+		String definitionType = requiredText(definition, "type");
+		if ("EXISTING_ASSET".equals(definitionType)) {
+			return new ManualBinding(requiredText(definition, "assetType"), requiredText(definition, "assetKey"), other,
+					false);
+		}
+		if ("DERIVED_METRIC".equals(definitionType)) {
+			String metricCode = requiredText(definition, "metricCode");
+			String businessName = optionalText(definition, "businessName");
+			return new ManualBinding("METRIC", metricCode, hasText(businessName) ? businessName : other, false);
+		}
+		if ("ENUM_SET_FILTER".equals(definitionType)) {
+			String ruleCode = requiredText(definition, "ruleCode");
+			String businessName = optionalText(definition, "businessName");
+			return new ManualBinding("RULE", ruleCode, hasText(businessName) ? businessName : other, false);
+		}
+		if ("RELATIONSHIP".equals(definitionType)) {
+			String relationshipCode = requiredText(definition, "relationshipCode");
+			return new ManualBinding("RELATIONSHIP", relationshipCode, relationshipCode, false);
+		}
+		throw new IllegalArgumentException("Unsupported missing semantic definition type: " + definitionType);
+	}
+
+	private void validateExistingAssetDefinition(String requirementType, SemanticGap gap, JsonNode definition) {
+		String assetType = requiredText(definition, "assetType");
+		String assetKey = requiredText(definition, "assetKey");
+		Set<String> allowedTypes = switch (requirementType) {
+			case "MEASURE" -> Set.of("METRIC");
+			case "DIMENSION" -> Set.of("DIMENSION");
+			case "FILTER" -> Set.of("DIMENSION", "RULE", "ENUM_VALUE");
+			case "TIME" -> Set.of("TIME_COLUMN");
+			case "SORTING" -> Set.of("METRIC", "DIMENSION");
+			case "RELATIONSHIP" -> Set.of("RELATIONSHIP");
+			default -> Set.of();
+		};
+		if (!allowedTypes.contains(assetType)) {
+			throw new IllegalArgumentException(
+					"Existing Catalog asset type " + assetType + " is not valid for requirement type " + requirementType);
+		}
+		SemanticCatalogSnapshot catalog = catalogRepository.loadCatalog(gap.getProjectId(), gap.getProjectVersionId());
+		if (manualCatalogCandidate(new ManualBinding(assetType, assetKey, assetKey, false), catalog) == null) {
+			throw new IllegalArgumentException("Existing Catalog asset is missing or disabled: " + assetType + ":" + assetKey);
 		}
 	}
 
@@ -309,13 +449,21 @@ public class ScenarioResolutionService {
 			throw new IllegalArgumentException("缺失语义必须提供可验证的 definition，不能只提交自由文本");
 		}
 		String definitionType = requiredText(definition, "type");
+		if ("EXISTING_ASSET".equals(definitionType)) {
+			validateExistingAssetDefinition(requirementType, gap, definition);
+			return;
+		}
 		if ("MEASURE".equals(requirementType) && "DERIVED_METRIC".equals(definitionType)) {
 			applyDerivedMetricDefinition(gap, response, definition, other);
 			return;
 		}
+		if ("RELATIONSHIP".equals(requirementType) && "RELATIONSHIP".equals(definitionType)) {
+			applyRelationshipDefinition(gap, response, definition);
+			return;
+		}
 		if (!"FILTER".equals(requirementType) || !"ENUM_SET_FILTER".equals(definitionType)) {
 			throw new IllegalArgumentException(
-					"当前缺失语义仅支持 FILTER/ENUM_SET_FILTER 或 MEASURE/DERIVED_METRIC 的结构化定义");
+					"Unsupported structured definition for missing semantic requirement type " + requirementType);
 		}
 		String modelCode = requiredText(definition, "modelCode");
 		String columnName = requiredText(definition, "columnName");
@@ -388,6 +536,78 @@ public class ScenarioResolutionService {
 		catalogRepository.replaceCatalog(catalog);
 	}
 
+	private void applyRelationshipDefinition(SemanticGap gap, JsonNode response, JsonNode definition) {
+		String relationshipCode = requiredText(definition, "relationshipCode");
+		if (!relationshipCode.matches("[A-Za-z][A-Za-z0-9_]{0,127}")) {
+			throw new IllegalArgumentException(
+					"relationshipCode must be a stable identifier using letters, digits, and underscores");
+		}
+		String sourceModelCode = requiredText(definition, "sourceModelCode");
+		String sourceColumn = requiredText(definition, "sourceColumn");
+		String targetModelCode = requiredText(definition, "targetModelCode");
+		String targetColumn = requiredText(definition, "targetColumn");
+		if (sourceModelCode.equals(targetModelCode)) {
+			throw new IllegalArgumentException("Relationship must connect two different semantic models");
+		}
+		String joinType = requiredText(definition, "joinType").toUpperCase(Locale.ROOT);
+		if (!RELATIONSHIP_JOIN_TYPES.contains(joinType)) {
+			throw new IllegalArgumentException("Unsupported relationship joinType: " + joinType);
+		}
+		RelationshipCardinality cardinality;
+		try {
+			cardinality = RelationshipCardinality.valueOf(requiredText(definition, "cardinality").toUpperCase(Locale.ROOT));
+		}
+		catch (IllegalArgumentException ex) {
+			throw new IllegalArgumentException("Unsupported relationship cardinality", ex);
+		}
+		SemanticCatalogSnapshot catalog = catalogRepository.loadCatalog(gap.getProjectId(), gap.getProjectVersionId());
+		requireEnabledModel(catalog, sourceModelCode);
+		requireEnabledModel(catalog, targetModelCode);
+		requireEnabledColumn(catalog, sourceModelCode, sourceColumn);
+		requireEnabledColumn(catalog, targetModelCode, targetColumn);
+		LocalDateTime now = LocalDateTime.now();
+		SemanticCatalogSnapshot.Relationship relationship = SemanticCatalogSnapshot.Relationship.builder()
+			.projectId(gap.getProjectId())
+			.projectVersionId(gap.getProjectVersionId())
+			.relationshipCode(relationshipCode)
+			.sourceModelCode(sourceModelCode)
+			.targetModelCode(targetModelCode)
+			.cardinality(cardinality)
+			.joinType(joinType)
+			.joinCondition(sourceModelCode + "." + sourceColumn + " = " + targetModelCode + "." + targetColumn)
+			.description(firstText(optionalText(definition, "description"), "Grill-Me confirmed semantic relationship"))
+			.evidence(answerEvidence(gap, response))
+			.status(SemanticAssetStatus.ENABLED)
+			.createTime(now)
+			.updateTime(now)
+			.build();
+		catalog.getRelationships().removeIf(existing -> relationshipCode.equals(existing.getRelationshipCode()));
+		catalog.getRelationships().add(relationship);
+		catalogRepository.replaceCatalog(catalog);
+	}
+
+	private void requireEnabledModel(SemanticCatalogSnapshot catalog, String modelCode) {
+		boolean exists = catalog.getModels()
+			.stream()
+			.anyMatch(model -> model.getStatus() == SemanticAssetStatus.ENABLED && modelCode.equals(model.getModelCode()));
+		if (!exists) {
+			throw new IllegalArgumentException("Semantic model not found for Grill-Me relationship: " + modelCode);
+		}
+	}
+
+	private void requireEnabledColumn(SemanticCatalogSnapshot catalog, String modelCode, String columnName) {
+		if (!columnName.matches("[A-Za-z_][A-Za-z0-9_$]*")) {
+			throw new IllegalArgumentException("Unsafe relationship column identifier: " + columnName);
+		}
+		boolean exists = catalog.getColumns()
+			.stream()
+			.anyMatch(column -> column.getStatus() == SemanticAssetStatus.ENABLED && modelCode.equals(column.getModelCode())
+					&& columnName.equals(column.getColumnName()));
+		if (!exists) {
+			throw new IllegalArgumentException("Governed relationship column not found: " + modelCode + "." + columnName);
+		}
+	}
+
 	private void applyDerivedMetricDefinition(SemanticGap gap, JsonNode response, JsonNode definition, String other) {
 		String metricCode = requiredText(definition, "metricCode");
 		if (!metricCode.matches("[A-Za-z][A-Za-z0-9_]{0,127}")) {
@@ -397,7 +617,8 @@ public class ScenarioResolutionService {
 		String expression = requiredText(definition, "expression");
 		String aggregation = requiredText(definition, "aggregation").toUpperCase(Locale.ROOT);
 		if (!DERIVED_METRIC_AGGREGATIONS.contains(aggregation)) {
-			throw new IllegalArgumentException("DERIVED_METRIC aggregation must be one of SUM, AVG, MIN, MAX");
+			throw new IllegalArgumentException(
+					"DERIVED_METRIC aggregation must be one of SUM, AVG, MIN, MAX, COUNT, COUNT_DISTINCT");
 		}
 		SemanticCatalogSnapshot catalog = catalogRepository.loadCatalog(gap.getProjectId(), gap.getProjectVersionId());
 		boolean modelExists = catalog.getModels()
@@ -406,9 +627,11 @@ public class ScenarioResolutionService {
 		if (!modelExists) {
 			throw new IllegalArgumentException("Semantic model not found for Grill-Me metric definition: " + modelCode);
 		}
-		Set<String> expressionColumns = validateDerivedMetricExpression(expression, modelCode, catalog);
+		Set<String> expressionColumns = Set.of("COUNT", "COUNT_DISTINCT").contains(aggregation)
+				? validateCountMetricExpression(expression, modelCode, catalog)
+				: validateDerivedMetricExpression(expression, modelCode, catalog);
 		if (expressionColumns.isEmpty()) {
-			throw new IllegalArgumentException("DERIVED_METRIC expression must reference at least one governed measure column");
+			throw new IllegalArgumentException("DERIVED_METRIC expression must reference at least one governed column");
 		}
 		String timeColumn = optionalText(definition, "timeColumn");
 		if (hasText(timeColumn)) {
@@ -453,6 +676,26 @@ public class ScenarioResolutionService {
 		catalog.getMetrics().removeIf(existing -> metricCode.equals(existing.getMetricCode()));
 		catalog.getMetrics().add(metric);
 		catalogRepository.replaceCatalog(catalog);
+	}
+
+	private Set<String> validateCountMetricExpression(String expression, String modelCode,
+			SemanticCatalogSnapshot catalog) {
+		String columnName = expression == null ? "" : expression.trim();
+		if (!columnName.matches("[A-Za-z_][A-Za-z0-9_$]*")) {
+			throw new IllegalArgumentException("COUNT metric expression must be exactly one governed column");
+		}
+		SemanticCatalogSnapshot.Column column = catalog.getColumns()
+			.stream()
+			.filter(candidate -> candidate.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(candidate -> modelCode.equals(candidate.getModelCode()) && columnName.equals(candidate.getColumnName()))
+			.findFirst()
+			.orElseThrow(() -> new IllegalArgumentException(
+					"COUNT metric expression references an unknown governed column: " + modelCode + "." + columnName));
+		if (!Boolean.TRUE.equals(column.getAllowAggregation())) {
+			throw new IllegalArgumentException("COUNT metric column is not allowed for aggregation: " + modelCode + "."
+					+ columnName);
+		}
+		return Set.of(columnName);
 	}
 
 	private Set<String> validateDerivedMetricExpression(String expression, String modelCode,
@@ -529,13 +772,70 @@ public class ScenarioResolutionService {
 
 	private List<BindingCandidate> metricCandidates(String term, SemanticCatalogSnapshot catalog,
 			List<ProjectEvidence> evidence) {
-		return bestCandidates(catalog.getMetrics()
+		List<BindingCandidate> values = new ArrayList<>(catalog.getMetrics()
 			.stream()
 			.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
 			.map(asset -> candidate("METRIC", asset.getMetricCode(), asset.getBusinessName(), asset.getModelCode(),
 					asset.getDescription(), asset.getEvidence(), term, evidence))
 			.filter(candidate -> candidate.score() >= 80)
 			.toList());
+		values.addAll(entityCountMetricCandidates(term, catalog));
+		return bestCandidates(values);
+	}
+
+	private List<BindingCandidate> entityCountMetricCandidates(String term, SemanticCatalogSnapshot catalog) {
+		Set<String> matchedModels = catalog.getModels()
+			.stream()
+			.filter(model -> model.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(model -> entityTermMatches(term, model))
+			.map(SemanticCatalogSnapshot.Model::getModelCode)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		if (matchedModels.size() != 1) {
+			return List.of();
+		}
+		String modelCode = matchedModels.iterator().next();
+		Set<String> grainKeys = catalog.getGrains()
+			.stream()
+			.filter(grain -> grain.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(grain -> modelCode.equals(grain.getModelCode()))
+			.map(SemanticCatalogSnapshot.Grain::getKeyColumns)
+			.filter(this::hasText)
+			.flatMap(value -> Arrays.stream(value.split(",")))
+			.map(String::trim)
+			.filter(this::hasText)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		return catalog.getMetrics()
+			.stream()
+			.filter(metric -> metric.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(metric -> modelCode.equals(metric.getModelCode()))
+			.filter(metric -> Set.of("COUNT", "COUNT_DISTINCT").contains(
+					Objects.toString(metric.getAggregation(), "").toUpperCase(Locale.ROOT)))
+			.filter(metric -> grainKeys.contains(metric.getExpression()))
+			.map(metric -> new BindingCandidate("METRIC", metric.getMetricCode(),
+					firstText(metric.getBusinessName(), metric.getMetricCode()), metric.getModelCode(),
+					optionLabel(firstText(metric.getBusinessName(), metric.getMetricCode()), metric.getDescription(),
+							metric.getModelCode()),
+					95, "entity name deterministically maps to the governed primary-grain count metric"))
+			.toList();
+	}
+
+	private boolean entityTermMatches(String term, SemanticCatalogSnapshot.Model model) {
+		String normalizedTerm = singularEnglish(normalize(term));
+		if (!hasText(normalizedTerm)) {
+			return false;
+		}
+		return Stream.of(model.getBusinessName(), model.getModelCode(), model.getPhysicalTable())
+			.map(this::normalize)
+			.map(this::singularEnglish)
+			.filter(this::hasText)
+			.anyMatch(value -> value.equals(normalizedTerm) || value.endsWith(normalizedTerm));
+	}
+
+	private String singularEnglish(String value) {
+		if (value != null && value.matches("[a-z0-9_]*[a-z]s") && value.length() > 3 && !value.endsWith("ss")) {
+			return value.substring(0, value.length() - 1);
+		}
+		return value;
 	}
 
 	private List<BindingCandidate> dimensionCandidates(String term, SemanticCatalogSnapshot catalog,
@@ -565,6 +865,18 @@ public class ScenarioResolutionService {
 			.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
 			.map(asset -> candidate("ENUM_VALUE", enumKey(asset), asset.getBusinessName(), asset.getModelCode(),
 					joinText(asset.getAliases(), asset.getDescription()), asset.getEvidence(), term, evidence))
+			.filter(candidate -> candidate.score() >= 80)
+			.forEach(values::add);
+		catalog.getDimensions()
+			.stream()
+			.filter(asset -> asset.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(asset -> catalog.getColumns()
+				.stream()
+				.anyMatch(column -> column.getStatus() == SemanticAssetStatus.ENABLED
+						&& asset.getModelCode().equals(column.getModelCode())
+						&& asset.getColumnName().equals(column.getColumnName()) && Boolean.TRUE.equals(column.getAllowFilter())))
+			.map(asset -> candidate("DIMENSION", asset.getDimensionCode(), asset.getBusinessName(), asset.getModelCode(),
+					joinText(asset.getDescription(), asset.getHierarchy()), asset.getEvidence(), term, evidence))
 			.filter(candidate -> candidate.score() >= 80)
 			.forEach(values::add);
 		return bestCandidates(values);
@@ -730,7 +1042,7 @@ public class ScenarioResolutionService {
 			return true;
 		}
 		return "MISSING_REQUIRED_SEMANTIC".equals(unresolved.reason())
-				&& !Set.of("RELATIONSHIP", "CAPABILITY").contains(unresolved.requirementType());
+				&& !"CAPABILITY".equals(unresolved.requirementType());
 	}
 
 	private String gapRoot(ScenarioGapTarget target) {

@@ -128,7 +128,7 @@ public class QueryWeaverConfiguration {
 			// Intent recognition
 			// QUERY_ENHANCE_NODE节点输出
 			keyStrategyHashMap.put(QUERY_ENHANCE_NODE_OUTPUT, KeyStrategy.REPLACE);
-			// Semantic model and deterministic typed plan
+			// Semantic model and deterministic Semantic Query Plan
 			keyStrategyHashMap.put(GENEGRATED_SEMANTIC_MODEL_PROMPT, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(TYPED_SEMANTIC_PLAN, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(CATALOG_HASH, KeyStrategy.REPLACE);
@@ -150,6 +150,8 @@ public class QueryWeaverConfiguration {
 			// sql generate节点输出
 			keyStrategyHashMap.put(SQL_GENERATE_SCHEMA_MISSING_ADVICE, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(SQL_GENERATE_OUTPUT, KeyStrategy.REPLACE);
+			keyStrategyHashMap.put(SQL_PHYSICAL_OUTPUT, KeyStrategy.REPLACE);
+			keyStrategyHashMap.put(SQL_DRY_PLAN_OUTPUT, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(SQL_GENERATE_COUNT, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(SQL_REGENERATE_REASON, KeyStrategy.REPLACE);
 			// Semantic consistence节点输出
@@ -222,7 +224,7 @@ public class QueryWeaverConfiguration {
 
 		stateGraph.addEdge(START, REQUEST_ANALYSIS_NODE)
 			.addConditionalEdges(REQUEST_ANALYSIS_NODE, edge_async(new RequestAnalysisDispatcher()),
-					Map.of(SEMANTIC_PLAN_NODE, SEMANTIC_PLAN_NODE, END, END))
+					Map.of(SEMANTIC_PLAN_NODE, SEMANTIC_PLAN_NODE, REQUEST_SYNTHESIS_NODE, REQUEST_SYNTHESIS_NODE, END, END))
 			.addConditionalEdges(QUERY_ENHANCE_NODE, edge_async(new QueryEnhanceDispatcher()),
 					Map.of(SCHEMA_RECALL_NODE, SCHEMA_RECALL_NODE, END, END))
 			.addConditionalEdges(SCHEMA_RECALL_NODE, edge_async(new SchemaRecallDispatcher()),
@@ -258,9 +260,9 @@ public class QueryWeaverConfiguration {
 					END, END))
 			// Human feedback node routing
 			.addConditionalEdges(HUMAN_FEEDBACK_NODE, edge_async(new HumanFeedbackDispatcher()), Map.of(
-					// Natural-language rejection changes business semantics, so re-plan the Typed Semantic Plan.
+					// Natural-language rejection changes business semantics, so re-plan the Semantic Query Plan.
 					SEMANTIC_PLAN_NODE, SEMANTIC_PLAN_NODE,
-					// Approval continues the same Typed Plan through governed compiler-first execution.
+					// Approval continues the same Semantic Query Plan through governed compiler-first execution.
 					SEMANTIC_EXECUTION_NODE, SEMANTIC_EXECUTION_NODE,
 					// If max repair attempts are reached, end the process
 					END, END))
@@ -273,13 +275,16 @@ public class QueryWeaverConfiguration {
 					Map.of(SQL_GENERATE_NODE, SQL_GENERATE_NODE, END, END, SEMANTIC_CONSISTENCY_NODE,
 							SEMANTIC_CONSISTENCY_NODE))
 			.addConditionalEdges(SEMANTIC_CONSISTENCY_NODE, edge_async(new SemanticConsistenceDispatcher()),
-					Map.of(SQL_GENERATE_NODE, SQL_GENERATE_NODE, SQL_EXECUTE_NODE, SQL_EXECUTE_NODE))
+					Map.of(SQL_GENERATE_NODE, SQL_GENERATE_NODE, SQL_EXECUTE_NODE, SQL_EXECUTE_NODE, PLANNER_NODE,
+							PLANNER_NODE))
 			.addConditionalEdges(SQL_EXECUTE_NODE, edge_async(new SQLExecutorDispatcher()),
-					Map.of(SQL_GENERATE_NODE, SQL_GENERATE_NODE, POST_EXECUTION_REVIEW_NODE, POST_EXECUTION_REVIEW_NODE))
+					Map.of(SQL_GENERATE_NODE, SQL_GENERATE_NODE, PLANNER_NODE, PLANNER_NODE, POST_EXECUTION_REVIEW_NODE,
+							POST_EXECUTION_REVIEW_NODE))
 			.addConditionalEdges(POST_EXECUTION_REVIEW_NODE, edge_async(new PostExecutionReviewDispatcher()),
-					Map.of(PLAN_EXECUTOR_NODE, PLAN_EXECUTOR_NODE, SQL_GENERATE_NODE, SQL_GENERATE_NODE, QUERY_ENHANCE_NODE,
-							QUERY_ENHANCE_NODE, REPORT_GENERATOR_NODE, REPORT_GENERATOR_NODE, TODO_BOUNDARY_NODE,
-							TODO_BOUNDARY_NODE, SEMANTIC_PLAN_NODE, SEMANTIC_PLAN_NODE));
+					Map.of(PLAN_EXECUTOR_NODE, PLAN_EXECUTOR_NODE, PLANNER_NODE, PLANNER_NODE, SQL_GENERATE_NODE,
+							SQL_GENERATE_NODE, QUERY_ENHANCE_NODE, QUERY_ENHANCE_NODE, REPORT_GENERATOR_NODE,
+							REPORT_GENERATOR_NODE, TODO_BOUNDARY_NODE, TODO_BOUNDARY_NODE, SEMANTIC_PLAN_NODE,
+							SEMANTIC_PLAN_NODE));
 
 		GraphRepresentation graphRepresentation = stateGraph.getGraph(GraphRepresentation.Type.PLANTUML,
 				"workflow graph");

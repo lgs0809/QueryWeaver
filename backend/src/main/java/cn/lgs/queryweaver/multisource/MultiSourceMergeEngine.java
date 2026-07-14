@@ -82,9 +82,18 @@ public class MultiSourceMergeEngine {
 		ResultSetBO current = copy(inputs.get(0));
 		for (int inputIndex = 1; inputIndex < inputs.size(); inputIndex++) {
 			ResultSetBO right = inputs.get(inputIndex);
+			if (!safeColumns(current).contains(leftKey)) {
+				throw new IllegalStateException("Left merge input is missing required key column: " + leftKey);
+			}
+			if (!safeColumns(right).contains(rightKey)) {
+				throw new IllegalStateException("Right merge input is missing required key column: " + rightKey);
+			}
 			Map<String, List<Map<String, String>>> rightIndex = new LinkedHashMap<>();
 			for (Map<String, String> row : safeRows(right)) {
-				rightIndex.computeIfAbsent(row.get(rightKey), ignored -> new ArrayList<>()).add(row);
+				String key = row.get(rightKey);
+				if (hasText(key)) {
+					rightIndex.computeIfAbsent(key, ignored -> new ArrayList<>()).add(row);
+				}
 			}
 			Set<String> columns = new LinkedHashSet<>(safeColumns(current));
 			columns.add(outputKey);

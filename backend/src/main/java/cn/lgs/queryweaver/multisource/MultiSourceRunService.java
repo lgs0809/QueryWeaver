@@ -21,6 +21,7 @@ import cn.lgs.queryweaver.run.QueryRunService;
 import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -28,7 +29,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -53,7 +56,7 @@ public class MultiSourceRunService {
 	public MultiSourceRunView initialize(String runId, String executionKey, Long projectId, Long versionId,
 			SemanticQueryPlan plan) {
 		if (plan == null || !plan.isExecutable()) {
-			throw new IllegalArgumentException("An executable typed semantic plan is required");
+			throw new IllegalArgumentException("An executable Semantic Query Plan is required");
 		}
 		if (plan.getSourceSubPlans() == null || plan.getSourceSubPlans().isEmpty()) {
 			throw new IllegalArgumentException("Typed semantic plan has no source subplans");
@@ -178,8 +181,13 @@ public class MultiSourceRunService {
 		return requireSubRun(runId, subRunId);
 	}
 
-@Transactional
+	@Transactional
 	public ResultArtifact merge(String runId, String executionKey) {
+		return merge(runId, executionKey, null);
+	}
+
+	@Transactional
+	public ResultArtifact merge(String runId, String executionKey, SemanticQueryPlan plan) {
 		String scope = requiredExecutionKey(executionKey);
 		MultiSourceRunView view = get(runId, scope);
 		if (view.mergeExecution().status() == MergeStatus.COMPLETED
@@ -211,6 +219,7 @@ public class MultiSourceRunService {
 		List<ResultSetBO> results = inputs.stream().map(this::toResultSet).toList();
 		MergePolicy policy = readMergePolicy(view.mergeExecution());
 		ResultSetBO merged = results.size() == 1 ? results.get(0) : mergeEngine.merge(policy, results);
+		merged = shapeMergedResult(merged, plan);
 		String artifactId = UUID.randomUUID().toString();
 		String schemaJson = json(merged.getColumn() == null ? List.of() : merged.getColumn());
 		String dataJson = json(merged.getData() == null ? List.of() : merged.getData());
@@ -238,7 +247,111 @@ public class MultiSourceRunService {
 		return requireArtifact(artifactId);
 	}
 
-public MultiSourceRunView get(String runId, String executionKey) {
+	private ResultSetBO shapeMergedResult(ResultSetBO merged, SemanticQueryPlan plan) {
+		if (merged == null || plan == null || plan.getExpectedResult() == null
+				|| plan.getExpectedResult().getColumns() == null || plan.getExpectedResult().getColumns().isEmpty()) {
+			return merged;
+		}
+		List<String> expectedColumns = List.copyOf(plan.getExpectedResult().getColumns());
+		List<Map<String, String>> rows = merged.getData() == null ? List.of() : merged.getData();
+		if (rows.isEmpty()) {
+			return ResultSetBO.builder().column(expectedColumns).data(List.of()).errorMsg(merged.getErrorMsg()).build();
+		}
+		boolean scalar = "SCALAR".equalsIgnoreCase(Objects.toString(plan.getExpectedResult().getGrain(), ""))
+				&& (plan.getGroupBy() == null || plan.getGroupBy().isEmpty());
+		if (!scalar || rows.size() == 1) {
+			List<Map<String, String>> projected = rows.stream().map(row -> projectRow(row, expectedColumns)).toList();
+			return ResultSetBO.builder().column(expectedColumns).data(projected).errorMsg(merged.getErrorMsg()).build();
+		}
+		Map<String, String> collapsed = new LinkedHashMap<>();
+		for (String column : expectedColumns) {
+			SemanticQueryPlan.MetricSelection metric = plan.getMetrics()
+				.stream()
+				.filter(item -> Objects.equals(item.getMetricCode(), column))
+				.findFirst()
+				.orElse(null);
+			if (metric == null) {
+				throw new IllegalStateException("Cannot safely collapse multi-source scalar column: " + column);
+			}
+			collapsed.put(column, aggregateMetric(rows, column, metric, plan));
+		}
+		return ResultSetBO.builder()
+			.column(expectedColumns)
+			.data(List.of(collapsed))
+			.errorMsg(merged.getErrorMsg())
+			.build();
+	}
+
+	private Map<String, String> projectRow(Map<String, String> row, List<String> expectedColumns) {
+		Map<String, String> projected = new LinkedHashMap<>();
+		for (String column : expectedColumns) {
+			if (row == null || !row.containsKey(column)) {
+				throw new IllegalStateException("Merged result is missing expected output column: " + column);
+			}
+			projected.put(column, row.get(column));
+		}
+		return projected;
+	}
+
+	private String aggregateMetric(List<Map<String, String>> rows, String column,
+			SemanticQueryPlan.MetricSelection metric, SemanticQueryPlan plan) {
+		List<BigDecimal> values = rows.stream()
+			.map(row -> row == null ? null : row.get(column))
+			.filter(Objects::nonNull)
+			.filter(value -> !value.isBlank())
+			.map(value -> {
+				try {
+					return new BigDecimal(value);
+				}
+				catch (NumberFormatException ex) {
+					throw new IllegalStateException("Cannot aggregate non-numeric merged metric: " + column, ex);
+				}
+			})
+			.toList();
+		if (values.isEmpty()) {
+			return null;
+		}
+		String aggregation = Objects.toString(metric.getAggregation(), "").trim().toUpperCase(java.util.Locale.ROOT);
+		BigDecimal result = switch (aggregation) {
+			case "SUM", "COUNT" -> values.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+			case "COUNT_DISTINCT" -> {
+				if (!canSafelyRecombineCountDistinct(plan, metric)) {
+					throw new IllegalStateException("Multi-source scalar merge cannot safely recombine COUNT_DISTINCT metric: "
+							+ metric.getMetricCode() + "; the DISTINCT column must be protected by a single-column UNIQUE grain");
+				}
+				yield values.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+			}
+			case "MIN" -> values.stream().min(BigDecimal::compareTo).orElseThrow();
+			case "MAX" -> values.stream().max(BigDecimal::compareTo).orElseThrow();
+			default -> throw new IllegalStateException(
+					"Multi-source scalar merge cannot safely recombine metric aggregation: " + aggregation);
+		};
+		return result.stripTrailingZeros().toPlainString();
+	}
+
+	static boolean canSafelyRecombineCountDistinct(SemanticQueryPlan plan, SemanticQueryPlan.MetricSelection metric) {
+		if (plan == null || metric == null || metric.getExpression() == null || metric.getModelCode() == null) {
+			return false;
+		}
+		java.util.regex.Matcher matcher = java.util.regex.Pattern
+			.compile("(?i)^\\s*COUNT\\s*\\(\\s*DISTINCT\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\)\\s*$")
+			.matcher(metric.getExpression());
+		if (!matcher.matches()) {
+			return false;
+		}
+		String distinctColumn = matcher.group(1);
+		String normalizedUniqueRule = "UNIQUE(" + distinctColumn + ")";
+		return plan.getGrains() != null && plan.getGrains().stream().anyMatch(grain -> {
+			if (grain == null || !Objects.equals(metric.getModelCode(), grain.getModelCode())) {
+				return false;
+			}
+			String keys = Objects.toString(grain.getKeyColumns(), "").replaceAll("\\s+", "");
+			String uniqueness = Objects.toString(grain.getUniquenessRule(), "").replaceAll("\\s+", "");
+			return keys.equalsIgnoreCase(distinctColumn) && uniqueness.equalsIgnoreCase(normalizedUniqueRule);
+		});
+	}
+
+	public MultiSourceRunView get(String runId, String executionKey) {
 		return find(runId, executionKey)
 			.orElseThrow(() -> new IllegalArgumentException("Multi-source execution not found: " + runId + "/" + executionKey));
 	}

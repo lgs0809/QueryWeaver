@@ -46,6 +46,11 @@ public record PostExecutionReview(Decision decision, IssueType issueType, double
 	public enum Decision {
 		PASS,
 		RETRY_SQL,
+		/** Semantic binding is still valid, but the current execution strategy should be rebuilt. */
+		REPLAN_EXECUTION,
+		/** The selected governed semantic assets themselves are materially suspect. */
+		REBIND_SEMANTIC,
+		/** Backward-compatible alias for persisted review payloads created before replan scopes were split. */
 		REPLAN,
 		RERETRIEVE,
 		CLARIFY,

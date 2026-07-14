@@ -28,7 +28,7 @@ import org.springframework.util.StringUtils;
 /**
  * Deterministic final synthesis for a multi-task request.
  *
- * <p>The service only renders facts that already exist in each executed Typed Semantic Plan and durable accepted Todo
+ * <p>The service only renders facts that already exist in each executed Semantic Query Plan and durable accepted Todo
  * result. It does not invoke a model and therefore cannot add a new metric/filter/time definition during final
  * wording.</p>
  */

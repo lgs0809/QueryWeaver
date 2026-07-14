@@ -38,12 +38,12 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-/** Builds the explicitly governed portion of the Typed Semantic Query IR. */
+/** Builds the explicitly governed portion of the Semantic Query Plan. */
 @Service
 public class SemanticQueryIrEnricher {
 
 	private static final Set<String> SUPPORTED_LITERAL_FILTER_OPERATORS = Set.of("EQ", "NE", "GT", "GTE", "LT",
-			"LTE", "IN");
+			"LTE", "IN", "IS_NULL", "IS_NOT_NULL");
 
 	private static final Set<String> SUPPORTED_TIME_GROUP_GRANULARITIES = Set.of("DAY", "MONTH", "YEAR");
 
@@ -53,9 +53,6 @@ public class SemanticQueryIrEnricher {
 	private static final Pattern RANKED_ENTITY_COUNT_PATTERN = Pattern.compile(
 			"(?:最高|最低|最大|最小|最多|最少|top|bottom|从高到低|从低到高|降序|升序|排名|前|后).*?(\\d{1,5}|[一二两三四五六七八九十百]{1,4})\\s*(?:笔(?:订单|交易|记录)?|条(?:记录)?|行|记录|单|个订单)",
 			Pattern.CASE_INSENSITIVE);
-
-	private static final Set<String> ADVANCED_TERMS = Set.of("window", "cohort", "retention", "rolling", "同比", "环比",
-			"留存", "复购", "窗口", "移动平均", "同期");
 
 	private static final Pattern AGGREGATE_EXPRESSION = Pattern
 		.compile("(?i)^\\s*(?:sum|count|avg|average|min|max)\\s*\\(");
@@ -244,13 +241,20 @@ public class SemanticQueryIrEnricher {
 				errors.add("Unsupported governed literal filter operator: " + hint.operator());
 				continue;
 			}
-			if ("IN".equals(operator)) {
+			boolean nullPredicate = "IS_NULL".equals(operator) || "IS_NOT_NULL".equals(operator);
+			if (nullPredicate) {
+				if (hint.value() != null) {
+					errors.add("Governed " + operator + " filter must not carry a literal value");
+					continue;
+				}
+			}
+			else if ("IN".equals(operator)) {
 				if (!(hint.value() instanceof List<?> values) || values.isEmpty()) {
 					errors.add("Governed IN literal filter requires a non-empty value list");
 					continue;
 				}
 			}
-			else if (hint.value() instanceof java.util.Collection<?>) {
+			else if (hint.value() == null || hint.value() instanceof java.util.Collection<?>) {
 				errors.add("Governed scalar literal filter requires one scalar value");
 				continue;
 			}
@@ -273,14 +277,16 @@ public class SemanticQueryIrEnricher {
 		}
 
 		Set<String> timeRelevantModelCodes = timeRelevantModelCodes(metrics, selectedDimensions, selectedModelCodes);
-		SemanticQueryPlan.TimeRangeSelection timeRange = timeRange(normalized, metrics, timeRelevantModelCodes, columns,
-				hints);
-		if (containsTimeIntent(normalized) && timeRange == null) {
+		boolean timeIntentCoveredByGovernedFilter = hasGovernedTimeFilter(hints, columns);
+		boolean timeRangeCoveredByGovernedFilter = hasGovernedTimeLiteralFilter(hints, columns);
+		SemanticQueryPlan.TimeRangeSelection timeRange = timeRangeCoveredByGovernedFilter ? null
+				: timeRange(normalized, metrics, timeRelevantModelCodes, columns, hints);
+		if (containsTimeRangeIntent(normalized) && timeRange == null && !timeIntentCoveredByGovernedFilter) {
 			if (hints.strictAssetBinding()) {
-				errors.add("Strict semantic binding requires an explicit governed timeBinding for time intent");
+				errors.add("Strict semantic binding requires an explicit governed timeBinding or governed time-column filter for time intent");
 			}
 			else {
-				warnings.add("Time intent was detected but the selected semantic models have no governed time column");
+				warnings.add("Time intent was detected but the selected semantic models have no governed time binding/filter");
 			}
 		}
 		addTimeGrouping(hints.timeBinding(), columns, projections, groups, errors);
@@ -299,12 +305,8 @@ public class SemanticQueryIrEnricher {
 			.tabular(true)
 			.chartable(!metrics.isEmpty() && !selectedDimensions.isEmpty())
 			.build();
-		boolean advanced = ADVANCED_TERMS.stream().anyMatch(normalized::contains);
-		String compilerMode = advanced || projections.isEmpty() ? "CONSTRAINED_GENERATION" : "DETERMINISTIC";
-		if (advanced) {
-			warnings.add("Advanced analytic semantics require constrained generation after Typed IR validation");
-		}
-		else if (projections.isEmpty()) {
+		String compilerMode = projections.isEmpty() ? "CONSTRAINED_GENERATION" : "DETERMINISTIC";
+		if (projections.isEmpty()) {
 			warnings.add("No governed projection was resolved; constrained generation is required");
 		}
 		return new IrDetails(List.copyOf(projections), List.copyOf(selectedDimensions), List.copyOf(filters),
@@ -469,6 +471,32 @@ public class SemanticQueryIrEnricher {
 		return Objects.equals(existing.getModelCode(), hint.modelCode())
 				&& Objects.equals(existing.getColumnName(), hint.columnName())
 				&& Objects.equals(existing.getValueCode(), hint.valueCode());
+	}
+
+	private boolean hasGovernedTimeFilter(QueryCaseHints hints,
+			Map<String, SemanticCatalogSnapshot.Column> columns) {
+		for (FilterBindingHint hint : hints.filterBindings()) {
+			SemanticCatalogSnapshot.Column column = columns.get(key(hint.modelCode(), hint.columnName()));
+			if (column != null && column.getRole() == SemanticColumnRole.TIME
+					&& Boolean.TRUE.equals(column.getAllowFilter())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean hasGovernedTimeLiteralFilter(QueryCaseHints hints,
+			Map<String, SemanticCatalogSnapshot.Column> columns) {
+		for (FilterBindingHint hint : hints.filterBindings()) {
+			SemanticCatalogSnapshot.Column column = columns.get(key(hint.modelCode(), hint.columnName()));
+			String operator = Objects.toString(hint.operator(), "").trim().toUpperCase(Locale.ROOT);
+			if (column != null && column.getRole() == SemanticColumnRole.TIME
+					&& Boolean.TRUE.equals(column.getAllowFilter()) && hint.value() != null
+					&& !"IS_NULL".equals(operator) && !"IS_NOT_NULL".equals(operator)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private Set<String> timeRelevantModelCodes(List<SemanticQueryPlan.MetricSelection> metrics,
@@ -667,10 +695,9 @@ public class SemanticQueryIrEnricher {
 		return "DAY";
 	}
 
-	private boolean containsTimeIntent(String query) {
+	private boolean containsTimeRangeIntent(String query) {
 		String userSemanticQuery = SYSTEM_CURRENT_TIME_CONTEXT.matcher(Objects.toString(query, "")).replaceAll(" ");
-		return relativeRange(userSemanticQuery) != null || absoluteRange(userSemanticQuery) != null
-				|| List.of("日期", "时间", "day", "week", "month", "year").stream().anyMatch(userSemanticQuery::contains);
+		return relativeRange(userSemanticQuery) != null || absoluteRange(userSemanticQuery) != null;
 	}
 
 	private int limit(String query) {

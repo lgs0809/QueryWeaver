@@ -468,13 +468,14 @@ public class RuntimeClarificationService implements ApplicationEventPublisherAwa
 						DIMENSION_TERMS, "分析维度")));
 	}
 
-	private static boolean hasUniqueSpecificDimensionMatch(String query,
+	static boolean hasUniqueSpecificDimensionMatch(String query,
 			List<SemanticCatalogSnapshot.Dimension> exactMatches, Set<String> requestedGenericTerms) {
-		int genericLength = requestedGenericTerms.stream().mapToInt(String::length).max().orElse(0);
 		long specificMatches = exactMatches.stream()
-			.map(SemanticCatalogSnapshot.Dimension::getBusinessName)
-			.map(RuntimeClarificationService::normalize)
-			.filter(name -> name.length() > genericLength && query.contains(name))
+			.filter(dimension -> List.of(normalize(dimension.getBusinessName()), normalize(dimension.getDimensionCode()),
+					normalize(dimension.getColumnName()))
+				.stream()
+				.filter(RuntimeClarificationService::hasText)
+				.anyMatch(token -> containsAssetToken(query, token) && !requestedGenericTerms.contains(token)))
 			.count();
 		return specificMatches == 1;
 	}

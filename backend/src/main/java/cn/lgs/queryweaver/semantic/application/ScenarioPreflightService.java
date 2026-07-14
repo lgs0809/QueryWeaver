@@ -105,10 +105,10 @@ public class ScenarioPreflightService {
 			}
 			if (!plan.isExecutable()) {
 				return failed(scenario,
-						"Typed plan is not executable: " + String.join("; ", plan.getValidationErrors()));
+						"Semantic Query Plan is not executable: " + String.join("; ", plan.getValidationErrors()));
 			}
 			if (!"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())) {
-				return failed(scenario, "Typed plan requires constrained generation: " + plan.getCompilerMode());
+				return failed(scenario, "Semantic Query Plan requires constrained generation: " + plan.getCompilerMode());
 			}
 			CompiledSemanticQuery compiled = sqlCompiler.compile(plan, catalog, dialects(plan), Clock.systemUTC(),
 					ZoneId.of("UTC"));
@@ -128,6 +128,7 @@ public class ScenarioPreflightService {
 		Set<String> metrics = new LinkedHashSet<>();
 		Set<String> dimensions = new LinkedHashSet<>();
 		Set<String> rules = new LinkedHashSet<>();
+		Set<String> relationships = new LinkedHashSet<>();
 		List<EnumBindingHint> enums = new ArrayList<>();
 		TimeBindingHint time = null;
 		for (ResolvedBinding binding : bindings) {
@@ -138,6 +139,7 @@ public class ScenarioPreflightService {
 				case "METRIC" -> metrics.add(binding.assetKey());
 				case "DIMENSION" -> dimensions.add(binding.assetKey());
 				case "RULE" -> rules.add(binding.assetKey());
+				case "RELATIONSHIP" -> relationships.add(binding.assetKey());
 				case "ENUM_VALUE" -> {
 					String[] parts = binding.assetKey().split(":", 3);
 					if (parts.length != 3) {
@@ -158,8 +160,8 @@ public class ScenarioPreflightService {
 				}
 			}
 		}
-		return new QueryCaseHints(Set.copyOf(models), Set.copyOf(metrics), Set.copyOf(dimensions), Set.of(), Set.of(),
-				Set.copyOf(rules), List.copyOf(enums), time, true, "SCENARIO_PREFLIGHT",
+		return new QueryCaseHints(Set.copyOf(models), Set.copyOf(metrics), Set.copyOf(dimensions), Set.of(),
+				Set.copyOf(relationships), Set.copyOf(rules), List.copyOf(enums), time, true, "SCENARIO_PREFLIGHT",
 				List.of("scenario:" + scenario.getId()), 1, Map.of());
 	}
 
@@ -192,6 +194,10 @@ public class ScenarioPreflightService {
 			.stream()
 			.map(SemanticQueryPlan.RuleSelection::getRuleCode)
 			.collect(Collectors.toSet());
+		Set<String> planRelationships = plan.getRelationships()
+			.stream()
+			.map(SemanticQueryPlan.RelationshipSelection::getRelationshipCode)
+			.collect(Collectors.toSet());
 		Set<String> planEnums = plan.getEnumResolutions()
 			.stream()
 			.map(value -> value.getModelCode() + ":" + value.getColumnName() + ":" + value.getValueCode())
@@ -203,6 +209,8 @@ public class ScenarioPreflightService {
 				case "DIMENSION" ->
 					require(planDimensions.contains(binding.assetKey()), "dimension", binding.assetKey(), violations);
 				case "RULE" -> require(planRules.contains(binding.assetKey()), "rule", binding.assetKey(), violations);
+				case "RELATIONSHIP" -> require(planRelationships.contains(binding.assetKey()), "relationship",
+						binding.assetKey(), violations);
 				case "ENUM_VALUE" ->
 					require(planEnums.contains(binding.assetKey()), "enum", binding.assetKey(), violations);
 				case "TIME_COLUMN" -> {
@@ -212,8 +220,12 @@ public class ScenarioPreflightService {
 						.stream()
 						.anyMatch(metric -> Objects.equals(binding.assetKey(),
 								metric.getModelCode() + ":" + Objects.toString(metric.getTimeColumn(), "")));
-					require(Objects.equals(actual, binding.assetKey()) || preservedByMetric, "time column", binding.assetKey(),
-							violations);
+					boolean preservedByDimension = plan.getDimensions()
+						.stream()
+						.anyMatch(dimension -> Objects.equals(binding.assetKey(),
+								dimension.getModelCode() + ":" + Objects.toString(dimension.getColumnName(), "")));
+					require(Objects.equals(actual, binding.assetKey()) || preservedByMetric || preservedByDimension, "time column",
+							binding.assetKey(), violations);
 				}
 				default -> {
 				}
@@ -224,7 +236,7 @@ public class ScenarioPreflightService {
 
 	private void require(boolean valid, String type, String key, List<String> violations) {
 		if (!valid) {
-			violations.add("Resolved " + type + " was not preserved in Typed Plan: " + key);
+			violations.add("Resolved " + type + " was not preserved in Semantic Query Plan: " + key);
 		}
 	}
 

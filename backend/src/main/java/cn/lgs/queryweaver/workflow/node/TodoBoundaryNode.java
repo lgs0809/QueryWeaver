@@ -92,7 +92,7 @@ public class TodoBoundaryNode implements NodeAction {
 			throw new IllegalStateException("Todo may advance only after Post-Execution Review PASS");
 		}
 		if (plan == null) {
-			throw new IllegalStateException("Todo completion requires its Typed Semantic Plan");
+			throw new IllegalStateException("Todo completion requires its Semantic Query Plan");
 		}
 
 		// Saving here is idempotent with the SemanticPlanNode persistence and guarantees synthesis has the final plan.
@@ -143,7 +143,7 @@ public class TodoBoundaryNode implements NodeAction {
 		update.put(SQL_EXECUTE_NODE_OUTPUT, Map.of());
 		update.put(SQL_EXECUTED_QUERY_OUTPUT, Map.of());
 		update.put(LAST_SQL_RESULT_PAYLOAD, "");
-		update.put(PLAN_CURRENT_STEP, 0);
+		update.put(PLAN_CURRENT_STEP, 1);
 		return update;
 	}
 

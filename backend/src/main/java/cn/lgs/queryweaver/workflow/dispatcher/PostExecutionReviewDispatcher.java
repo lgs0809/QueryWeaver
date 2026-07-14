@@ -16,6 +16,7 @@
 package cn.lgs.queryweaver.workflow.dispatcher;
 
 import static cn.lgs.queryweaver.constant.Constant.PLAN_EXECUTOR_NODE;
+import static cn.lgs.queryweaver.constant.Constant.PLANNER_NODE;
 import static cn.lgs.queryweaver.constant.Constant.QUERY_ENHANCE_NODE;
 import static cn.lgs.queryweaver.constant.Constant.POST_EXECUTION_REVIEW_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.REPORT_GENERATOR_NODE;
@@ -49,9 +50,10 @@ public class PostExecutionReviewDispatcher implements EdgeAction {
 			case PASS -> directSemanticExecution ? (todoEnabled ? TODO_BOUNDARY_NODE : REPORT_GENERATOR_NODE)
 					: PLAN_EXECUTOR_NODE;
 			// A deterministic compiler result that still needs physical SQL repair falls back to the bounded
-			// advanced execution path while retaining the same Typed Semantic Plan.
+			// advanced execution path while retaining the same Semantic Query Plan.
 			case RETRY_SQL -> directSemanticExecution ? QUERY_ENHANCE_NODE : SQL_GENERATE_NODE;
-			case REPLAN, RERETRIEVE, CLARIFY -> SEMANTIC_PLAN_NODE;
+			case REPLAN_EXECUTION -> directSemanticExecution ? QUERY_ENHANCE_NODE : PLANNER_NODE;
+			case REBIND_SEMANTIC, REPLAN, RERETRIEVE, CLARIFY -> SEMANTIC_PLAN_NODE;
 			case FAIL -> throw new IllegalStateException("Post-execution review failed: " + review.issueType());
 		};
 	}

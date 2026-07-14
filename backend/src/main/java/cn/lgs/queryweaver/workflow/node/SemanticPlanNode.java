@@ -79,7 +79,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * Resolves a deterministic, typed semantic plan before generic tool planning and SQL
+ * Resolves a deterministic, Semantic Query Plan before generic tool planning and SQL
  * generation. The node rejects disconnected semantic models instead of allowing an LLM to
  * invent joins or metric definitions.
  */
@@ -122,9 +122,9 @@ public class SemanticPlanNode implements NodeAction {
 					(SemanticQueryPlan) null);
 			if (approved == null || !approved.isExecutable() || !Objects.equals(projectId, approved.getProjectId())
 					|| !Objects.equals(projectVersionId, approved.getProjectVersionId())) {
-				throw new IllegalStateException("Approved Typed Semantic Plan recovery payload is missing or incompatible");
+				throw new IllegalStateException("Approved Semantic Query Plan recovery payload is missing or incompatible");
 			}
-			log.info("Reusing exact approved Typed Semantic Plan for durable checkpoint-loss recovery");
+			log.info("Reusing exact approved Semantic Query Plan for durable checkpoint-loss recovery");
 			return Map.of(TYPED_SEMANTIC_PLAN, approved, APPROVED_PLAN_RECOVERY, false, FORCE_SEMANTIC_REPLAN, false);
 		}
 		String semanticReplanFeedback = StateUtil.getStringValue(state, SEMANTIC_REPLAN_FEEDBACK, "");
@@ -188,7 +188,7 @@ public class SemanticPlanNode implements NodeAction {
 		}
 		QueryCaseHints recalledHints = resolution.historicalHints();
 		QueryCaseHints caseHints = requiredHints.emptyHints() ? recalledHints : mergeHints(recalledHints, requiredHints);
-		log.info("Resolved typed semantic plan: models={}, metrics={}, dimensions={}, relationships={}, warnings={}",
+		log.info("Resolved Semantic Query Plan: models={}, metrics={}, dimensions={}, relationships={}, warnings={}",
 				plan.getModels().size(), plan.getMetrics().size(), plan.getDimensions().size(),
 				plan.getRelationships().size(), plan.getValidationWarnings());
 		if (!plan.isExecutable()) {
@@ -253,7 +253,7 @@ public class SemanticPlanNode implements NodeAction {
 		String payload = canonicalJson.write(plan);
 		String scope = activeTodoId == null || activeTodoId.isBlank() ? "simple" : activeTodoId;
 		queryRunService.appendEvent(runId, "SEMANTIC_PLAN_SNAPSHOT", "semantic-plan", payload,
-				"Exact Typed Semantic Plan snapshot persisted for diagnosis and recovery",
+				"Exact Semantic Query Plan snapshot persisted for diagnosis and recovery",
 				"semantic-plan-snapshot:" + runId + ":" + scope + ":" + Integer.toHexString(payload.hashCode()));
 	}
 
@@ -264,7 +264,7 @@ public class SemanticPlanNode implements NodeAction {
 		String payload = canonicalJson.write(plan);
 		String scope = activeTodoId == null || activeTodoId.isBlank() ? "simple" : activeTodoId;
 		queryRunService.appendEvent(runId, "APPROVAL_PLAN_SNAPSHOT", "semantic-plan", payload,
-				"Exact Typed Semantic Plan snapshot persisted for approval",
+				"Exact Semantic Query Plan snapshot persisted for approval",
 				"approval-plan:" + runId + ":" + scope + ":" + Integer.toHexString(payload.hashCode()));
 	}
 

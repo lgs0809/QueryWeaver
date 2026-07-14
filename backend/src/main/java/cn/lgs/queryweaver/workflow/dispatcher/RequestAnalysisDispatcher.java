@@ -15,7 +15,9 @@
  */
 package cn.lgs.queryweaver.workflow.dispatcher;
 
+import static cn.lgs.queryweaver.constant.Constant.ACTIVE_TODO_ID;
 import static cn.lgs.queryweaver.constant.Constant.REQUEST_ANALYSIS;
+import static cn.lgs.queryweaver.constant.Constant.REQUEST_SYNTHESIS_NODE;
 import static cn.lgs.queryweaver.constant.Constant.SEMANTIC_PLAN_NODE;
 import static com.alibaba.cloud.ai.graph.StateGraph.END;
 
@@ -31,8 +33,15 @@ public class RequestAnalysisDispatcher implements EdgeAction {
 	@Override
 	public String apply(OverAllState state) {
 		RequestAnalysis analysis = StateUtil.getObjectValue(state, REQUEST_ANALYSIS, RequestAnalysis.class);
+		return route(analysis, StateUtil.getStringValue(state, ACTIVE_TODO_ID, ""));
+	}
+
+	static String route(RequestAnalysis analysis, String activeTodoId) {
 		if (analysis == null || analysis.requestType() == RequestType.NON_DATA_QUERY) {
 			return END;
+		}
+		if (analysis.needsTodo() && (activeTodoId == null || activeTodoId.isBlank())) {
+			return REQUEST_SYNTHESIS_NODE;
 		}
 		return SEMANTIC_PLAN_NODE;
 	}

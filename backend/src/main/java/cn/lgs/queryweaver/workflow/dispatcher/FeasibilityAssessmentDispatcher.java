@@ -32,7 +32,7 @@ public class FeasibilityAssessmentDispatcher implements EdgeAction {
 	public String apply(OverAllState state) throws Exception {
 		Object typedPlan = state.value(TYPED_SEMANTIC_PLAN).orElse(null);
 		if (typedPlan instanceof SemanticQueryPlan plan && plan.isExecutable()) {
-			log.info("[FeasibilityAssessmentNodeDispatcher]可执行 Typed Semantic Plan 已建立，进入PlannerNode节点");
+			log.info("[FeasibilityAssessmentNodeDispatcher]可执行 Semantic Query Plan 已建立，进入PlannerNode节点");
 			return PLANNER_NODE;
 		}
 

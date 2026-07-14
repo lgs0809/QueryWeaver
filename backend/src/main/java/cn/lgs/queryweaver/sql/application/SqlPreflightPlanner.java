@@ -32,7 +32,9 @@ public class SqlPreflightPlanner {
 		String normalizedDialect = dialect == null ? "" : dialect.trim().toLowerCase(Locale.ROOT);
 		String statement = stripTrailingSemicolon(sql);
 		return switch (normalizedDialect) {
-			case "mysql", "postgresql", "postgres", "hologress", "h2", "hive" -> Optional.of("EXPLAIN " + statement);
+			case "mysql" -> Optional.of("EXPLAIN FORMAT=JSON " + statement);
+			case "postgresql", "postgres", "hologress" -> Optional.of("EXPLAIN (FORMAT JSON, COSTS TRUE) " + statement);
+			case "h2", "hive" -> Optional.of("EXPLAIN " + statement);
 			case "sqlite" -> Optional.of("EXPLAIN QUERY PLAN " + statement);
 			default -> Optional.empty();
 		};

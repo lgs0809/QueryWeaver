@@ -65,17 +65,27 @@ public class SemanticSqlCompiler {
 			"bigint", "double", "float", "round", "floor", "ceil", "abs", "lower", "upper", "trim", "substring",
 			"concat", "and", "or", "not", "in", "between", "like", "is", "null", "true", "false");
 
+	/**
+	 * Query intents that this deterministic compiler cannot faithfully express yet. This belongs to compiler capability
+	 * probing rather than semantic binding: a match means "planner required", not "complex query". The Planner may still
+	 * choose a single physical SQL step using CTE/window/subquery constructs.
+	 */
+	private static final Set<String> PLANNER_REQUIRED_QUERY_TERMS = Set.of("window", "lag", "lead", "cohort",
+			"retention", "rolling", "weekly", "week", "quarter", "按周", "每周", "季度", "同比", "环比", "留存",
+			"复购", "窗口", "移动平均", "同期");
+
 	public CompiledSemanticQuery compile(SemanticQueryPlan plan, SemanticCatalogSnapshot catalog,
 			Map<Integer, SqlDialect> dialects, Clock clock, ZoneId defaultZone) {
 		Objects.requireNonNull(plan, "semantic query plan is required");
 		Objects.requireNonNull(catalog, "semantic catalog is required");
 		if (!plan.isExecutable()) {
 			throw new IllegalArgumentException(
-					"Typed Semantic Query IR is not executable: " + String.join("; ", plan.getValidationErrors()));
+					"Semantic Query Plan is not executable: " + String.join("; ", plan.getValidationErrors()));
 		}
 		if (!"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())) {
-			throw new ConstrainedGenerationRequiredException("Typed IR requires constrained generation mode");
+			throw new ConstrainedGenerationRequiredException("Semantic Query Plan requires constrained generation mode");
 		}
+		assertDeterministicCapability(plan);
 		if (plan.getProjections() == null || plan.getProjections().isEmpty()) {
 			throw new ConstrainedGenerationRequiredException(
 					"No governed projection is available for deterministic SQL");
@@ -83,7 +93,7 @@ public class SemanticSqlCompiler {
 		CompileContext context = context(plan, catalog);
 		List<SemanticQueryPlan.SourceSubPlan> sources = sourcePlans(plan, context);
 		if (sources.isEmpty()) {
-			throw new IllegalArgumentException("Typed Semantic Query IR has no source plan");
+			throw new IllegalArgumentException("Semantic Query Plan has no source plan");
 		}
 		List<CompiledSourceQuery> compiled = new ArrayList<>();
 		for (SemanticQueryPlan.SourceSubPlan source : sources) {
@@ -109,19 +119,29 @@ public class SemanticSqlCompiler {
 		Objects.requireNonNull(datasourceId, "datasourceId is required");
 		if (!plan.isExecutable()) {
 			throw new IllegalArgumentException(
-					"Typed Semantic Query IR is not executable: " + String.join("; ", plan.getValidationErrors()));
+					"Semantic Query Plan is not executable: " + String.join("; ", plan.getValidationErrors()));
 		}
 		if (!"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())) {
-			throw new ConstrainedGenerationRequiredException("Typed IR requires constrained generation mode");
+			throw new ConstrainedGenerationRequiredException("Semantic Query Plan requires constrained generation mode");
 		}
+		assertDeterministicCapability(plan);
 		CompileContext context = context(plan, catalog);
 		SemanticQueryPlan.SourceSubPlan source = sourcePlans(plan, context).stream()
 			.filter(candidate -> Objects.equals(candidate.getDatasourceId(), datasourceId))
 			.findFirst()
 			.orElseThrow(
-					() -> new IllegalArgumentException("Typed IR has no source plan for datasource " + datasourceId));
+					() -> new IllegalArgumentException("Semantic Query Plan has no source plan for datasource " + datasourceId));
 		return compileSource(plan, source, dialect, context, clock == null ? Clock.systemUTC() : clock,
 				defaultZone == null ? ZoneId.systemDefault() : defaultZone);
+	}
+
+	private void assertDeterministicCapability(SemanticQueryPlan plan) {
+		String query = Objects.toString(plan.getCanonicalQuery(), "").toLowerCase(Locale.ROOT);
+		String unsupported = PLANNER_REQUIRED_QUERY_TERMS.stream().filter(query::contains).findFirst().orElse(null);
+		if (unsupported != null) {
+			throw new ConstrainedGenerationRequiredException(
+					"Deterministic compiler does not represent query intent '" + unsupported + "'; execution planning is required");
+		}
 	}
 
 	private CompiledSourceQuery compileSource(SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source,
@@ -159,10 +179,14 @@ public class SemanticSqlCompiler {
 			.toList();
 		boolean conditionalMetricFilters = requiresConditionalMetricFilters(sourceMetrics);
 		List<Object> parameters = new ArrayList<>();
-		List<String> select = projections.stream()
+		List<String> select = new ArrayList<>(projections.stream()
 			.map(projection -> compileProjection(projection, dialect, aliases, context, sourceMetrics,
 					conditionalMetricFilters, parameters))
-			.toList();
+			.toList());
+		InternalMergeKey internalMergeKey = internalMergeKey(plan, sourceModels, context);
+		if (internalMergeKey != null) {
+			select.add(compileInternalMergeKey(internalMergeKey, dialect, aliases, context));
+		}
 		SemanticCatalogSnapshot.Model base = models.get(0);
 		StringBuilder fromAndJoins = new StringBuilder(qualifiedTable(base.getPhysicalTable(), dialect)).append(' ')
 			.append(aliases.get(base.getModelCode()));
@@ -189,12 +213,18 @@ public class SemanticSqlCompiler {
 						dialect, aliases, context, parameters));
 			}
 		}
-		List<String> groupBy = plan.getGroupBy()
+		List<String> groupBy = new ArrayList<>(plan.getGroupBy()
 			.stream()
 			.filter(group -> sourceModels.contains(group.getModelCode()))
 			.map(group -> compileGroup(group, dialect, aliases, context))
 			.distinct()
-			.toList();
+			.toList());
+		if (internalMergeKey != null && !sourceMetrics.isEmpty()) {
+			String expression = compileInternalMergeKeyExpression(internalMergeKey, dialect, aliases, context);
+			if (!groupBy.contains(expression)) {
+				groupBy.add(expression);
+			}
+		}
 		List<String> projectionAliases = projections.stream()
 			.map(SemanticQueryPlan.ProjectionSelection::getAlias)
 			.filter(StringUtils::hasText)
@@ -206,6 +236,9 @@ public class SemanticSqlCompiler {
 		int limit = Math.max(1, Math.min(plan.getLimit() == null ? 100 : plan.getLimit(), 10000));
 		if (plan.getExpectedResult() != null && plan.getExpectedResult().getMaxRows() != null) {
 			limit = Math.min(limit, Math.max(1, plan.getExpectedResult().getMaxRows()));
+		}
+		if (internalMergeKey != null && plan.getMergePlan() != null && plan.getMergePlan().getMaxRows() != null) {
+			limit = Math.max(limit, Math.min(Math.max(1, plan.getMergePlan().getMaxRows()), 10000));
 		}
 		SqlSelectAst ast = new SqlSelectAst(select, fromAndJoins.toString(), conditions, groupBy, orderBy, limit);
 		List<String> physicalTables = models.stream().map(SemanticCatalogSnapshot.Model::getPhysicalTable).toList();
@@ -260,6 +293,40 @@ public class SemanticSqlCompiler {
 		}
 		return renderExpression(firstText(group.getExpression(), group.getColumnName()), group.getModelCode(), dialect,
 				aliases, context, false, true);
+	}
+
+	private InternalMergeKey internalMergeKey(SemanticQueryPlan plan, Set<String> sourceModels, CompileContext context) {
+		if (plan.getMergePlan() == null || plan.getSourceSubPlans() == null || plan.getSourceSubPlans().size() < 2) {
+			return null;
+		}
+		for (String inputKey : List.of(Objects.toString(plan.getMergePlan().getLeftInputKey(), ""),
+				Objects.toString(plan.getMergePlan().getRightInputKey(), ""))) {
+			if (!StringUtils.hasText(inputKey)) {
+				continue;
+			}
+			SemanticCatalogSnapshot.Dimension dimension = context.dimensionsByCode().get(inputKey);
+			if (dimension != null && dimension.getStatus() == SemanticAssetStatus.ENABLED
+					&& sourceModels.contains(dimension.getModelCode()) && StringUtils.hasText(dimension.getColumnName())) {
+				requireColumn(context, dimension.getModelCode(), dimension.getColumnName());
+				return new InternalMergeKey(dimension.getModelCode(), dimension.getColumnName(), inputKey);
+			}
+		}
+		return null;
+	}
+
+	private String compileInternalMergeKey(InternalMergeKey key, SqlDialect dialect, Map<String, String> aliases,
+			CompileContext context) {
+		return compileInternalMergeKeyExpression(key, dialect, aliases, context) + " AS " + dialect.quote(key.alias());
+	}
+
+	private String compileInternalMergeKeyExpression(InternalMergeKey key, SqlDialect dialect, Map<String, String> aliases,
+			CompileContext context) {
+		requireColumn(context, key.modelCode(), key.columnName());
+		String tableAlias = aliases.get(key.modelCode());
+		if (!StringUtils.hasText(tableAlias)) {
+			throw new IllegalArgumentException("Internal merge key model is not part of source: " + key.modelCode());
+		}
+		return tableAlias + "." + dialect.quote(key.columnName());
 	}
 
 	private String compileTimeBucket(String modelCode, String columnName, String granularity, SqlDialect dialect,
@@ -353,7 +420,7 @@ public class SemanticSqlCompiler {
 			case "IS_NOT_NULL" -> left + " IS NOT NULL";
 			case "IN", "NOT_IN" -> compileIn(left, operator, filter.getValue(), parameters);
 			case "BETWEEN" -> compileBetween(left, filter.getValue(), parameters);
-			default -> throw new IllegalArgumentException("Unsupported Typed IR filter operator: " + operator);
+			default -> throw new IllegalArgumentException("Unsupported Semantic Query Plan filter operator: " + operator);
 		};
 	}
 
@@ -665,13 +732,19 @@ public class SemanticSqlCompiler {
 			.filter(column -> column.getStatus() == SemanticAssetStatus.ENABLED)
 			.collect(Collectors.toMap(column -> key(column.getModelCode(), column.getColumnName()), Function.identity(),
 					(left, right) -> left));
+		Map<String, SemanticCatalogSnapshot.Dimension> dimensions = catalog.getDimensions()
+			.stream()
+			.filter(dimension -> dimension.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(dimension -> StringUtils.hasText(dimension.getDimensionCode()))
+			.collect(Collectors.toMap(SemanticCatalogSnapshot.Dimension::getDimensionCode, Function.identity(),
+					(left, right) -> left));
 		for (SemanticQueryPlan.ModelSelection model : plan.getModels()) {
 			if (!models.containsKey(model.getModelCode())) {
 				throw new IllegalArgumentException(
-						"Typed IR references a non-published model: " + model.getModelCode());
+						"Semantic Query Plan references a non-published model: " + model.getModelCode());
 			}
 		}
-		return new CompileContext(Map.copyOf(models), Map.copyOf(modelByTable), Map.copyOf(columns));
+		return new CompileContext(Map.copyOf(models), Map.copyOf(modelByTable), Map.copyOf(columns), Map.copyOf(dimensions));
 	}
 
 	private List<SemanticQueryPlan.SourceSubPlan> sourcePlans(SemanticQueryPlan plan, CompileContext context) {
@@ -772,7 +845,11 @@ public class SemanticSqlCompiler {
 	}
 
 	private record CompileContext(Map<String, SemanticCatalogSnapshot.Model> modelsByCode,
-			Map<String, String> modelCodeByPhysicalTable, Map<String, SemanticCatalogSnapshot.Column> columnsByKey) {
+			Map<String, String> modelCodeByPhysicalTable, Map<String, SemanticCatalogSnapshot.Column> columnsByKey,
+			Map<String, SemanticCatalogSnapshot.Dimension> dimensionsByCode) {
+	}
+
+	private record InternalMergeKey(String modelCode, String columnName, String alias) {
 	}
 
 	private record ParameterizedExpression(String sql, List<Object> parameters) {

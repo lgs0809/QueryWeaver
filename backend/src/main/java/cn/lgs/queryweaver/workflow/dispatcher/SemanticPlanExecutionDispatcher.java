@@ -22,7 +22,7 @@ import static cn.lgs.queryweaver.constant.Constant.SEMANTIC_EXECUTION_NODE;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.EdgeAction;
 
-/** Routes a complete Typed Semantic Plan to optional approval or direct governed execution. */
+/** Routes a complete Semantic Query Plan to optional approval or direct governed execution. */
 public class SemanticPlanExecutionDispatcher implements EdgeAction {
 
 	@Override

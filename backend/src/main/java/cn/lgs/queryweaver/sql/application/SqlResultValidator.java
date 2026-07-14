@@ -32,6 +32,12 @@ import org.springframework.stereotype.Component;
 public class SqlResultValidator {
 
 	public ValidationResult validate(ResultSetBO resultSet, SemanticQueryPlan plan, int configuredMaxRows) {
+		return validate(resultSet, plan, configuredMaxRows, ValidationMode.STRICT_SEMANTIC_PLAN);
+	}
+
+	public ValidationResult validate(ResultSetBO resultSet, SemanticQueryPlan plan, int configuredMaxRows,
+			ValidationMode mode) {
+		ValidationMode effectiveMode = mode == null ? ValidationMode.STRICT_SEMANTIC_PLAN : mode;
 		List<String> errors = new ArrayList<>();
 		List<String> warnings = new ArrayList<>();
 		if (resultSet == null) {
@@ -52,10 +58,10 @@ public class SqlResultValidator {
 		}
 
 		if (plan != null) {
-			validateExpectedShape(columns, rows, plan, errors, warnings);
+			validateExpectedShape(columns, rows, plan, effectiveMode, errors, warnings);
 			if (!safe(plan.getMetrics()).isEmpty()) {
 				validateMetricColumns(columns, rows, plan.getMetrics(), errors, warnings);
-				validateGroupingUniqueness(columns, rows, plan.getGroupBy(), errors, warnings);
+				validateGroupingUniqueness(columns, rows, plan.getGroupBy(), effectiveMode, errors, warnings);
 			}
 		}
 		return errors.isEmpty() ? ValidationResult.accepted(warnings) : ValidationResult
@@ -63,9 +69,9 @@ public class SqlResultValidator {
 	}
 
 	private void validateExpectedShape(List<String> columns, List<Map<String, String>> rows, SemanticQueryPlan plan,
-			List<String> errors, List<String> warnings) {
+			ValidationMode mode, List<String> errors, List<String> warnings) {
 		SemanticQueryPlan.ExpectedResultShape expected = plan.getExpectedResult();
-		if (expected != null) {
+		if (expected != null && mode == ValidationMode.STRICT_SEMANTIC_PLAN) {
 			for (String expectedColumn : safe(expected.getColumns())) {
 				if (hasText(expectedColumn) && findOutputColumn(columns, expectedColumn) == null) {
 					errors.add("Expected result column is missing: " + expectedColumn);
@@ -75,15 +81,16 @@ public class SqlResultValidator {
 				errors.add("Result row count exceeds typed-plan expected maximum: " + expected.getMaxRows());
 			}
 		}
-		if (plan.getLimit() != null && plan.getLimit() > 0 && rows.size() > plan.getLimit()) {
+		if (mode == ValidationMode.STRICT_SEMANTIC_PLAN && plan.getLimit() != null && plan.getLimit() > 0
+				&& rows.size() > plan.getLimit()) {
 			errors.add("Result row count exceeds typed-plan limit: " + plan.getLimit());
 		}
 		boolean aggregateWithoutGrouping = !safe(plan.getMetrics()).isEmpty() && safe(plan.getDimensions()).isEmpty()
 				&& safe(plan.getGroupBy()).isEmpty();
-		if (aggregateWithoutGrouping && rows.size() > 1) {
+		if (mode == ValidationMode.STRICT_SEMANTIC_PLAN && aggregateWithoutGrouping && rows.size() > 1) {
 			errors.add("Aggregate query without grouping returned more than one row");
 		}
-		if (!safe(plan.getOrderBy()).isEmpty() && rows.size() > 1) {
+		if (mode == ValidationMode.STRICT_SEMANTIC_PLAN && !safe(plan.getOrderBy()).isEmpty() && rows.size() > 1) {
 			validateOrdering(columns, rows, plan.getOrderBy(), warnings);
 		}
 	}
@@ -197,12 +204,14 @@ public class SqlResultValidator {
 	}
 
 	private void validateGroupingUniqueness(List<String> columns, List<Map<String, String>> rows,
-			List<SemanticQueryPlan.GroupSelection> groups, List<String> errors, List<String> warnings) {
+			List<SemanticQueryPlan.GroupSelection> groups, ValidationMode mode, List<String> errors, List<String> warnings) {
 		List<String> groupingColumns = new ArrayList<>();
 		for (SemanticQueryPlan.GroupSelection group : safe(groups)) {
 			String outputColumn = findOutputColumn(columns, group.getAlias(), group.getColumnName(), group.getExpression());
 			if (outputColumn == null) {
-				warnings.add("Cannot identify output column for typed-plan grouping: " + group.getAlias());
+				if (mode == ValidationMode.STRICT_SEMANTIC_PLAN) {
+					warnings.add("Cannot identify output column for typed-plan grouping: " + group.getAlias());
+				}
 				return;
 			}
 			groupingColumns.add(outputColumn);
@@ -266,6 +275,13 @@ public class SqlResultValidator {
 
 	private <T> List<T> safe(List<T> values) {
 		return values == null ? List.of() : values;
+	}
+
+	public enum ValidationMode {
+		/** Exact result aliases/grain expected from deterministic compiler, replay and Query Pattern paths. */
+		STRICT_SEMANTIC_PLAN,
+		/** Planner-driven SQL may add or rename derived columns while preserving governed semantic bindings. */
+		ADVANCED_EXECUTION
 	}
 
 	public record ValidationResult(boolean valid, List<String> errors, List<String> warnings) {

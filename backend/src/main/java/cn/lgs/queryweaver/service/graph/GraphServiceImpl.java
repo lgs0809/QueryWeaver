@@ -18,6 +18,7 @@ package cn.lgs.queryweaver.service.graph;
 import cn.lgs.queryweaver.service.langfuse.LangfuseService;
 import cn.lgs.queryweaver.clarification.RuntimeClarificationRequiredException;
 import cn.lgs.queryweaver.clarification.RuntimeClarificationService;
+import cn.lgs.queryweaver.common.json.CanonicalJson;
 import cn.lgs.queryweaver.concurrency.CapacityRejectedException;
 import cn.lgs.queryweaver.concurrency.QueryWeaverConcurrencyProperties;
 import cn.lgs.queryweaver.operations.QueryWeaverProductionService;
@@ -37,6 +38,7 @@ import cn.lgs.queryweaver.run.RunLeaseUnavailableException;
 import cn.lgs.queryweaver.run.ThreadExecutionGuardService;
 import cn.lgs.queryweaver.run.ThreadExecutionGuardService.ThreadExecutionConflictException;
 import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.task.QueryTaskRepository;
 import cn.lgs.queryweaver.util.JsonUtil;
 import cn.lgs.queryweaver.enums.TextType;
 import cn.lgs.queryweaver.workflow.node.PlannerNode;
@@ -53,6 +55,8 @@ import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import io.opentelemetry.api.trace.Span;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -81,6 +85,8 @@ public class GraphServiceImpl implements GraphService {
 	private static final String REPLAN_AFTER_REJECTION = "REPLAN_AFTER_REJECTION";
 
 	private static final String EXECUTE_APPROVED_PLAN_AFTER_CHECKPOINT_LOSS = "EXECUTE_APPROVED_PLAN_AFTER_CHECKPOINT_LOSS";
+
+	private static final int MAX_MODEL_PROVIDER_RUN_RECOVERIES = 2;
 
 	private final CompiledGraph compiledGraph;
 
@@ -113,6 +119,10 @@ public class GraphServiceImpl implements GraphService {
 
 	private final ExecutionSnapshotService executionSnapshotService;
 
+	private final QueryTaskRepository queryTaskRepository;
+
+	private final CanonicalJson canonicalJson = new CanonicalJson();
+
 	private final long interactiveRetryAfterSeconds;
 
 	private final long interactiveTaskTimeoutMs;
@@ -122,7 +132,8 @@ public class GraphServiceImpl implements GraphService {
 			ProjectRuntimeGate projectRuntimeGate, ProjectRuntimeProfileService runtimeProfileService,
 			QueryWeaverProductionService productionService, QueryRunService runService,
 			RuntimeClarificationService clarificationService, ThreadExecutionGuardService threadExecutionGuardService,
-			ExecutionSnapshotService executionSnapshotService, QueryWeaverConcurrencyProperties concurrencyProperties)
+			ExecutionSnapshotService executionSnapshotService, QueryTaskRepository queryTaskRepository,
+			QueryWeaverConcurrencyProperties concurrencyProperties)
 			throws GraphStateException {
 		this.compiledGraph = stateGraph.compile(CompileConfig.builder()
 			.saverConfig(SaverConfig.builder().register(graphCheckpointer).build())
@@ -138,6 +149,7 @@ public class GraphServiceImpl implements GraphService {
 		this.clarificationService = clarificationService;
 		this.threadExecutionGuardService = threadExecutionGuardService;
 		this.executionSnapshotService = executionSnapshotService;
+		this.queryTaskRepository = queryTaskRepository;
 		this.interactiveRetryAfterSeconds = retryAfterSeconds(
 				concurrencyProperties.getInteractiveQuery().getQueueTimeoutMs());
 		this.interactiveTaskTimeoutMs = Math.max(1L, concurrencyProperties.getInteractiveQuery().getTaskTimeoutMs());
@@ -349,6 +361,16 @@ public class GraphServiceImpl implements GraphService {
 			graphRequest.setThreadId(run.threadId());
 		}
 		assertRunRequestScope(run, graphRequest);
+		if (graphRequest.isDurableRecoveryTakeover()) {
+			SemanticQueryPlan recoverablePlan = recoverableSemanticPlan(run);
+			if (recoverablePlan != null) {
+				graphRequest.setRecoveredSemanticPlan(recoverablePlan);
+			}
+			String recoverablePlannerOutput = recoverablePlannerOutput(run, recoverablePlan);
+			if (StringUtils.hasText(recoverablePlannerOutput)) {
+				graphRequest.setRecoveredPlannerOutput(recoverablePlannerOutput);
+			}
+		}
 		if (!run.terminal()) {
 			assertExecutionSnapshotCompatible(run);
 		}
@@ -397,8 +419,19 @@ public class GraphServiceImpl implements GraphService {
 			run = runService.resume(run.runId(), feedbackKey);
 		}
 		claimThreadOrReject(run);
+		QueryRun leaseCandidate = run;
 		try {
-			runService.acquireLease(run.runId());
+			run = runService.acquireLease(run.runId());
+			if (graphRequest.isDurableRecoveryTakeover() && leaseCandidate.status() == RunStatus.RUNNING) {
+				runService.appendEvent(run.runId(), "RUN_RECOVERED", leaseCandidate.currentNode(),
+						toJson(Map.of("previousOwner", Objects.toString(leaseCandidate.ownerInstance(), ""),
+								"previousLeaseExpireTime", Objects.toString(leaseCandidate.leaseExpireTime(), ""), "recoveredNode",
+								Objects.toString(leaseCandidate.currentNode(), ""), "recoverySemantics", "AT_LEAST_ONCE_REPLAY",
+								"previousVisibleNodePasses", graphRequest.getDurableRecoveryReplayNodeSequence().size(),
+								"semanticPlanReused", graphRequest.getRecoveredSemanticPlan() != null)),
+						"Durable run recovered after lease expiry",
+						"run-recovered:" + run.runId() + ":" + leaseCandidate.revision());
+			}
 		}
 		catch (RunLeaseUnavailableException ex) {
 			throw new RunInProgressException(run.runId(), "Durable run is executing on another instance");
@@ -686,6 +719,8 @@ public class GraphServiceImpl implements GraphService {
 						: run.requestPayload();
 				GraphRequest request = JsonUtil.getObjectMapper().readValue(recoveryPayload, GraphRequest.class);
 				request.setRunId(run.runId());
+				request.setDurableRecoveryTakeover(true);
+				request.setDurableRecoveryReplayNodeSequence(recoveryReplayNodeSequence(run));
 				Sinks.Many<ServerSentEvent<GraphNodeResponse>> detachedSink = Sinks.many()
 					.multicast()
 					.onBackpressureBuffer(16, false);
@@ -694,6 +729,108 @@ public class GraphServiceImpl implements GraphService {
 			catch (Exception ex) {
 				log.debug("Durable run {} was not taken over in this scan: {}", run.runId(), ex.getMessage());
 			}
+		}
+	}
+
+	private List<String> recoveryReplayNodeSequence(QueryRun run) {
+		long replayStartSequence = 0;
+		if (queryTaskRepository.enabled(run.runId())) {
+			var activeTask = queryTaskRepository.active(run.runId()).orElse(null);
+			if (activeTask == null) {
+				return List.of();
+			}
+			replayStartSequence = runService
+				.eventByIdempotency(run.runId(), "todo-activated:" + run.runId() + ":" + activeTask.taskId())
+				.map(RunEvent::sequence)
+				.orElseGet(() -> runService.eventByIdempotency(run.runId(), "request-analysis:" + run.runId())
+					.map(RunEvent::sequence)
+					.orElse(0L));
+		}
+		List<String> visiblePasses = new java.util.ArrayList<>(
+				runService.outputNodeSequence(run.runId(), replayStartSequence));
+		if (!visiblePasses.isEmpty() && Objects.equals(visiblePasses.get(visiblePasses.size() - 1), run.currentNode())) {
+			// The last pass may have been only partially streamed when the process died. Replaying it visibly from the start is
+			// preferable to suppressing content that never reached the durable event log.
+			visiblePasses.remove(visiblePasses.size() - 1);
+		}
+		return List.copyOf(visiblePasses);
+	}
+
+	private SemanticQueryPlan recoverableSemanticPlan(QueryRun run) {
+		if (queryTaskRepository.enabled(run.runId())) {
+			var activeTask = queryTaskRepository.active(run.runId()).orElse(null);
+			if (activeTask == null) {
+				return null;
+			}
+			SemanticQueryPlan plan = queryTaskRepository.plan(run.runId(), activeTask.taskId());
+			return validRecoverablePlan(run, plan) ? plan : null;
+		}
+		RunEvent snapshot;
+		try {
+			snapshot = runService.latestEvent(run.runId(), "SEMANTIC_PLAN_SNAPSHOT");
+		}
+		catch (IllegalArgumentException missing) {
+			return null;
+		}
+		if (!StringUtils.hasText(snapshot.payload())
+				|| !Objects.toString(snapshot.idempotencyKey(), "").contains(":simple:")) {
+			return null;
+		}
+		try {
+			SemanticQueryPlan plan = JsonUtil.getObjectMapper().readValue(snapshot.payload(), SemanticQueryPlan.class);
+			return validRecoverablePlan(run, plan) ? plan : null;
+		}
+		catch (Exception invalid) {
+			log.warn("Unable to reuse persisted Semantic Query Plan for durable run {}: {}", run.runId(), invalid.getMessage());
+			return null;
+		}
+	}
+
+	private boolean validRecoverablePlan(QueryRun run, SemanticQueryPlan plan) {
+		return plan != null && plan.isExecutable() && Objects.equals(run.projectId(), plan.getProjectId())
+				&& Objects.equals(run.projectVersionId(), plan.getProjectVersionId());
+	}
+
+	private String recoverablePlannerOutput(QueryRun run, SemanticQueryPlan recoverablePlan) {
+		if (recoverablePlan == null) {
+			return null;
+		}
+		String scope = "simple";
+		if (queryTaskRepository.enabled(run.runId())) {
+			var activeTask = queryTaskRepository.active(run.runId()).orElse(null);
+			if (activeTask == null) {
+				return null;
+			}
+			scope = activeTask.taskId();
+		}
+		RunEvent snapshot;
+		RunEvent semanticSnapshot;
+		try {
+			snapshot = runService.latestEvent(run.runId(), "PLANNER_PLAN_SNAPSHOT");
+			semanticSnapshot = runService.latestEvent(run.runId(), "SEMANTIC_PLAN_SNAPSHOT");
+		}
+		catch (IllegalArgumentException missing) {
+			return null;
+		}
+		String scopedToken = ":" + scope + ":";
+		String plannerKey = Objects.toString(snapshot.idempotencyKey(), "");
+		String semanticKey = Objects.toString(semanticSnapshot.idempotencyKey(), "");
+		if (!StringUtils.hasText(snapshot.payload()) || !plannerKey.contains(scopedToken) || !semanticKey.contains(scopedToken)
+				|| snapshot.sequence() <= semanticSnapshot.sequence()) {
+			return null;
+		}
+		String semanticHashToken = ":sem-" + canonicalJson.hash(recoverablePlan) + ":";
+		if (plannerKey.contains(":sem-") && !plannerKey.contains(semanticHashToken)) {
+			return null;
+		}
+		try {
+			var parsed = JsonUtil.getObjectMapper().readTree(snapshot.payload());
+			return parsed.path("execution_plan").isArray() && !parsed.path("execution_plan").isEmpty() ? snapshot.payload()
+					: null;
+		}
+		catch (Exception invalid) {
+			log.warn("Unable to reuse persisted Planner output for durable run {}: {}", run.runId(), invalid.getMessage());
+			return null;
 		}
 	}
 
@@ -978,13 +1115,13 @@ public class GraphServiceImpl implements GraphService {
 	private SemanticQueryPlan requireApprovedSemanticPlan(String runId) {
 		RunEvent snapshot = runService.latestEvent(runId, "APPROVAL_PLAN_SNAPSHOT");
 		if (snapshot == null || !StringUtils.hasText(snapshot.payload())) {
-			throw new IllegalStateException("Approved Typed Semantic Plan snapshot is unavailable for run: " + runId);
+			throw new IllegalStateException("Approved Semantic Query Plan snapshot is unavailable for run: " + runId);
 		}
 		try {
 			return JsonUtil.getObjectMapper().readValue(snapshot.payload(), SemanticQueryPlan.class);
 		}
 		catch (Exception ex) {
-			throw new IllegalStateException("Unable to deserialize approved Typed Semantic Plan for run: " + runId, ex);
+			throw new IllegalStateException("Unable to deserialize approved Semantic Query Plan for run: " + runId, ex);
 		}
 	}
 
@@ -1034,7 +1171,7 @@ public class GraphServiceImpl implements GraphService {
 		}
 		boolean rejected = REPLAN_AFTER_REJECTION.equals(recoveryRequest.getRecoveryMode());
 		if (!rejected && recoveryRequest.getRecoveredSemanticPlan() == null) {
-			throw new IllegalStateException("Approved-plan recovery requires the exact persisted Typed Semantic Plan");
+			throw new IllegalStateException("Approved-plan recovery requires the exact persisted Semantic Query Plan");
 		}
 		productionService.completeAttempt(run.episodeId(), run.attemptId(), rejected ? "REJECTED" : "FAILED",
 				"GRAPH_CHECKPOINT_UNAVAILABLE");
@@ -1168,6 +1305,10 @@ public class GraphServiceImpl implements GraphService {
 		try {
 			String durableErrorCode = streamErrorCode(error);
 			String durableErrorMessage = streamErrorMessage(error);
+			if (isRecoverableModelFailure(error) && scheduleModelProviderRecovery(context, agentId, threadId,
+					durableErrorCode, durableErrorMessage)) {
+				return;
+			}
 			try {
 				runService.transition(context.getRunId(), RunStatus.FAILED, null, durableErrorCode, durableErrorMessage);
 			}
@@ -1550,11 +1691,44 @@ public class GraphServiceImpl implements GraphService {
 		context.cleanup();
 	}
 
+	private boolean scheduleModelProviderRecovery(StreamContext context, String agentId, String threadId,
+			String errorCode, String errorMessage) {
+		long priorRecoveries = runService.events(context.getRunId(), 0, 1000)
+			.stream()
+			.filter(event -> "MODEL_PROVIDER_RETRY_SCHEDULED".equals(event.eventType()))
+			.count();
+		if (priorRecoveries >= MAX_MODEL_PROVIDER_RUN_RECOVERIES) {
+			return false;
+		}
+		int recoveryAttempt = (int) priorRecoveries + 1;
+		Map<String, Object> payload = Map.of(
+				"errorCode", errorCode,
+				"attempt", recoveryAttempt,
+				"maxAttempts", MAX_MODEL_PROVIDER_RUN_RECOVERIES,
+				"currentNode", Objects.toString(runService.get(context.getRunId()).currentNode(), ""));
+		runService.appendEvent(context.getRunId(), "MODEL_PROVIDER_RETRY_SCHEDULED",
+				runService.get(context.getRunId()).currentNode(), toJson(payload),
+				"Transient model-provider failure; durable Run will resume from persisted state",
+				"model-provider-retry:" + context.getRunId() + ":" + recoveryAttempt);
+		multiTurnContextManager.persistPending(threadId);
+		emitControlMessage(context, agentId, threadId, runService.get(context.getRunId()).currentNode(),
+				"模型服务暂时不可用，当前进度已持久化，系统会自动继续执行。", "model-provider-retry");
+		if (context.getSink() != null) {
+			context.getSink().tryEmitComplete();
+		}
+		log.warn("Transient model-provider failure for run {}; scheduled durable recovery {}/{}: {}",
+				context.getRunId(), recoveryAttempt, MAX_MODEL_PROVIDER_RUN_RECOVERIES, errorMessage);
+		return true;
+	}
+
 	private static long retryAfterSeconds(long millis) {
 		return Math.max(1, (Math.max(0, millis) + 999) / 1000);
 	}
 
 	static String streamErrorCode(Throwable error) {
+		if (isRecoverableModelFailure(error)) {
+			return isModelTimeoutFailure(error) ? "MODEL_PROVIDER_TIMEOUT" : "MODEL_PROVIDER_UNAVAILABLE";
+		}
 		return isTimeoutFailure(error) ? "INTERACTIVE_QUERY_TIMEOUT"
 				: error == null ? "GRAPH_EXECUTION_FAILED" : error.getClass().getSimpleName();
 	}
@@ -1571,17 +1745,47 @@ public class GraphServiceImpl implements GraphService {
 	}
 
 	private static boolean isUpstreamModelFailure(Throwable error, String message) {
+		return isRecoverableModelFailure(error) || containsUpstreamHttpFailure(message);
+	}
+
+	static boolean isRecoverableModelFailure(Throwable error) {
 		Throwable current = error;
 		for (int depth = 0; current != null && depth < 8; depth++) {
+			if (current instanceof WebClientRequestException) {
+				return true;
+			}
+			if (current instanceof WebClientResponseException response) {
+				int status = response.getStatusCode().value();
+				return status == 408 || status == 429 || status >= 500;
+			}
 			String className = current.getClass().getName();
 			String currentMessage = current.getMessage();
-			if (className.contains("WebClientResponseException") || className.contains("WebClientRequestException")
+			if (className.contains("ModelCircuitOpenException") || className.contains("ModelCapacityException")
+					|| className.contains("TransientModelException") || className.contains("PrematureCloseException")
 					|| className.contains("ServiceUnavailable") || containsUpstreamHttpFailure(currentMessage)) {
 				return true;
 			}
 			current = current.getCause();
 		}
-		return containsUpstreamHttpFailure(message);
+		return false;
+	}
+
+	private static boolean isModelTimeoutFailure(Throwable error) {
+		Throwable current = error;
+		for (int depth = 0; current != null && depth < 8; depth++) {
+			if (current instanceof TimeoutException) {
+				return true;
+			}
+			if (current instanceof WebClientResponseException response && response.getStatusCode().value() == 408) {
+				return true;
+			}
+			String message = current.getMessage();
+			if (StringUtils.hasText(message) && message.toLowerCase(java.util.Locale.ROOT).contains("timeout")) {
+				return true;
+			}
+			current = current.getCause();
+		}
+		return false;
 	}
 
 	private static boolean containsUpstreamHttpFailure(String message) {
@@ -1616,6 +1820,52 @@ public class GraphServiceImpl implements GraphService {
 		return value.length() <= 500 ? value : value.substring(0, 500);
 	}
 
+	private boolean suppressDurableReplayOutput(GraphRequest request, String node) {
+		if (!request.isDurableRecoveryTakeover()) {
+			return false;
+		}
+		List<String> sequence = request.getDurableRecoveryReplayNodeSequence();
+		if (sequence == null || sequence.isEmpty()) {
+			return false;
+		}
+		synchronized (request) {
+			int index = request.getDurableRecoveryReplayNodeIndex();
+			if (index >= sequence.size()) {
+				return false;
+			}
+			String current = request.getDurableRecoveryReplayCurrentNode();
+			if (!StringUtils.hasText(current)) {
+				String expected = sequence.get(index);
+				if (!Objects.equals(expected, node)) {
+					log.info("Durable replay diverged before previously visible node pass; duplicate-output suppression stopped. expected={}, actual={}",
+							expected, node);
+					request.setDurableRecoveryReplayNodeIndex(sequence.size());
+					return false;
+				}
+				request.setDurableRecoveryReplayCurrentNode(node);
+				return true;
+			}
+			if (Objects.equals(current, node)) {
+				return true;
+			}
+			int next = index + 1;
+			request.setDurableRecoveryReplayNodeIndex(next);
+			request.setDurableRecoveryReplayCurrentNode(null);
+			if (next >= sequence.size()) {
+				return false;
+			}
+			String expected = sequence.get(next);
+			if (!Objects.equals(expected, node)) {
+				log.info("Durable replay diverged from previously visible node pass sequence; duplicate-output suppression stopped. expected={}, actual={}",
+						expected, node);
+				request.setDurableRecoveryReplayNodeIndex(sequence.size());
+				return false;
+			}
+			request.setDurableRecoveryReplayCurrentNode(node);
+			return true;
+		}
+	}
+
 	private static String toJson(Object value) {
 		try {
 			return JsonUtil.getObjectMapper().writeValueAsString(value);
@@ -1638,6 +1888,9 @@ public class GraphServiceImpl implements GraphService {
 		log.debug("Received Stream output: {}", chunk);
 
 		if (chunk == null || chunk.isEmpty()) {
+			return;
+		}
+		if (suppressDurableReplayOutput(request, node)) {
 			return;
 		}
 

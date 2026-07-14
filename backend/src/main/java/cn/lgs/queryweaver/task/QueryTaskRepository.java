@@ -80,7 +80,7 @@ public class QueryTaskRepository {
 		if (existing.isPresent()) {
 			return existing.orElseThrow();
 		}
-		QueryTask first = list(runId).stream().filter(task -> task.status() == TaskStatus.PENDING).findFirst()
+		QueryTask first = nextRunnable(runId)
 			.orElseThrow(() -> new IllegalStateException("No pending Todo can be activated for run " + runId));
 		activate(runId, first.taskId());
 		return active(runId).orElseThrow();

@@ -16,6 +16,7 @@
 package cn.lgs.queryweaver.dto;
 
 import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 import lombok.AllArgsConstructor;
@@ -72,5 +73,22 @@ public class GraphRequest {
 
 	/** Exact approved Typed Semantic Plan used when the native human-review checkpoint was lost. */
 	private SemanticQueryPlan recoveredSemanticPlan;
+
+	/** Process-local marker set only by the durable recovery scanner after lease expiry. */
+	@JsonIgnore
+	private boolean durableRecoveryTakeover;
+
+	/** Ordered output-producing node passes already visible before the process was lost. */
+	@JsonIgnore
+	@Builder.Default
+	private List<String> durableRecoveryReplayNodeSequence = List.of();
+
+	/** Mutable cursor used only while suppressing at-least-once replay output after takeover. */
+	@JsonIgnore
+	private int durableRecoveryReplayNodeIndex;
+
+	/** Current replayed node pass whose duplicate stream is being suppressed. */
+	@JsonIgnore
+	private String durableRecoveryReplayCurrentNode;
 
 }

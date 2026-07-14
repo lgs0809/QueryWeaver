@@ -15,6 +15,7 @@
  */
 package cn.lgs.queryweaver.workflow.node;
 
+import cn.lgs.queryweaver.common.json.CanonicalJson;
 import cn.lgs.queryweaver.dto.schema.SchemaDTO;
 import cn.lgs.queryweaver.enums.TextType;
 import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
@@ -25,6 +26,7 @@ import com.alibaba.cloud.ai.graph.action.NodeAction;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import cn.lgs.queryweaver.prompt.PromptConstant;
 import cn.lgs.queryweaver.prompt.PromptHelper;
+import cn.lgs.queryweaver.run.QueryRunService;
 import cn.lgs.queryweaver.service.llm.LlmService;
 import cn.lgs.queryweaver.util.ChatResponseUtil;
 import cn.lgs.queryweaver.util.FluxUtil;
@@ -52,6 +54,10 @@ public class PlannerNode implements NodeAction {
 
 	private final LlmService llmService;
 
+	private final QueryRunService queryRunService;
+
+	private final CanonicalJson canonicalJson;
+
 	@Override
 	public Map<String, Object> apply(OverAllState state) throws Exception {
 		Boolean sqlGenerationOnly = state.value(SQL_GENERATION_ONLY, false);
@@ -68,11 +74,30 @@ public class PlannerNode implements NodeAction {
 				Flux.just(ChatResponseUtil.createPureResponse(TextType.JSON.getStartSign())), flux,
 				Flux.just(ChatResponseUtil.createPureResponse(TextType.JSON.getEndSign())));
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
-				state, v -> Map.of(PLANNER_NODE_OUTPUT, v.substring(TextType.JSON.getStartSign().length(),
-						v.length() - TextType.JSON.getEndSign().length())),
-				chatResponseFlux);
+				state, v -> {
+					String plannerOutput = v.substring(TextType.JSON.getStartSign().length(),
+							v.length() - TextType.JSON.getEndSign().length());
+					persistPlannerSnapshot(state, plannerOutput);
+					return Map.of(PLANNER_NODE_OUTPUT, plannerOutput);
+				}, chatResponseFlux);
 
 		return Map.of(PLANNER_NODE_OUTPUT, generator);
+	}
+
+	private void persistPlannerSnapshot(OverAllState state, String plannerOutput) {
+		String runId = StateUtil.getStringValue(state, RUN_ID, "");
+		if (!StringUtils.hasText(runId) || !StringUtils.hasText(plannerOutput)) {
+			return;
+		}
+		String activeTodoId = StateUtil.getStringValue(state, ACTIVE_TODO_ID, "");
+		String scope = StringUtils.hasText(activeTodoId) ? activeTodoId : "simple";
+		SemanticQueryPlan semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
+				(SemanticQueryPlan) null);
+		String semanticHash = semanticPlan == null ? "none" : canonicalJson.hash(semanticPlan);
+		queryRunService.appendEvent(runId, "PLANNER_PLAN_SNAPSHOT", "planner", plannerOutput,
+				"Exact execution Planner output persisted for diagnosis and durable recovery",
+				"planner-plan-snapshot:" + runId + ":" + scope + ":sem-" + semanticHash + ":"
+						+ Integer.toHexString(plannerOutput.hashCode()));
 	}
 
 	private Flux<ChatResponse> handlePlanGenerate(OverAllState state) {
@@ -93,13 +118,13 @@ public class PlannerNode implements NodeAction {
 		String semanticModel = (String) state.value(GENEGRATED_SEMANTIC_MODEL_PROMPT).orElse("");
 		SemanticQueryPlan semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
 				(SemanticQueryPlan) null);
-		semanticModel = semanticModel + "\n\n# Typed Semantic Plan\n" + serializeSemanticPlan(semanticPlan);
+		semanticModel = semanticModel + "\n\n# Semantic Query Plan\n" + serializeSemanticPlan(semanticPlan);
 		Map<String, Object> preferredPlan = StateUtil.getObjectValue(state, PREFERRED_EXECUTION_PLAN, Map.class,
 				Map.of());
 		if (!preferredPlan.isEmpty()) {
 			semanticModel = semanticModel + "\n\n# Preferred Execution Start Hint (NON-AUTHORITATIVE)\n"
 					+ preferredPlanHint(preferredPlan)
-					+ "\nThis is only a starting hint. Revalidate applicability, Typed IR, Catalog, SQL Guard, "
+					+ "\nThis is only a starting hint. Revalidate applicability, Semantic Query Plan, Catalog, SQL Guard, "
 					+ "cost policy and human review. Ignore it whenever any condition differs.";
 		}
 		SchemaDTO schemaDTO = StateUtil.getObjectValue(state, TABLE_RELATION_OUTPUT, SchemaDTO.class);
@@ -133,15 +158,15 @@ public class PlannerNode implements NodeAction {
 
 		String previousPlan = StateUtil.getStringValue(state, PLANNER_NODE_OUTPUT, "");
 		return String.format(
-				"IMPORTANT: User rejected previous plan with feedback: \"%s\"\n\n" + "Original question: %s\n\n"
-						+ "Previous rejected plan:\n%s\n\n"
-						+ "CRITICAL: Generate new plan incorporating user feedback (\"%s\")",
+				"IMPORTANT: The previous execution plan requires replanning with this authoritative feedback: \"%s\"\n\n"
+						+ "Original question: %s\n\n" + "Previous execution plan:\n%s\n\n"
+						+ "CRITICAL: Generate a replacement execution plan that incorporates the feedback while preserving governed semantic bindings unless the feedback explicitly says they are wrong (\"%s\")",
 				validationError, input, previousPlan, validationError);
 	}
 
 	private String formatValidationError(String validationError) {
 		return validationError != null ? String
-			.format("**USER FEEDBACK (CRITICAL)**: %s\n\n**Must incorporate this feedback.**", validationError) : "";
+			.format("**REPLAN FEEDBACK (CRITICAL)**: %s\n\n**Must incorporate this feedback.**", validationError) : "";
 	}
 
 	private String serializeSemanticPlan(SemanticQueryPlan semanticPlan) {
@@ -152,7 +177,7 @@ public class PlannerNode implements NodeAction {
 			return JsonUtil.getObjectMapper().writeValueAsString(semanticPlan);
 		}
 		catch (Exception ex) {
-			throw new IllegalStateException("Failed to serialize typed semantic plan", ex);
+			throw new IllegalStateException("Failed to serialize Semantic Query Plan", ex);
 		}
 	}
 

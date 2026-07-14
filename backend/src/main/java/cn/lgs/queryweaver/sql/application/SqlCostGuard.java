@@ -17,6 +17,7 @@ package cn.lgs.queryweaver.sql.application;
 
 import cn.lgs.queryweaver.bo.schema.ResultSetBO;
 import cn.lgs.queryweaver.properties.QueryWeaverProperties;
+import cn.lgs.queryweaver.sql.application.DialectQueryCostEstimator.QueryCostEstimate;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
@@ -33,6 +35,7 @@ import org.springframework.stereotype.Component;
  * datasource. This is a system policy and never invents business filters.
  */
 @Component
+@RequiredArgsConstructor
 public class SqlCostGuard {
 
 	private static final Pattern CARTESIAN_JOIN = Pattern.compile(
@@ -42,6 +45,8 @@ public class SqlCostGuard {
 
 	private static final List<String> ESTIMATED_ROW_KEYS = List.of("rows", "plan rows", "plan_rows", "estimated rows",
 			"estimated_rows", "cardinality");
+
+	private final List<DialectQueryCostEstimator> costEstimators;
 
 	public CostAssessment validateSql(String sql, Collection<String> referencedTables, Collection<String> timeColumns,
 			QueryWeaverProperties.SqlExecutionPolicy policy) {
@@ -61,13 +66,88 @@ public class SqlCostGuard {
 			throw new SqlGuardViolationException("Literal date range is " + literalRangeDays
 					+ " days; configured maximum is " + policy.getMaxTimeRangeDays());
 		}
-		return new CostAssessment(tableCount, 0, false, List.of());
+		return new CostAssessment(tableCount, 0, 0, 0, 0, 0, 0, false, List.of(), List.of());
 	}
 
 	public CostAssessment validateExplain(ResultSetBO explainResult, int tableCount,
+			QueryWeaverProperties.SqlExecutionPolicy policy, String dialect) {
+		DialectQueryCostEstimator estimator = costEstimators.stream()
+			.filter(candidate -> candidate.supports(dialect))
+			.findFirst()
+			.orElse(null);
+		if (estimator != null) {
+			return validateEstimate(estimator.estimate(explainResult), tableCount, policy);
+		}
+		return validateLegacyExplain(explainResult, tableCount, policy);
+	}
+
+	/** Backward-compatible entry point used by older tests/callers without a dialect. */
+	public CostAssessment validateExplain(ResultSetBO explainResult, int tableCount,
+			QueryWeaverProperties.SqlExecutionPolicy policy) {
+		return validateLegacyExplain(explainResult, tableCount, policy);
+	}
+
+	private CostAssessment validateEstimate(QueryCostEstimate estimate, int tableCount,
+			QueryWeaverProperties.SqlExecutionPolicy policy) {
+		if (estimate.estimatedScanRows() > policy.getMaxEstimatedRows()) {
+			throw new SqlCostGuardViolationException("EXPLAIN estimates " + estimate.estimatedScanRows()
+					+ " scanned rows; configured maximum is " + policy.getMaxEstimatedRows() + diagnosticSuffix(estimate));
+		}
+		if (policy.getMaxEstimatedIntermediateRows() > 0
+				&& estimate.estimatedIntermediateRows() > policy.getMaxEstimatedIntermediateRows()) {
+			throw new SqlCostGuardViolationException("EXPLAIN estimates " + estimate.estimatedIntermediateRows()
+					+ " intermediate rows; configured maximum is " + policy.getMaxEstimatedIntermediateRows()
+					+ diagnosticSuffix(estimate));
+		}
+		if (policy.getMaxEstimatedJoinRows() > 0 && estimate.estimatedJoinRows() > policy.getMaxEstimatedJoinRows()) {
+			throw new SqlCostGuardViolationException("EXPLAIN estimates " + estimate.estimatedJoinRows()
+					+ " rows produced by a join; configured maximum is " + policy.getMaxEstimatedJoinRows()
+					+ diagnosticSuffix(estimate));
+		}
+		if (policy.getMaxEstimatedSortRows() > 0 && estimate.estimatedSortRows() > policy.getMaxEstimatedSortRows()) {
+			throw new SqlCostGuardViolationException("EXPLAIN estimates " + estimate.estimatedSortRows()
+					+ " rows entering sort/filesort; configured maximum is " + policy.getMaxEstimatedSortRows()
+					+ diagnosticSuffix(estimate));
+		}
+		if (policy.getMaxEstimatedAggregateRows() > 0
+				&& estimate.estimatedAggregateRows() > policy.getMaxEstimatedAggregateRows()) {
+			throw new SqlCostGuardViolationException("EXPLAIN estimates " + estimate.estimatedAggregateRows()
+					+ " rows handled by aggregation/grouping; configured maximum is " + policy.getMaxEstimatedAggregateRows()
+					+ diagnosticSuffix(estimate));
+		}
+		if (policy.getMaxEstimatedCost() > 0 && estimate.estimatedCost() > policy.getMaxEstimatedCost()) {
+			throw new SqlCostGuardViolationException("EXPLAIN estimated cost is " + estimate.estimatedCost()
+					+ "; configured maximum is " + policy.getMaxEstimatedCost() + diagnosticSuffix(estimate));
+		}
+		if (estimate.fullTableScan()) {
+			if (policy.isRejectFullTableScan()) {
+				throw new SqlCostGuardViolationException("EXPLAIN reports a full table scan" + diagnosticSuffix(estimate));
+			}
+			if (policy.getMaxFullScanRows() > 0 && estimate.estimatedScanRows() > policy.getMaxFullScanRows()) {
+				throw new SqlCostGuardViolationException("EXPLAIN reports a full table scan over approximately "
+						+ estimate.estimatedScanRows() + " rows; configured full-scan maximum is "
+						+ policy.getMaxFullScanRows() + diagnosticSuffix(estimate));
+			}
+		}
+		List<String> warnings = new ArrayList<>(estimate.warnings());
+		if (estimate.fullTableScan()) {
+			warnings.add("EXPLAIN reports a full table scan");
+		}
+		return new CostAssessment(tableCount, estimate.estimatedScanRows(), estimate.estimatedIntermediateRows(),
+				estimate.estimatedJoinRows(), estimate.estimatedSortRows(), estimate.estimatedAggregateRows(), estimate.estimatedCost(),
+				estimate.fullTableScan(), estimate.expensiveOperators(), List.copyOf(warnings));
+	}
+
+	private String diagnosticSuffix(QueryCostEstimate estimate) {
+		return estimate.expensiveOperators().isEmpty() ? ""
+				: "; expensive operators=" + String.join(",", estimate.expensiveOperators());
+	}
+
+	private CostAssessment validateLegacyExplain(ResultSetBO explainResult, int tableCount,
 			QueryWeaverProperties.SqlExecutionPolicy policy) {
 		if (explainResult == null || explainResult.getData() == null) {
-			return new CostAssessment(tableCount, 0, false, List.of("EXPLAIN returned no structured plan"));
+			return new CostAssessment(tableCount, 0, 0, 0, 0, 0, 0, false, List.of(),
+					List.of("EXPLAIN returned no structured plan"));
 		}
 		long estimatedRows = 0;
 		boolean fullTableScan = false;
@@ -77,16 +157,21 @@ public class SqlCostGuard {
 			fullTableScan |= isFullTableScan(row);
 		}
 		if (estimatedRows > policy.getMaxEstimatedRows()) {
-			throw new SqlGuardViolationException("EXPLAIN estimates " + estimatedRows
+			throw new SqlCostGuardViolationException("EXPLAIN estimates " + estimatedRows
 					+ " scanned rows; configured maximum is " + policy.getMaxEstimatedRows());
 		}
 		if (fullTableScan) {
 			if (policy.isRejectFullTableScan()) {
-				throw new SqlGuardViolationException("EXPLAIN reports a full table scan");
+				throw new SqlCostGuardViolationException("EXPLAIN reports a full table scan");
+			}
+			if (policy.getMaxFullScanRows() > 0 && estimatedRows > policy.getMaxFullScanRows()) {
+				throw new SqlCostGuardViolationException("EXPLAIN reports a full table scan over approximately "
+						+ estimatedRows + " rows; configured full-scan maximum is " + policy.getMaxFullScanRows());
 			}
 			warnings.add("EXPLAIN reports a full table scan");
 		}
-		return new CostAssessment(tableCount, estimatedRows, fullTableScan, List.copyOf(warnings));
+		return new CostAssessment(tableCount, estimatedRows, estimatedRows, 0, 0, 0, 0, fullTableScan, List.of(),
+				List.copyOf(warnings));
 	}
 
 	private boolean hasTimeFilter(String sql, Collection<String> timeColumns) {
@@ -142,7 +227,13 @@ public class SqlCostGuard {
 		return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
 	}
 
-	public record CostAssessment(int tableCount, long estimatedRows, boolean fullTableScan, List<String> warnings) {
+	public record CostAssessment(int tableCount, long estimatedRows, long estimatedIntermediateRows, long estimatedJoinRows,
+			long estimatedSortRows, long estimatedAggregateRows, double estimatedCost, boolean fullTableScan,
+			List<String> expensiveOperators, List<String> warnings) {
+
+		public CostAssessment(int tableCount, long estimatedRows, boolean fullTableScan, List<String> warnings) {
+			this(tableCount, estimatedRows, estimatedRows, 0, 0, 0, 0, fullTableScan, List.of(), warnings);
+		}
 	}
 
 }

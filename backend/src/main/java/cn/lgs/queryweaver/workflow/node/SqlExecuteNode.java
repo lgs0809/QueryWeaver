@@ -15,6 +15,7 @@
  */
 package cn.lgs.queryweaver.workflow.node;
 
+import static cn.lgs.queryweaver.constant.Constant.ADVANCED_EXECUTION_FALLBACK;
 import static cn.lgs.queryweaver.constant.Constant.AGENT_ID;
 import static cn.lgs.queryweaver.constant.Constant.ATTEMPT_ID;
 import static cn.lgs.queryweaver.constant.Constant.CATALOG_HASH;
@@ -22,6 +23,7 @@ import static cn.lgs.queryweaver.constant.Constant.DATASOURCE_ID;
 import static cn.lgs.queryweaver.constant.Constant.LAST_SQL_EXECUTED_STEP;
 import static cn.lgs.queryweaver.constant.Constant.LAST_SQL_RESULT_PAYLOAD;
 import static cn.lgs.queryweaver.constant.Constant.PLAN_CURRENT_STEP;
+import static cn.lgs.queryweaver.constant.Constant.PLAN_VALIDATION_ERROR;
 import static cn.lgs.queryweaver.constant.Constant.PLANNER_NODE_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.PROJECT_ID;
 import static cn.lgs.queryweaver.constant.Constant.PROJECT_VERSION_ID;
@@ -35,6 +37,8 @@ import static cn.lgs.queryweaver.constant.Constant.SQL_EXECUTE_NODE_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.SQL_GENERATE_COUNT;
 import static cn.lgs.queryweaver.constant.Constant.SQL_GENERATE_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.SQL_PATTERN_TEMPLATE_ID;
+import static cn.lgs.queryweaver.constant.Constant.SQL_PHYSICAL_OUTPUT;
+import static cn.lgs.queryweaver.constant.Constant.SQL_DRY_PLAN_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.SQL_REGENERATE_REASON;
 import static cn.lgs.queryweaver.constant.Constant.SQL_RESULT_LIST_MEMORY;
 import static cn.lgs.queryweaver.constant.Constant.SQL_RESULT_MEMORY_BY_STEP;
@@ -71,6 +75,7 @@ import cn.lgs.queryweaver.sql.application.SqlResultValidator;
 import cn.lgs.queryweaver.sql.application.SqlValidationClassifier;
 import cn.lgs.queryweaver.sql.application.SqlValidationDecisionException;
 import cn.lgs.queryweaver.sql.application.SqlValidationResult;
+import cn.lgs.queryweaver.sql.application.SqlResultValidator.ValidationMode;
 import cn.lgs.queryweaver.sql.application.SqlResultValidator.ValidationResult;
 import cn.lgs.queryweaver.service.llm.LlmService;
 import cn.lgs.queryweaver.service.nl2sql.Nl2SqlService;
@@ -156,11 +161,15 @@ public class SqlExecuteNode implements NodeAction {
 
 		Integer currentStep = PlanProcessUtil.getCurrentStepNumber(state);
 
-		String sqlQuery = StateUtil.getStringValue(state, SQL_GENERATE_OUTPUT);
-		sqlQuery = nl2SqlService.sqlTrim(sqlQuery);
+		String generatedSql = nl2SqlService.sqlTrim(StateUtil.getStringValue(state, SQL_GENERATE_OUTPUT));
+		String compilerMode = StateUtil.getStringValue(state, SQL_COMPILER_MODE, "CONSTRAINED_GENERATION");
+		String dryPlannedPhysicalSql = nl2SqlService.sqlTrim(StateUtil.getStringValue(state, SQL_PHYSICAL_OUTPUT, ""));
+		String sqlQuery = "SEMANTIC_SQL".equalsIgnoreCase(compilerMode) && !dryPlannedPhysicalSql.isBlank()
+				? dryPlannedPhysicalSql : generatedSql;
 		List<Object> sqlParameters = StateUtil.getObjectValue(state, SQL_COMPILED_PARAMETERS, List.class, List.of());
 
-		log.info("Executing SQL query: {} (parameterCount={})", sqlQuery, sqlParameters.size());
+		log.info("Executing physical SQL query: {} (compilerMode={}, parameterCount={})", sqlQuery, compilerMode,
+				sqlParameters.size());
 
 		Integer datasourceId = StateUtil.getObjectValue(state, DATASOURCE_ID, Integer.class);
 		DbConfigBO dbConfig = databaseUtil.getDatasourceDbConfig(datasourceId);
@@ -184,9 +193,11 @@ public class SqlExecuteNode implements NodeAction {
 		effectInput.put("projectVersionId", projectVersionId);
 		effectInput.put("catalogHash", state.value(CATALOG_HASH, ""));
 		effectInput.put("currentStep", currentStep);
-		effectInput.put("sql", sqlQuery);
+		effectInput.put("generatedSql", generatedSql);
+		effectInput.put("physicalSql", sqlQuery);
+		effectInput.put("dryPlan", StateUtil.getObjectValue(state, SQL_DRY_PLAN_OUTPUT, Map.class, Map.of()));
 		effectInput.put("parameters", sqlParameters);
-		effectInput.put("compilerMode", state.value(SQL_COMPILER_MODE, "CONSTRAINED_GENERATION"));
+		effectInput.put("compilerMode", compilerMode);
 		effectInput.put("plannerOutput", StateUtil.getStringValue(state, PLANNER_NODE_OUTPUT, ""));
 		effectInput.put("previousStepResults", new TreeMap<>(existingResults));
 		String effectInputHash = runNodeEffectService
@@ -214,8 +225,8 @@ public class SqlExecuteNode implements NodeAction {
 	 * @param sqlQuery The SQL query to execute
 	 * @param dbConfig The database configuration to use for execution
 	 * @param datasourceId The pinned QueryWeaver datasource ID
-	 * @param allowedTables Tables exposed by the pinned typed semantic plan
-	 * @param semanticPlan Pinned typed semantic plan used for result validation
+	 * @param allowedTables Tables exposed by the pinned Semantic Query Plan
+	 * @param semanticPlan Pinned Semantic Query Plan used for result validation
 	 * @return Map containing the generator for streaming output
 	 */
 	@SuppressWarnings("unchecked")
@@ -267,10 +278,21 @@ public class SqlExecuteNode implements NodeAction {
 				preflightSummary.put("explainEnabled", properties.getSqlExecution().isExplainEnabled());
 				preflightSummary.put("previewEnabled", properties.getSqlExecution().isPreviewEnabled());
 				preflightSummary.put("compilerMode", state.value(SQL_COMPILER_MODE, "CONSTRAINED_GENERATION"));
+				preflightSummary.put("dryPlan", StateUtil.getObjectValue(state, SQL_DRY_PLAN_OUTPUT, Map.class, Map.of()));
 				preflightSummary.put("parameterCount", sqlParameters.size());
-				runPreflight(dbAccessor, dbConfig, sqlQuery, sqlParameters, staticCost.tableCount(), catalog,
-						cancellationKey);
+				SqlCostGuard.CostAssessment explainCost = runPreflight(dbAccessor, dbConfig, sqlQuery, sqlParameters,
+						staticCost.tableCount(), catalog, cancellationKey);
 				preflightSummary.put("decision", "PASS");
+				if (explainCost != null) {
+					preflightSummary.put("estimatedScanRows", explainCost.estimatedRows());
+					preflightSummary.put("estimatedIntermediateRows", explainCost.estimatedIntermediateRows());
+					preflightSummary.put("estimatedJoinRows", explainCost.estimatedJoinRows());
+					preflightSummary.put("estimatedSortRows", explainCost.estimatedSortRows());
+					preflightSummary.put("estimatedAggregateRows", explainCost.estimatedAggregateRows());
+					preflightSummary.put("estimatedCost", explainCost.estimatedCost());
+					preflightSummary.put("fullTableScan", explainCost.fullTableScan());
+					preflightSummary.put("expensiveOperators", explainCost.expensiveOperators());
+				}
 				emitter.next(ChatResponseUtil.createResponse("SQL预检通过，开始正式执行..."));
 
 				DbQueryParameter dbQueryParameter = queryParameter(sqlQuery, sqlParameters, dbConfig.getSchema(),
@@ -278,8 +300,13 @@ public class SqlExecuteNode implements NodeAction {
 						properties.getSqlExecution().getQueryTimeoutSeconds(), cancellationKey);
 				ResultSetBO resultSetBO = dbAccessor.executeSqlAndReturnObject(dbConfig, dbQueryParameter);
 				sensitiveResultSanitizer.sanitize(resultSetBO, catalog);
+				String executionCompilerMode = StateUtil.getStringValue(state, SQL_COMPILER_MODE, "");
+				boolean advancedExecution = state.value(ADVANCED_EXECUTION_FALLBACK, false)
+						|| "SEMANTIC_SQL".equalsIgnoreCase(executionCompilerMode);
+				ValidationMode resultValidationMode = advancedExecution ? ValidationMode.ADVANCED_EXECUTION
+						: ValidationMode.STRICT_SEMANTIC_PLAN;
 				ValidationResult resultValidation = sqlResultValidator.validate(resultSetBO, semanticPlan,
-						properties.getSqlExecution().getMaxRows());
+						properties.getSqlExecution().getMaxRows(), resultValidationMode);
 				for (String error : resultValidation.errors()) {
 					log.warn("SQL deterministic result review error: {}", error);
 				}
@@ -375,8 +402,28 @@ public class SqlExecuteNode implements NodeAction {
 						emitter.next(ChatResponseUtil.createResponse("SQL执行失败，进入统一有界修复: " + errorMessage));
 					}
 					else {
-						result.put(SQL_REGENERATE_REASON, SqlRetryDto.empty());
-						emitter.error(new IllegalStateException("SQL repair budget exhausted: " + repairDecision.reason(), e));
+						BudgetDecision replanDecision = repairPolicy.consumeTransition(currentBudget, Decision.REPLAN_EXECUTION);
+						if (replanDecision.allowed()) {
+							result.put(QUERY_REPAIR_BUDGET, replanDecision.budget());
+							result.put(PLAN_VALIDATION_ERROR,
+									"EXECUTION_REPLAN_REQUIRED: SQL repair budget exhausted for the current execution strategy; "
+											+ errorMessage);
+							result.put(PLAN_CURRENT_STEP, 1);
+							result.put(SQL_REGENERATE_REASON, SqlRetryDto.empty());
+							result.put(SQL_EXECUTE_NODE_OUTPUT, Map.of());
+							result.put(SQL_EXECUTED_QUERY_OUTPUT, Map.of());
+							result.put(SQL_RESULT_MEMORY_BY_STEP, Map.of());
+							result.put(SQL_RESULT_LIST_MEMORY, List.of());
+							result.put(LAST_SQL_EXECUTED_STEP, 0);
+							result.put(LAST_SQL_RESULT_PAYLOAD, "");
+							emitter.next(ChatResponseUtil.createResponse(
+									"当前执行策略的 SQL 修复预算已用尽，保留语义绑定并回到 Planner 重新规划执行步骤。"));
+						}
+						else {
+							result.put(SQL_REGENERATE_REASON, SqlRetryDto.empty());
+							emitter.error(new IllegalStateException(
+									"SQL repair and execution replan budgets exhausted: " + replanDecision.reason(), e));
+						}
 					}
 				}
 				else {
@@ -498,19 +545,23 @@ public class SqlExecuteNode implements NodeAction {
 		}
 	}
 
-	private void runPreflight(Accessor accessor, DbConfigBO dbConfig, String sql, List<Object> parameters,
-			int tableCount, SemanticCatalogSnapshot catalog, String cancellationKey) throws Exception {
+	private SqlCostGuard.CostAssessment runPreflight(Accessor accessor, DbConfigBO dbConfig, String sql,
+			List<Object> parameters, int tableCount, SemanticCatalogSnapshot catalog, String cancellationKey) throws Exception {
 		QueryWeaverProperties.SqlExecutionPolicy policy = properties.getSqlExecution();
+		SqlCostGuard.CostAssessment explainCost = null;
 		if (policy.isExplainEnabled()) {
 			String explainSql = sqlPreflightPlanner.explainSql(sql, dbConfig.getDialectType()).orElse(null);
 			if (explainSql != null) {
 				DbQueryParameter explainParameter = queryParameter(explainSql, parameters, dbConfig.getSchema(),
 						Math.max(1, policy.getPreviewRows()), policy.getPreflightTimeoutSeconds(), cancellationKey);
 				ResultSetBO explainResult = accessor.executeSqlAndReturnObject(dbConfig, explainParameter);
-				SqlCostGuard.CostAssessment cost = sqlCostGuard.validateExplain(explainResult, tableCount, policy);
-				log.info("SQL EXPLAIN cost guard passed, estimatedRows={}, fullTableScan={}", cost.estimatedRows(),
-						cost.fullTableScan());
-				cost.warnings().forEach(warning -> log.warn("SQL cost guard warning: {}", warning));
+				explainCost = sqlCostGuard.validateExplain(explainResult, tableCount, policy, dbConfig.getDialectType());
+				log.info(
+						"SQL EXPLAIN cost guard passed, scanRows={}, intermediateRows={}, joinRows={}, sortRows={}, aggregateRows={}, estimatedCost={}, fullTableScan={}, operators={}",
+						explainCost.estimatedRows(), explainCost.estimatedIntermediateRows(), explainCost.estimatedJoinRows(),
+						explainCost.estimatedSortRows(), explainCost.estimatedAggregateRows(), explainCost.estimatedCost(),
+						explainCost.fullTableScan(), explainCost.expensiveOperators());
+				explainCost.warnings().forEach(warning -> log.warn("SQL cost guard warning: {}", warning));
 			}
 		}
 		if (policy.isPreviewEnabled()) {
@@ -520,6 +571,7 @@ public class SqlExecuteNode implements NodeAction {
 			sensitiveResultSanitizer.sanitize(previewResult, catalog);
 			log.info("SQL preview preflight passed with maxRows={}", policy.getPreviewRows());
 		}
+		return explainCost;
 	}
 
 	private Set<String> semanticTimeColumns(SemanticQueryPlan semanticPlan) {

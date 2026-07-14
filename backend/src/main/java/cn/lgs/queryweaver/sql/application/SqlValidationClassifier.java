@@ -44,6 +44,12 @@ public class SqlValidationClassifier {
 		if (contains(normalized, "human review", "require review", "人工审核", "审批")) {
 			return result(SqlValidationDecision.REQUIRE_REVIEW, errorType, message, "human-feedback", 0, retriesUsed);
 		}
+		if (root instanceof SqlCostGuardViolationException) {
+			// QueryRepairPolicy is the durable source of truth for retry/replan budgets. Do not
+			// pre-empt it with the classifier's legacy local retry counter.
+			return boundedRetry(errorType, "QUERY_COST_EXCEEDED: " + message, "sql-generate", Integer.MAX_VALUE,
+					retriesUsed);
+		}
 		if (contains(normalized, "guard", "unsafe", "denies", "forbidden", "not allowed", "security", "sensitive",
 				"read-only", "readonly", "drop ", "delete ", "update ", "insert ", "truncate ")) {
 			return result(SqlValidationDecision.FATAL, errorType, message, null, 0, retriesUsed);

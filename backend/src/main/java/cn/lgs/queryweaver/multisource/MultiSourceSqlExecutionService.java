@@ -19,6 +19,8 @@ import cn.lgs.queryweaver.bo.DbConfigBO;
 import cn.lgs.queryweaver.bo.schema.ResultSetBO;
 import cn.lgs.queryweaver.connector.DbQueryParameter;
 import cn.lgs.queryweaver.connector.accessor.Accessor;
+import cn.lgs.queryweaver.operations.QueryWeaverProductionService;
+import cn.lgs.queryweaver.operations.QueryWeaverProductionService.SqlTraceRequest;
 import cn.lgs.queryweaver.properties.QueryWeaverProperties;
 import cn.lgs.queryweaver.operations.SemanticCatalogCache;
 import cn.lgs.queryweaver.semantic.compiler.SqlDialect;
@@ -32,6 +34,7 @@ import cn.lgs.queryweaver.sql.application.SqlPreflightPlanner;
 import cn.lgs.queryweaver.sql.application.SqlResultValidator;
 import cn.lgs.queryweaver.service.nl2sql.Nl2SqlService;
 import cn.lgs.queryweaver.util.DatabaseUtil;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,8 +42,10 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MultiSourceSqlExecutionService {
@@ -67,6 +72,8 @@ public class MultiSourceSqlExecutionService {
 
 	private final SemanticCatalogCache semanticCatalogCache;
 
+	private final QueryWeaverProductionService productionService;
+
 	public SqlDialect dialect(Integer datasourceId) {
 		if (datasourceId == null || datasourceId <= 0) {
 			throw new IllegalArgumentException("datasourceId must be positive");
@@ -77,12 +84,26 @@ public class MultiSourceSqlExecutionService {
 	public ResultSetBO execute(Long projectId, Long projectVersionId, String executionOwner, Integer datasourceId,
 			Set<String> allowedTables, String sql, SemanticQueryPlan semanticPlan) throws Exception {
 		return execute(projectId, projectVersionId, executionOwner, executionOwner, datasourceId, allowedTables, sql,
-				List.of(), semanticPlan);
+				List.of(), semanticPlan, null, null);
 	}
 
 	public ResultSetBO execute(Long projectId, Long projectVersionId, String principalId, String executionOwner,
 			Integer datasourceId, Set<String> allowedTables, String sql, List<Object> parameters,
 			SemanticQueryPlan semanticPlan) throws Exception {
+		return execute(projectId, projectVersionId, principalId, executionOwner, datasourceId, allowedTables, sql, parameters,
+				semanticPlan, null, null);
+	}
+
+	public ResultSetBO execute(Long projectId, Long projectVersionId, String principalId, String executionOwner,
+			Integer datasourceId, Set<String> allowedTables, String sql, List<Object> parameters,
+			SemanticQueryPlan semanticPlan, String attemptId, String traceKey) throws Exception {
+		long startNanos = System.nanoTime();
+		Map<String, Object> guardSummary = new LinkedHashMap<>();
+		Map<String, Object> costSummary = new LinkedHashMap<>();
+		Map<String, Object> explainSummary = new LinkedHashMap<>();
+		Map<String, Object> previewSummary = new LinkedHashMap<>();
+		Map<String, Object> resultSummary = new LinkedHashMap<>();
+		String normalizedSql = nl2SqlService.sqlTrim(sql);
 		if (datasourceId == null || datasourceId <= 0) {
 			throw new IllegalArgumentException("datasourceId must be positive");
 		}
@@ -93,7 +114,6 @@ public class MultiSourceSqlExecutionService {
 		if (normalizedAllowedTables.isEmpty()) {
 			throw new IllegalArgumentException("Source subplan must expose at least one physical table");
 		}
-		String normalizedSql = nl2SqlService.sqlTrim(sql);
 		if (normalizedSql == null || normalizedSql.isBlank()) {
 			throw new IllegalArgumentException("Generated SQL is empty");
 		}
@@ -109,26 +129,46 @@ public class MultiSourceSqlExecutionService {
 		try {
 			SqlExecutionGuard.GuardResult guard = sqlExecutionGuard.validate(normalizedSql, dbConfig.getDialectType(),
 					normalizedAllowedTables, dbConfig.getSchema());
-			SqlCostGuard.CostAssessment staticCost = sqlCostGuard.validateSql(normalizedSql, guard.referencedTables(),
-					semanticTimeColumns(semanticPlan), properties.getSqlExecution());
+			guardSummary.put("decision", "PASS");
+			guardSummary.put("referencedTables", guard.referencedTables());
+			guardSummary.put("allowedTables", normalizedAllowedTables);
+			Set<String> timeColumns = semanticTimeColumns(semanticPlan);
+			SqlCostGuard.CostAssessment staticCost = sqlCostGuard.validateSql(normalizedSql, guard.referencedTables(), timeColumns,
+					properties.getSqlExecution());
+			costSummary.put("decision", "PASS");
+			costSummary.put("tableCount", staticCost.tableCount());
+			costSummary.put("timeColumns", timeColumns);
 			Accessor accessor = databaseUtil.getDatasourceAccessor(datasourceId);
-			runPreflight(accessor, dbConfig, normalizedSql, parameters, staticCost.tableCount(), catalog,
-					effectiveExecutionOwner);
+			SqlCostGuard.CostAssessment explainCost = runPreflight(accessor, dbConfig, normalizedSql, parameters,
+					staticCost.tableCount(), catalog, effectiveExecutionOwner, explainSummary, previewSummary, semanticPlan);
+			if (explainCost != null) {
+				putExplainCost(explainSummary, explainCost);
+			}
 			ResultSetBO result = accessor.executeSqlAndReturnObject(dbConfig,
 					queryParameter(normalizedSql, dbConfig.getSchema(), properties.getSqlExecution().getMaxRows(),
 							properties.getSqlExecution().getQueryTimeoutSeconds(), effectiveExecutionOwner, parameters));
 			sensitiveResultSanitizer.sanitize(result, catalog);
 			SqlResultValidator.ValidationResult validation = sqlResultValidator.validate(result, semanticPlan,
 					properties.getSqlExecution().getMaxRows());
+			resultSummary.put("decision", validation.valid() ? "PASS" : "REJECT");
+			resultSummary.put("rowCount", result == null || result.getData() == null ? 0 : result.getData().size());
+			resultSummary.put("warnings", validation.warnings());
+			resultSummary.put("compilerMode", semanticPlan == null ? "" : semanticPlan.getCompilerMode());
 			if (!validation.valid()) {
 				throw new IllegalStateException(
 						"SQL result validation failed: " + String.join("; ", validation.errors()));
 			}
 			permit.success();
+			recordSqlTrace(attemptId, traceKey, normalizedSql, guardSummary, costSummary, explainSummary, previewSummary,
+					resultSummary, "SUCCEEDED", startNanos, null);
 			return result;
 		}
 		catch (Exception ex) {
 			permit.failure();
+			guardSummary.putIfAbsent("decision", "REJECT");
+			resultSummary.putIfAbsent("decision", "FAILED");
+			recordSqlTrace(attemptId, traceKey, normalizedSql, guardSummary, costSummary, explainSummary, previewSummary,
+					resultSummary, "FAILED", startNanos, ex.getClass().getSimpleName());
 			throw ex;
 		}
 		finally {
@@ -199,16 +239,25 @@ public class MultiSourceSqlExecutionService {
 		return quote + value + quote;
 	}
 
-	private void runPreflight(Accessor accessor, DbConfigBO dbConfig, String sql, List<Object> parameters, int tableCount,
-			SemanticCatalogSnapshot catalog, String cancellationKey) throws Exception {
+	private SqlCostGuard.CostAssessment runPreflight(Accessor accessor, DbConfigBO dbConfig, String sql,
+			List<Object> parameters, int tableCount, SemanticCatalogSnapshot catalog, String cancellationKey,
+			Map<String, Object> explainSummary, Map<String, Object> previewSummary, SemanticQueryPlan semanticPlan)
+			throws Exception {
 		QueryWeaverProperties.SqlExecutionPolicy policy = properties.getSqlExecution();
+		explainSummary.put("explainEnabled", policy.isExplainEnabled());
+		explainSummary.put("previewEnabled", policy.isPreviewEnabled());
+		explainSummary.put("compilerMode",
+				semanticPlan == null || semanticPlan.getCompilerMode() == null ? "" : semanticPlan.getCompilerMode());
+		explainSummary.put("parameterCount", parameters == null ? 0 : parameters.size());
+		SqlCostGuard.CostAssessment explainCost = null;
 		if (policy.isExplainEnabled()) {
 			String explainSql = sqlPreflightPlanner.explainSql(sql, dbConfig.getDialectType()).orElse(null);
 			if (explainSql != null) {
 				ResultSetBO explain = accessor.executeSqlAndReturnObject(dbConfig,
 						queryParameter(explainSql, dbConfig.getSchema(), Math.max(1, policy.getPreviewRows()),
 								policy.getPreflightTimeoutSeconds(), cancellationKey + ":explain", parameters));
-				sqlCostGuard.validateExplain(explain, tableCount, policy);
+				explainCost = sqlCostGuard.validateExplain(explain, tableCount, policy, dbConfig.getDialectType());
+				explainSummary.put("decision", "PASS");
 			}
 		}
 		if (policy.isPreviewEnabled()) {
@@ -216,6 +265,38 @@ public class MultiSourceSqlExecutionService {
 					queryParameter(sql, dbConfig.getSchema(), Math.max(1, policy.getPreviewRows()),
 							policy.getPreflightTimeoutSeconds(), cancellationKey + ":preview", parameters));
 			sensitiveResultSanitizer.sanitize(preview, catalog);
+			previewSummary.put("decision", "PASS");
+			previewSummary.put("rowCount", preview == null || preview.getData() == null ? 0 : preview.getData().size());
+		}
+		return explainCost;
+	}
+
+	private void putExplainCost(Map<String, Object> summary, SqlCostGuard.CostAssessment cost) {
+		summary.put("estimatedScanRows", cost.estimatedRows());
+		summary.put("estimatedIntermediateRows", cost.estimatedIntermediateRows());
+		summary.put("estimatedJoinRows", cost.estimatedJoinRows());
+		summary.put("estimatedSortRows", cost.estimatedSortRows());
+		summary.put("estimatedAggregateRows", cost.estimatedAggregateRows());
+		summary.put("estimatedCost", cost.estimatedCost());
+		summary.put("fullTableScan", cost.fullTableScan());
+		summary.put("expensiveOperators", cost.expensiveOperators());
+		summary.put("warnings", cost.warnings());
+	}
+
+	private void recordSqlTrace(String attemptId, String traceKey, String sql, Map<String, Object> guardSummary,
+			Map<String, Object> costSummary, Map<String, Object> explainSummary, Map<String, Object> previewSummary,
+			Map<String, Object> resultSummary, String status, long startNanos, String errorType) {
+		if (attemptId == null || attemptId.isBlank() || traceKey == null || traceKey.isBlank()) {
+			return;
+		}
+		try {
+			productionService.recordSqlTrace(attemptId,
+					new SqlTraceRequest(traceKey, sql, Map.copyOf(guardSummary), Map.copyOf(costSummary),
+							Map.copyOf(explainSummary), Map.copyOf(previewSummary), Map.copyOf(resultSummary), status, 0,
+							Math.max(0, (System.nanoTime() - startNanos) / 1_000_000), errorType));
+		}
+		catch (RuntimeException traceError) {
+			log.warn("Unable to persist governed SQL trace for attempt {}: {}", attemptId, traceError.getMessage());
 		}
 	}
 

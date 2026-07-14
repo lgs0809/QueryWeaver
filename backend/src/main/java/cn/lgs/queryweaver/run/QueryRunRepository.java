@@ -157,6 +157,25 @@ public class QueryRunRepository {
 				""", eventMapper, runId, eventType));
 	}
 
+	public List<String> outputNodeSequence(String runId) {
+		return outputNodeSequence(runId, 0);
+	}
+
+	public List<String> outputNodeSequence(String runId, long afterSequence) {
+		return jdbc.queryForList("""
+				WITH ordered_outputs AS (
+				    SELECT sequence, node_name,
+				           LAG(node_name) OVER (ORDER BY sequence) AS previous_node
+				    FROM qw_run_event
+				    WHERE run_id = ? AND event_type = 'NODE_OUTPUT' AND node_name IS NOT NULL AND sequence > ?
+				)
+				SELECT node_name
+				FROM ordered_outputs
+				WHERE previous_node IS DISTINCT FROM node_name
+				ORDER BY sequence
+				""", String.class, runId, Math.max(0, afterSequence));
+	}
+
 	public int acquireLease(String runId, long expectedRevision, String ownerInstance, LocalDateTime expiresAt,
 			LocalDateTime now) {
 		return jdbc.update("""

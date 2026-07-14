@@ -77,6 +77,9 @@ public class PlanExecutorNode implements NodeAction {
 			log.debug("Reusing validated plan hash {}", snapshot.outputHash());
 		}
 		result.put(PLAN_VALIDATION_STATUS, true);
+		// Once a replacement/initial plan validates, stale replan feedback must not leak into later steps or tasks.
+		result.put(PLAN_VALIDATION_ERROR, "");
+		result.put(PLAN_REPAIR_COUNT, 0);
 
 		Boolean humanReviewEnabled = state.value(HUMAN_REVIEW_ENABLED, false);
 		if (Boolean.TRUE.equals(humanReviewEnabled)) {
@@ -88,6 +91,9 @@ public class PlanExecutorNode implements NodeAction {
 		int currentStep = PlanProcessUtil.getCurrentStepNumber(state);
 		List<ExecutionStep> executionPlan = plan.getExecutionPlan();
 		boolean sqlGenerationOnly = state.value(SQL_GENERATION_ONLY, false);
+		if (currentStep < 1) {
+			throw new IllegalStateException("Plan current step must be >= 1, actual=" + currentStep);
+		}
 		if (currentStep > executionPlan.size()) {
 			log.info("Plan completed, current step: {}, total steps: {}", currentStep, executionPlan.size());
 			result.put(PLAN_CURRENT_STEP, 1);

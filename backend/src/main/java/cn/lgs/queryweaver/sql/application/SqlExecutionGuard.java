@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Parses generated SQL before execution and enforces QueryWeaver's system-level safety
- * boundary. Business correctness is handled by the typed semantic plan; this guard is
+ * boundary. Business correctness is handled by the Semantic Query Plan; this guard is
  * intentionally limited to deterministic execution safety and table scope.
  */
 @Component

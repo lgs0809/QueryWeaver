@@ -224,6 +224,16 @@ public class QueryRunService {
 			.orElseThrow(() -> new IllegalArgumentException("Run event not found: " + runId + "/" + eventType));
 	}
 
+	public List<String> outputNodeSequence(String runId) {
+		get(runId);
+		return repository.outputNodeSequence(runId);
+	}
+
+	public List<String> outputNodeSequence(String runId, long afterSequence) {
+		get(runId);
+		return repository.outputNodeSequence(runId, afterSequence);
+	}
+
 	public Optional<RunEvent> eventByIdempotency(String runId, String idempotencyKey) {
 		get(runId);
 		return repository.findEventByIdempotency(runId, idempotencyKey);

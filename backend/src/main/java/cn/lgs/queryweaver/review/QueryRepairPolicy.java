@@ -64,7 +64,7 @@ public class QueryRepairPolicy {
 					: BudgetDecision.allowed(new RepairBudget(budget.sqlRepairsUsed() + 1,
 							budget.semanticReplansUsed(), budget.retrievalRepairsUsed(), budget.semanticReviewsUsed(),
 							budget.clarificationsUsed(), budget.totalTransitions() + 1), "SQL_REPAIR_CONSUMED");
-			case REPLAN -> budget.semanticReplansUsed() >= Math.max(0, maxSemanticReplans)
+			case REPLAN_EXECUTION, REBIND_SEMANTIC, REPLAN -> budget.semanticReplansUsed() >= Math.max(0, maxSemanticReplans)
 					? BudgetDecision.rejected(budget, "SEMANTIC_REPLAN_BUDGET_EXHAUSTED")
 					: BudgetDecision.allowed(new RepairBudget(budget.sqlRepairsUsed(), budget.semanticReplansUsed() + 1,
 							budget.retrievalRepairsUsed(), budget.semanticReviewsUsed(), budget.clarificationsUsed(),

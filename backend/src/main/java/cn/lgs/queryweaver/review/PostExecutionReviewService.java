@@ -20,6 +20,7 @@ import cn.lgs.queryweaver.review.PostExecutionReview.Decision;
 import cn.lgs.queryweaver.review.PostExecutionReview.IssueType;
 import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
 import cn.lgs.queryweaver.sql.application.SqlResultValidator;
+import cn.lgs.queryweaver.sql.application.SqlResultValidator.ValidationMode;
 import cn.lgs.queryweaver.sql.application.SqlResultValidator.ValidationResult;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,30 +42,59 @@ public class PostExecutionReviewService {
 
 	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
 			int configuredMaxRows) {
-		return review(question, plan, sql, resultSet, configuredMaxRows, ReviewMode.CONFIGURED);
+		return review(question, plan, sql, resultSet, configuredMaxRows, "", ReviewMode.CONFIGURED);
 	}
 
 	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
 			int configuredMaxRows, ReviewMode mode) {
-		ValidationResult deterministic = resultValidator.validate(resultSet, plan, configuredMaxRows);
-		PostExecutionReview preliminary = deterministic.valid()
-				? PostExecutionReview.deterministicPass(deterministic.warnings())
-				: PostExecutionReview.deterministicRetry(deterministic.errors(), deterministic.warnings());
-		if (!shouldRunSemanticReviewer(mode, deterministic, plan)) {
+		return review(question, plan, sql, resultSet, configuredMaxRows, "", mode);
+	}
+
+	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+			int configuredMaxRows, String executionPlan, ReviewMode mode) {
+		return review(question, plan, sql, resultSet, configuredMaxRows, executionPlan, mode,
+				ValidationMode.STRICT_SEMANTIC_PLAN);
+	}
+
+	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+			int configuredMaxRows, String executionPlan, ReviewMode mode, ValidationMode validationMode) {
+		return review(question, plan, sql, resultSet, configuredMaxRows, executionPlan, mode, validationMode, List.of());
+	}
+
+	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+			int configuredMaxRows, String executionPlan, ReviewMode mode, ValidationMode validationMode,
+			List<String> contextualWarnings) {
+		ValidationResult deterministic = resultValidator.validate(resultSet, plan, configuredMaxRows, validationMode);
+		List<String> warnings = new ArrayList<>(deterministic.warnings());
+		if (contextualWarnings != null) {
+			contextualWarnings.stream().filter(value -> value != null && !value.isBlank()).forEach(warnings::add);
+		}
+		warnings = List.copyOf(new java.util.LinkedHashSet<>(warnings));
+		PostExecutionReview preliminary = deterministic.valid() ? PostExecutionReview.deterministicPass(warnings)
+				: PostExecutionReview.deterministicRetry(deterministic.errors(), warnings);
+		boolean contextualReviewRequired = contextualWarnings != null && !contextualWarnings.isEmpty();
+		// DETERMINISTIC_ONLY is the durable budget boundary, not merely a preference. Contextual dry-plan warnings may
+		// request a semantic review while budget remains, but they must never bypass an already exhausted review budget.
+		if (mode == ReviewMode.DETERMINISTIC_ONLY) {
+			return preliminary;
+		}
+		if (!shouldRunSemanticReviewer(mode, deterministic, plan) && !contextualReviewRequired) {
 			return preliminary;
 		}
 		try {
-			PostExecutionReview reviewed = semanticReviewer.review(question, plan, sql, resultSet, deterministic.errors(),
-					deterministic.warnings());
-			return normalize(reviewed, deterministic);
+			PostExecutionReview reviewed = semanticReviewer.review(question, plan, sql, resultSet, executionPlan,
+					deterministic.errors(), warnings, validationMode == ValidationMode.ADVANCED_EXECUTION);
+			PostExecutionReview normalized = normalize(reviewed, deterministic, warnings, validationMode, question,
+					executionPlan, sql);
+			return normalizeGovernedEmptyMerge(normalized, deterministic, warnings, plan, resultSet);
 		}
 		catch (RuntimeException ex) {
 			log.warn("Semantic post-execution reviewer was ignored because its constrained result was unavailable/invalid: {}",
 					ex.getMessage());
-			List<String> warnings = new ArrayList<>(preliminary.deterministicWarnings());
-			warnings.add("Semantic reviewer unavailable or invalid; deterministic decision retained");
+			List<String> fallbackWarnings = new ArrayList<>(preliminary.deterministicWarnings());
+			fallbackWarnings.add("Semantic reviewer unavailable or invalid; deterministic decision retained");
 			return new PostExecutionReview(preliminary.decision(), preliminary.issueType(), preliminary.confidence(),
-					preliminary.suspectedAssetKeys(), preliminary.evidence(), preliminary.deterministicErrors(), warnings,
+					preliminary.suspectedAssetKeys(), preliminary.evidence(), preliminary.deterministicErrors(), fallbackWarnings,
 					false, null);
 		}
 	}
@@ -94,15 +124,74 @@ public class PostExecutionReviewService {
 				|| !plan.getRules().isEmpty() || plan.getSourceSubPlans().size() > 1;
 	}
 
-	private PostExecutionReview normalize(PostExecutionReview reviewed, ValidationResult deterministic) {
+	private PostExecutionReview normalizeGovernedEmptyMerge(PostExecutionReview reviewed, ValidationResult deterministic,
+			List<String> warnings, SemanticQueryPlan plan, ResultSetBO resultSet) {
+		boolean emptyResult = resultSet != null && (resultSet.getData() == null || resultSet.getData().isEmpty());
+		boolean governedMultiSourceMerge = plan != null && plan.getMergePlan() != null && plan.getSourceSubPlans() != null
+				&& plan.getSourceSubPlans().size() > 1;
+		boolean emptyMergeRepairObjection = reviewed.decision() == Decision.RETRY_SQL
+				&& reviewed.issueType() == IssueType.SQL_REPAIRABLE;
+		boolean emptyMergeShapeObjection = reviewed.decision() == Decision.REPLAN_EXECUTION
+				&& reviewed.issueType() == IssueType.RESULT_SHAPE_MISMATCH;
+		if (!deterministic.valid() || !emptyResult || !governedMultiSourceMerge
+				|| (!emptyMergeRepairObjection && !emptyMergeShapeObjection)) {
+			return reviewed;
+		}
+		List<String> normalizedWarnings = new ArrayList<>(warnings);
+		normalizedWarnings.add(
+				"Governed multi-source merge returned no matching relationship keys; deterministic final-result validation passed, so the empty result was retained instead of repair/replan");
+		return new PostExecutionReview(Decision.PASS, IssueType.NONE, reviewed.confidence(), SetSupport.empty(),
+				reviewed.evidence(), deterministic.errors(), List.copyOf(normalizedWarnings), reviewed.semanticReviewerUsed(),
+				reviewed.modelEvidence());
+	}
+
+	private PostExecutionReview normalize(PostExecutionReview reviewed, ValidationResult deterministic, List<String> warnings,
+			ValidationMode validationMode, String question, String executionPlan, String sql) {
 		if (!deterministic.valid() && reviewed.decision() == Decision.PASS) {
-			return PostExecutionReview.deterministicRetry(deterministic.errors(), deterministic.warnings());
+			return PostExecutionReview.deterministicRetry(deterministic.errors(), warnings);
+		}
+		if (validationMode == ValidationMode.ADVANCED_EXECUTION && deterministic.valid()
+				&& reviewed.decision() == Decision.REPLAN_EXECUTION
+				&& reviewed.issueType() == IssueType.RESULT_SHAPE_MISMATCH
+				&& requiredAdvancedShapeIsObservable((question == null ? "" : question) + "\n"
+						+ (executionPlan == null ? "" : executionPlan), sql)) {
+			List<String> normalizedWarnings = new ArrayList<>(warnings);
+			normalizedWarnings.add("Semantic reviewer shape objection ignored because deterministic validation passed and the planner-required advanced SQL structure is observable");
+			return new PostExecutionReview(Decision.PASS, IssueType.NONE, reviewed.confidence(), SetSupport.empty(),
+					reviewed.evidence(), deterministic.errors(), List.copyOf(normalizedWarnings), true, reviewed.modelEvidence());
 		}
 		if (reviewed.decision() == Decision.PASS && reviewed.issueType() != IssueType.NONE) {
 			return new PostExecutionReview(Decision.PASS, IssueType.NONE, reviewed.confidence(), SetSupport.empty(),
-					reviewed.evidence(), deterministic.errors(), deterministic.warnings(), true, reviewed.modelEvidence());
+					reviewed.evidence(), deterministic.errors(), warnings, true, reviewed.modelEvidence());
 		}
 		return reviewed;
+	}
+
+	static boolean requiredAdvancedShapeIsObservable(String executionPlan, String sql) {
+		String plan = executionPlan == null ? "" : executionPlan.toUpperCase(java.util.Locale.ROOT);
+		String statement = sql == null ? "" : sql.toUpperCase(java.util.Locale.ROOT);
+		boolean requiresKnownAdvancedOperator = false;
+		for (String operator : List.of("LAG", "LEAD", "ROW_NUMBER", "RANK", "DENSE_RANK")) {
+			if (plan.contains(operator)) {
+				requiresKnownAdvancedOperator = true;
+				if (!statement.contains(operator + "(")) {
+					return false;
+				}
+			}
+		}
+		if (plan.contains("PARTITION BY")) {
+			requiresKnownAdvancedOperator = true;
+			if (!statement.contains("PARTITION BY")) {
+				return false;
+			}
+		}
+		if (plan.contains("WINDOW")) {
+			requiresKnownAdvancedOperator = true;
+			if (!statement.contains(" OVER ") && !statement.contains("OVER(")) {
+				return false;
+			}
+		}
+		return requiresKnownAdvancedOperator;
 	}
 
 	public enum ReviewMode {

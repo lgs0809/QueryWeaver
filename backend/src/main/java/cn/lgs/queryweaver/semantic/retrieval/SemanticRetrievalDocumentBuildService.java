@@ -239,6 +239,19 @@ public class SemanticRetrievalDocumentBuildService {
 		return indexService.reindexAll();
 	}
 
+	public SemanticRetrievalIndexService.IndexingResult reindexEmbeddings(Long projectId, Long projectVersionId) {
+		List<SemanticRetrievalDocument> documents = documentRepository.findVersion(projectId, projectVersionId);
+		if (documents.isEmpty()) {
+			return new SemanticRetrievalIndexService.IndexingResult(0, false);
+		}
+		long catalogHashCount = documents.stream().map(SemanticRetrievalDocument::catalogHash).distinct().count();
+		if (catalogHashCount != 1) {
+			throw new IllegalStateException("Semantic retrieval documents contain multiple catalog hashes for project version "
+					+ projectVersionId);
+		}
+		return indexService.indexDocuments(documents);
+	}
+
 	private SourceDocument modelSource(SemanticCatalogSnapshot snapshot, SemanticCatalogSnapshot.Model model,
 			Map<String, SemanticCatalogSnapshot.Column> columns, List<ProjectEvidence> evidence,
 			List<BusinessQueryScenario> scenarios, Set<String> allowedAssetKeys) {

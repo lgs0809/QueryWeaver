@@ -19,6 +19,8 @@ import cn.lgs.queryweaver.learning.QueryCaseHints;
 import cn.lgs.queryweaver.model.ModelCallPurpose;
 import cn.lgs.queryweaver.model.PlannerReasoningProperties;
 import cn.lgs.queryweaver.model.QueryWeaverModelGateway.ModelCallResult;
+import cn.lgs.queryweaver.multisource.MultiSourcePolicyService;
+import cn.lgs.queryweaver.multisource.MultiSourcePolicySnapshot.CrossSourceRelationship;
 import cn.lgs.queryweaver.service.llm.LlmInvocationOptions;
 import cn.lgs.queryweaver.learning.QueryCaseHints.EnumBindingHint;
 import cn.lgs.queryweaver.learning.QueryCaseHints.FilterBindingHint;
@@ -54,7 +56,7 @@ import org.springframework.util.StringUtils;
  * <p>The model is allowed to choose only already-published Semantic Catalog assets. It never
  * supplies SQL, metric formulae, join predicates, datasource identifiers or arbitrary columns.
  * QueryWeaver validates every selected code against the candidate Catalog slice and then lets the
- * deterministic semantic resolver expand those codes into the authoritative Typed Plan.
+ * deterministic semantic resolver expand those codes into the authoritative Semantic Query Plan.
  */
 @Service
 public class LlmSemanticPlanningService {
@@ -64,7 +66,7 @@ public class LlmSemanticPlanningService {
 	private static final int RELATIONSHIP_NEIGHBORHOOD_DEPTH = 2;
 
 	private static final Set<String> SUPPORTED_LITERAL_FILTER_OPERATORS = Set.of("EQ", "NE", "GT", "GTE", "LT",
-			"LTE", "IN");
+			"LTE", "IN", "IS_NULL", "IS_NOT_NULL");
 
 	private static final Set<String> SUPPORTED_TIME_GROUP_GRANULARITIES = Set.of("DAY", "MONTH", "YEAR");
 
@@ -86,17 +88,27 @@ public class LlmSemanticPlanningService {
 			3. dimensionCodes contains only fields the user wants returned/grouped as dimensions or entity labels.
 			   A field mentioned only to filter rows MUST NOT also become a dimension.
 			4. enumBindings represents categorical filters whose value is one of the supplied published enum values.
-			5. filters represents non-enum literal predicates. Use only supplied filterableColumns and copy literal values
-			   from the current question; never invent a literal. Do not duplicate an enumBinding as a filter.
+			5. filters represents non-enum predicates. Use supplied filterableColumns; a supplied timeColumn may also be used
+			   as a filter only when the current question explicitly names that governed time field. Copy literal values from
+			   the current question; never invent a literal. IS_NULL / IS_NOT_NULL have no value field. Do not duplicate an
+			   enumBinding as a filter.
 			6. ruleCodes contains only supplied querySelectableRules implied by the user's business wording. planningPolicies
 			   and mandatoryGovernanceRules are constraints, never selectable ruleCodes. When an exact supplied business rule
 			   represents the user's business wording, select that ruleCode instead of reconstructing the same business concept
 			   from a lower-level enumBinding. Do not emit a duplicate enumBinding for a predicate expanded by that selected rule.
-			7. If the question contains a date/range/relative time expression, timeBinding MUST choose the published
-			   business-event time column appropriate to the requested metric/event. Supplied timeColumns are governed,
-			   filter-approved time-range bindings and are intentionally listed separately from filterableColumns; never
-			   require a time column to also appear in filterableColumns. If the user explicitly asks for daily, monthly or
-			   yearly grouping, set groupGranularity to DAY, MONTH or YEAR respectively; otherwise it is null.
+			7. timeBinding is only a governed binding for one explicit date/range/relative-time predicate, or for one simple
+			   DAY/MONTH/YEAR grouping that can be represented directly. Supplied timeColumns are governed and filter-approved.
+			   Do NOT try to encode every use of time in timeBinding. Multiple time axes, WEEK/QUARTER/custom buckets, CTEs,
+			   LAG/LEAD, window PARTITION/ORDER, period comparison and other SQL execution structure belong to the downstream
+			   execution Planner/SQL and are NOT missing semantic assets. Never return UNRESOLVABLE merely because such SQL
+			   operations are not represented by Catalog codes. When a query has several time fields but only one explicit
+			   range predicate, bind the field owning that range; leave the other grouping/window usages to SQL.
+			   IMPORTANT: the identity of the BUSINESS TIME AXIS is semantic even when bucket/window syntax is execution-owned.
+			   Never silently drop a requested temporal grouping/trend. If the user asks to group/trend "by time/date" without
+			   identifying which business time field, and two or more supplied governed time dimensions are materially plausible
+			   (for example created_at vs paid_at vs completed_at), you MUST return NEEDS_CLARIFICATION and offer those supplied
+			   time-dimension assets. The downstream Planner may choose HOW to bucket/order a selected time axis; it may not guess
+			   WHICH business time axis the user meant.
 			8. relationshipCodes contains only published relationships necessary to connect the selected semantic assets.
 			9. grainCodes contains only published grains explicitly required for the requested result semantics.
 			10. Do not add context that the user did not ask for. Minimal sufficient plan wins.
@@ -106,7 +118,9 @@ public class LlmSemanticPlanningService {
 			12. Return status=NEEDS_CLARIFICATION only when two or more supplied governed candidates represent materially
 			    different plausible meanings and the current question/requiredHints cannot distinguish them. Clarification
 			    options must reference only supplied candidate asset codes. Do not use clarification to hide a retrieval miss.
-			13. Return status=UNRESOLVABLE when the supplied governed candidates cannot represent the requested meaning.
+			13. Return status=UNRESOLVABLE only when a required BUSINESS meaning (metric/definition/model/relation/rule) is absent
+			    from the governed candidates. Missing SQL operators, bucket granularities, window functions or multi-stage
+			    computation are execution concerns and must never by themselves make semantic planning UNRESOLVABLE.
 
 			For a resolved request return exactly one JSON object and no Markdown:
 			{
@@ -120,7 +134,8 @@ public class LlmSemanticPlanningService {
 			    {"modelCode":"published_model_code","columnName":"published_column","valueCode":"published_value"}
 			  ],
 			  "filters": [
-			    {"modelCode":"published_model_code","columnName":"published_filterable_column","operator":"EQ","value":"literal copied from question"}
+			    {"modelCode":"published_model_code","columnName":"published_filterable_column","operator":"EQ","value":"literal copied from question"},
+			    {"modelCode":"published_model_code","columnName":"explicitly named nullable column","operator":"IS_NULL"}
 			  ],
 			  "timeBinding": {"modelCode":"published_model_code","columnName":"published_time_column","groupGranularity":null},
 			  "confidence": 0.0
@@ -139,12 +154,16 @@ public class LlmSemanticPlanningService {
 
 	private final PlannerReasoningProperties reasoningProperties;
 
+	private final MultiSourcePolicyService multiSourcePolicyService;
+
 	@Autowired
 	public LlmSemanticPlanningService(SemanticCatalogRepository catalogRepository,
-			SemanticDocumentExtractionClient extractionClient, PlannerReasoningProperties reasoningProperties) {
+			SemanticDocumentExtractionClient extractionClient, PlannerReasoningProperties reasoningProperties,
+			MultiSourcePolicyService multiSourcePolicyService) {
 		this.catalogRepository = catalogRepository;
 		this.extractionClient = extractionClient;
 		this.reasoningProperties = reasoningProperties;
+		this.multiSourcePolicyService = multiSourcePolicyService;
 	}
 
 	LlmSemanticPlanningService(SemanticCatalogRepository catalogRepository,
@@ -153,6 +172,7 @@ public class LlmSemanticPlanningService {
 		this.extractionClient = extractionClient;
 		this.reasoningProperties = new PlannerReasoningProperties();
 		this.reasoningProperties.setEnabled(false);
+		this.multiSourcePolicyService = null;
 	}
 
 	public QueryCaseHints plan(Long projectId, Long projectVersionId, String query,
@@ -230,8 +250,9 @@ public class LlmSemanticPlanningService {
 			return new PlanningDecision(explicit, calls);
 		}
 		try {
-			return new PlanningDecision(
-					new SemanticPlanningOutcome.Resolved(parseAndValidate(query, response, candidates, requiredHints)), calls);
+			QueryCaseHints binding = parseAndValidate(query, response, candidates, requiredHints);
+			SemanticPlanningOutcome ambiguity = unresolvedGenericTimeAxis(query, candidates, binding);
+			return new PlanningDecision(ambiguity == null ? new SemanticPlanningOutcome.Resolved(binding) : ambiguity, calls);
 		}
 		catch (IllegalArgumentException firstFailure) {
 			String repairPrompt = userPrompt + "\n\nYour previous response was rejected by QueryWeaver: "
@@ -245,14 +266,59 @@ public class LlmSemanticPlanningService {
 				return new PlanningDecision(repairedExplicit, calls);
 			}
 			try {
-				return new PlanningDecision(
-						new SemanticPlanningOutcome.Resolved(parseAndValidate(query, repaired, candidates, requiredHints)), calls);
+				QueryCaseHints binding = parseAndValidate(query, repaired, candidates, requiredHints);
+				SemanticPlanningOutcome ambiguity = unresolvedGenericTimeAxis(query, candidates, binding);
+				return new PlanningDecision(ambiguity == null ? new SemanticPlanningOutcome.Resolved(binding) : ambiguity, calls);
 			}
 			catch (IllegalArgumentException finalFailure) {
 				return new PlanningDecision(new SemanticPlanningOutcome.Rejected("INVALID_GOVERNED_SELECTION",
 						safeError(finalFailure.getMessage())), calls);
 			}
 		}
+	}
+
+	static SemanticPlanningOutcome unresolvedGenericTimeAxis(String query, SemanticCandidateSet candidates,
+			QueryCaseHints binding) {
+		if (!requestsGenericTemporalGrouping(query) || candidates == null || binding == null) {
+			return null;
+		}
+		List<SemanticCatalogSnapshot.Dimension> plausible = candidates.dimensions()
+			.stream()
+			.filter(dimension -> dimension.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(dimension -> "TIME".equalsIgnoreCase(Objects.toString(dimension.getDimensionType(), "")))
+			.filter(dimension -> StringUtils.hasText(dimension.getDimensionCode()))
+			.sorted(Comparator.comparing(SemanticCatalogSnapshot.Dimension::getModelCode)
+				.thenComparing(SemanticCatalogSnapshot.Dimension::getDimensionCode))
+			.toList();
+		if (plausible.size() < 2) {
+			return null;
+		}
+		List<SemanticPlanningOutcome.Option> options = plausible.stream()
+			.limit(8)
+			.map(dimension -> new SemanticPlanningOutcome.Option("time-axis:" + dimension.getDimensionCode(),
+					timeAxisLabel(dimension), "DIMENSION", dimension.getDimensionCode()))
+			.toList();
+		return new SemanticPlanningOutcome.ClarificationRequired("SEMANTIC_AMBIGUITY", "你希望按哪个业务时间字段统计？", options,
+				"The request asks for a generic temporal grouping but multiple governed business time axes are plausible.");
+	}
+
+	private static boolean requestsGenericTemporalGrouping(String query) {
+		if (!StringUtils.hasText(query)) {
+			return false;
+		}
+		String normalized = query.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+		return normalized.contains("按时间统计") || normalized.contains("按时间分组") || normalized.contains("按时间汇总")
+				|| normalized.contains("按时间趋势") || normalized.contains("按日期统计") || normalized.contains("按日期分组")
+				|| normalized.contains("按日期汇总") || normalized.contains("按日期趋势") || normalized.contains("随时间")
+				|| normalized.contains("时间趋势") || normalized.contains("日期趋势") || normalized.contains("by time")
+				|| normalized.contains("by date") || normalized.contains("over time") || normalized.contains("time trend")
+				|| normalized.contains("date trend");
+	}
+
+	private static String timeAxisLabel(SemanticCatalogSnapshot.Dimension dimension) {
+		String label = StringUtils.hasText(dimension.getBusinessName()) ? dimension.getBusinessName()
+				: StringUtils.hasText(dimension.getColumnName()) ? dimension.getColumnName() : dimension.getDimensionCode();
+		return StringUtils.hasText(dimension.getModelCode()) ? label + " (" + dimension.getModelCode() + ")" : label;
 	}
 
 	private ModelCallResult completePlanner(PlannerProfile profile, String systemPrompt, String userPrompt) {
@@ -284,7 +350,9 @@ public class LlmSemanticPlanningService {
 			}
 		}
 
-		Set<String> modelCodes = relationshipNeighborhood(snapshot, seedModels);
+		List<SemanticCatalogSnapshot.Relationship> governedRelationships = governedRelationships(projectId,
+				projectVersionId, snapshot);
+		Set<String> modelCodes = relationshipNeighborhood(governedRelationships, seedModels);
 		if (modelCodes.size() > MAX_CANDIDATE_MODELS) {
 			modelCodes = seedModels.stream().limit(MAX_CANDIDATE_MODELS).collect(Collectors.toCollection(LinkedHashSet::new));
 		}
@@ -322,7 +390,7 @@ public class LlmSemanticPlanningService {
 		List<SemanticCatalogSnapshot.Rule> planningPolicies = inScopeRules.stream()
 			.filter(rule -> !querySelectableRule(rule) && !mandatoryGovernanceRule(rule))
 			.toList();
-		List<SemanticCatalogSnapshot.Relationship> relationships = safe(snapshot.getRelationships()).stream()
+		List<SemanticCatalogSnapshot.Relationship> relationships = governedRelationships.stream()
 			.filter(relationship -> relationship.getStatus() == SemanticAssetStatus.ENABLED)
 			.filter(relationship -> finalModelCodes.contains(relationship.getSourceModelCode())
 					&& finalModelCodes.contains(relationship.getTargetModelCode()))
@@ -362,11 +430,57 @@ public class LlmSemanticPlanningService {
 				relationships, grains, timeColumns, filterableColumns, retrievalEvidence);
 	}
 
-	private Set<String> relationshipNeighborhood(SemanticCatalogSnapshot snapshot, Set<String> seeds) {
+	private List<SemanticCatalogSnapshot.Relationship> governedRelationships(Long projectId, Long projectVersionId,
+			SemanticCatalogSnapshot snapshot) {
+		Map<String, SemanticCatalogSnapshot.Relationship> relationships = new LinkedHashMap<>();
+		for (SemanticCatalogSnapshot.Relationship relationship : safe(snapshot.getRelationships())) {
+			if (relationship.getStatus() == SemanticAssetStatus.ENABLED) {
+				relationships.put(relationship.getRelationshipCode(), relationship);
+			}
+		}
+		if (multiSourcePolicyService == null) {
+			return List.copyOf(relationships.values());
+		}
+		for (CrossSourceRelationship crossSource : multiSourcePolicyService.get(projectId, projectVersionId)
+			.getCrossSourceRelationships()) {
+			if (crossSource.getStatus() != SemanticAssetStatus.ENABLED) {
+				continue;
+			}
+			if (relationships.containsKey(crossSource.getRelationshipCode())) {
+				throw new IllegalStateException(
+						"Duplicate governed relationshipCode across Semantic Catalog and Multi-Source Policy: "
+								+ crossSource.getRelationshipCode());
+			}
+			relationships.put(crossSource.getRelationshipCode(), plannerRelationship(projectId, projectVersionId, crossSource));
+		}
+		return relationships.values().stream()
+			.sorted(Comparator.comparing(SemanticCatalogSnapshot.Relationship::getRelationshipCode))
+			.toList();
+	}
+
+	static SemanticCatalogSnapshot.Relationship plannerRelationship(Long projectId, Long projectVersionId,
+			CrossSourceRelationship relationship) {
+		return SemanticCatalogSnapshot.Relationship.builder()
+			.projectId(projectId)
+			.projectVersionId(projectVersionId)
+			.relationshipCode(relationship.getRelationshipCode())
+			.sourceModelCode(relationship.getLeftModelCode())
+			.targetModelCode(relationship.getRightModelCode())
+			.cardinality(relationship.getCardinality())
+			.joinType("CROSS_SOURCE_MERGE")
+			.joinCondition(relationship.getLeftModelCode() + "." + relationship.getLeftKey() + " = "
+					+ relationship.getRightModelCode() + "." + relationship.getRightKey())
+			.description("Governed cross-datasource relationship. Physical execution must use the published Multi-Source merge policy, not a database JOIN.")
+			.evidence(relationship.getEvidence())
+			.status(SemanticAssetStatus.ENABLED)
+			.build();
+	}
+
+	private Set<String> relationshipNeighborhood(List<SemanticCatalogSnapshot.Relationship> relationships, Set<String> seeds) {
 		Set<String> models = new LinkedHashSet<>(seeds);
 		for (int depth = 0; depth < RELATIONSHIP_NEIGHBORHOOD_DEPTH; depth++) {
 			Set<String> additions = new LinkedHashSet<>();
-			for (SemanticCatalogSnapshot.Relationship relationship : safe(snapshot.getRelationships())) {
+			for (SemanticCatalogSnapshot.Relationship relationship : relationships) {
 				if (relationship.getStatus() != SemanticAssetStatus.ENABLED) {
 					continue;
 				}
@@ -623,6 +737,10 @@ public class LlmSemanticPlanningService {
 			.stream()
 			.collect(Collectors.toMap(column -> columnKey(column.getModelCode(), column.getColumnName()),
 					Function.identity()));
+		Map<String, SemanticCatalogSnapshot.Column> governedTimeColumns = candidates.timeColumns()
+			.stream()
+			.collect(Collectors.toMap(column -> columnKey(column.getModelCode(), column.getColumnName()),
+					Function.identity()));
 		List<FilterBindingHint> bindings = new ArrayList<>();
 		for (JsonNode item : node) {
 			String modelCode = text(item, "modelCode");
@@ -633,22 +751,39 @@ public class LlmSemanticPlanningService {
 			}
 			SemanticCatalogSnapshot.Column column = allowedColumns.get(columnKey(modelCode, columnName));
 			if (column == null) {
+				SemanticCatalogSnapshot.Column timeColumn = governedTimeColumns.get(columnKey(modelCode, columnName));
+				if (timeColumn != null && explicitlyMentionsColumn(query, timeColumn)) {
+					column = timeColumn;
+				}
+			}
+			if (column == null) {
 				throw new IllegalArgumentException("filters contains non-candidate filterable column: " + modelCode + "."
 						+ columnName);
 			}
+			boolean nullPredicate = "IS_NULL".equals(operator) || "IS_NOT_NULL".equals(operator);
 			JsonNode valueNode = item.get("value");
-			if (valueNode == null || valueNode.isNull()) {
-				throw new IllegalArgumentException("filters.value is required");
+			Object value;
+			if (nullPredicate) {
+				if (valueNode != null && !valueNode.isNull()) {
+					throw new IllegalArgumentException(operator + " filter must not include a literal value");
+				}
+				value = null;
 			}
-			Object value = literalValue(valueNode);
-			validateFilterValueShape(operator, value);
-			if (!literalComesFromQuestion(query, value)) {
-				throw new IllegalArgumentException("filters contains a literal that is not present in the current question");
+			else {
+				if (valueNode == null || valueNode.isNull()) {
+					throw new IllegalArgumentException("filters.value is required");
+				}
+				value = literalValue(valueNode);
+				validateFilterValueShape(operator, value);
+				if (!literalComesFromQuestion(query, value)) {
+					throw new IllegalArgumentException("filters contains a literal that is not present in the current question");
+				}
+				if (duplicatesPublishedEnum(candidates, modelCode, columnName, value)) {
+					throw new IllegalArgumentException("filters duplicates a published enum value; use enumBindings instead");
+				}
 			}
-			if (duplicatesPublishedEnum(candidates, modelCode, columnName, value)) {
-				throw new IllegalArgumentException("filters duplicates a published enum value; use enumBindings instead");
-			}
-			bindings.add(new FilterBindingHint(literalRawText(value), modelCode, columnName, operator, value,
+			String rawText = nullPredicate ? columnName + " " + operator : literalRawText(value);
+			bindings.add(new FilterBindingHint(rawText, modelCode, columnName, operator, value,
 					"LLM_SEMANTIC_PLANNER", confidence));
 		}
 		return List.copyOf(bindings);
@@ -731,6 +866,29 @@ public class LlmSemanticPlanningService {
 		return java.text.Normalizer.normalize(Objects.toString(value, ""), java.text.Normalizer.Form.NFKC)
 			.toLowerCase(Locale.ROOT)
 			.replaceAll("\\s+", "");
+	}
+
+	private boolean explicitlyMentionsColumn(String query, SemanticCatalogSnapshot.Column column) {
+		String normalizedQuery = normalizeNaturalText(query);
+		if (!StringUtils.hasText(normalizedQuery) || column == null) {
+			return false;
+		}
+		if (containsExplicitTerm(normalizedQuery, column.getColumnName())
+				|| containsExplicitTerm(normalizedQuery, column.getBusinessName())) {
+			return true;
+		}
+		String synonyms = Objects.toString(column.getSynonyms(), "");
+		for (String synonym : synonyms.split("[,，;；|/]")) {
+			if (containsExplicitTerm(normalizedQuery, synonym)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean containsExplicitTerm(String normalizedQuery, String term) {
+		String normalizedTerm = normalizeNaturalText(term);
+		return StringUtils.hasText(normalizedTerm) && normalizedQuery.contains(normalizedTerm);
 	}
 
 	private List<EnumBindingHint> enumBindings(String query, JsonNode node, SemanticCandidateSet candidates,

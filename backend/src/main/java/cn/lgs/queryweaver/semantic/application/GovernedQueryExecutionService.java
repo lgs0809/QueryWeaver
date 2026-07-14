@@ -22,13 +22,18 @@ import cn.lgs.queryweaver.multisource.MultiSourceRunService.SourceSubRun;
 import cn.lgs.queryweaver.multisource.MultiSourceRunService.SourceSubRunStatus;
 import cn.lgs.queryweaver.multisource.MultiSourceSqlExecutionService;
 import cn.lgs.queryweaver.operations.SemanticCatalogCache;
+import cn.lgs.queryweaver.run.QueryRunService;
 import cn.lgs.queryweaver.semantic.compiler.CompiledSemanticQuery;
 import cn.lgs.queryweaver.semantic.compiler.CompiledSemanticQuery.CompiledSourceQuery;
 import cn.lgs.queryweaver.semantic.compiler.SemanticSqlCompiler;
 import cn.lgs.queryweaver.semantic.compiler.SqlDialect;
+import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
 import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.ZoneId;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,10 +56,12 @@ public class GovernedQueryExecutionService {
 	private final MultiSourceSqlExecutionService sqlExecutionService;
 	private final MultiSourceRunService multiSourceRunService;
 
+	private final QueryRunService queryRunService;
+
 	public ExecutionResult execute(String runId, String executionKey, Long projectId, Long versionId, String principalId,
 			SemanticQueryPlan plan) throws Exception {
 		if (plan == null || !plan.isExecutable()) {
-			throw new IllegalArgumentException("An executable Typed Semantic Plan is required");
+			throw new IllegalArgumentException("An executable Semantic Query Plan is required");
 		}
 		Map<Integer, SqlDialect> dialects = plan.getSourceSubPlans().stream()
 			.filter(source -> source.getDatasourceId() != null)
@@ -63,6 +70,7 @@ public class GovernedQueryExecutionService {
 					LinkedHashMap::new));
 		CompiledSemanticQuery compiled = semanticSqlCompiler.compile(plan, semanticCatalogCache.get(projectId, versionId),
 				dialects, Clock.systemUTC(), ZoneId.systemDefault());
+		String attemptId = Objects.toString(queryRunService.get(runId).attemptId(), "");
 		multiSourceRunService.initialize(runId, executionKey, projectId, versionId, plan);
 		Map<Integer, CompiledSourceQuery> compiledByDatasource = compiled.sources().stream()
 			.collect(Collectors.toMap(CompiledSourceQuery::datasourceId, source -> source, (left, right) -> left,
@@ -90,7 +98,9 @@ public class GovernedQueryExecutionService {
 				String executionOwner = runId + ":source:" + sourceRun.subRunId();
 				ResultSetBO result = sqlExecutionService.execute(projectId, versionId, principalId, executionOwner,
 						sourcePlan.getDatasourceId(), Set.copyOf(sourcePlan.getPhysicalTables()), sourceQuery.sql(),
-						sourceQuery.parameters(), sourceSemanticPlan);
+						sourceQuery.parameters(), sourceSemanticPlan, attemptId,
+						"semantic-source:" + executionKey + ":" + sourceRun.subRunId());
+				protectInternalMergeKey(result, plan, sourcePlan);
 				String freshness = freshness(plan, sourcePlan, executionOwner, projectId);
 				multiSourceRunService.completeSource(runId, sourceRun.subRunId(), sourceQuery.sql(), result, freshness);
 			}
@@ -100,10 +110,14 @@ public class GovernedQueryExecutionService {
 			}
 		}
 
-		ResultArtifact artifact = multiSourceRunService.merge(runId, executionKey);
+		ResultArtifact artifact = multiSourceRunService.merge(runId, executionKey, plan);
 		ResultSetBO merged = multiSourceRunService.resultSet(artifact);
 		String allSql = compiled.sources().stream().map(CompiledSourceQuery::sql)
 			.collect(Collectors.joining("\n-- next source --\n"));
+		if (plan.getMergePlan() != null && plan.getSourceSubPlans().size() > 1) {
+			allSql += "\n-- governed cross-source merge: policy=" + plan.getMergePlan().getPolicyCode() + ", type="
+					+ plan.getMergePlan().getMergeType() + ", relationship=" + plan.getMergePlan().getRelationshipCode();
+		}
 		return new ExecutionResult(artifact, merged, allSql);
 	}
 
@@ -121,6 +135,42 @@ public class GovernedQueryExecutionService {
 
 	private SemanticQueryPlan sourceSemanticPlan(SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source) {
 		Set<String> modelCodes = Set.copyOf(source.getModelCodes());
+		List<SemanticQueryPlan.ProjectionSelection> sourceProjections = plan.getProjections()
+			.stream()
+			.filter(item -> item.getModelCode() == null || modelCodes.contains(item.getModelCode()))
+			.toList();
+		Set<String> sourceAliases = sourceProjections.stream()
+			.map(SemanticQueryPlan.ProjectionSelection::getAlias)
+			.filter(alias -> alias != null && !alias.isBlank())
+			.collect(Collectors.toSet());
+		InternalMergeKey mergeKey = internalMergeKey(plan, source);
+		List<SemanticQueryPlan.GroupSelection> sourceGroups = new java.util.ArrayList<>(plan.getGroupBy()
+			.stream()
+			.filter(item -> modelCodes.contains(item.getModelCode()))
+			.toList());
+		if (mergeKey != null && plan.getMetrics().stream().anyMatch(item -> modelCodes.contains(item.getModelCode()))) {
+			sourceGroups.add(SemanticQueryPlan.GroupSelection.builder()
+				.modelCode(mergeKey.modelCode())
+				.columnName(mergeKey.columnName())
+				.alias(mergeKey.alias())
+				.build());
+		}
+		int sourceMaxRows = plan.getExpectedResult() == null || plan.getExpectedResult().getMaxRows() == null ? 100
+				: plan.getExpectedResult().getMaxRows();
+		if (mergeKey != null && plan.getMergePlan() != null && plan.getMergePlan().getMaxRows() != null) {
+			sourceMaxRows = Math.max(sourceMaxRows, plan.getMergePlan().getMaxRows());
+		}
+		SemanticQueryPlan.ExpectedResultShape expectedResult = plan.getExpectedResult() == null ? null
+				: SemanticQueryPlan.ExpectedResultShape.builder()
+					.columns(sourceProjections.stream()
+						.map(SemanticQueryPlan.ProjectionSelection::getAlias)
+						.filter(alias -> alias != null && !alias.isBlank())
+						.toList())
+					.grain(plan.getExpectedResult().getGrain())
+					.maxRows(sourceMaxRows)
+					.tabular(plan.getExpectedResult().getTabular())
+					.chartable(plan.getExpectedResult().getChartable())
+					.build();
 		return SemanticQueryPlan.builder()
 			.projectId(plan.getProjectId())
 			.projectVersionId(plan.getProjectVersionId())
@@ -135,17 +185,74 @@ public class GovernedQueryExecutionService {
 						&& modelCodes.contains(item.getTargetModelCode())).toList())
 			.rules(plan.getRules().stream()
 				.filter(item -> item.getModelCode() == null || modelCodes.contains(item.getModelCode())).toList())
-			.projections(plan.getProjections().stream()
-				.filter(item -> item.getModelCode() == null || modelCodes.contains(item.getModelCode())).toList())
+			.projections(sourceProjections)
+			.filters(plan.getFilters().stream().filter(item -> modelCodes.contains(item.getModelCode())).toList())
+			.timeRange(plan.getTimeRange() != null && modelCodes.contains(plan.getTimeRange().getModelCode())
+					? plan.getTimeRange() : null)
+			.groupBy(List.copyOf(sourceGroups))
+			.orderBy(plan.getOrderBy().stream().filter(item -> sourceAliases.contains(item.getExpression())).toList())
+			.limit(Math.max(plan.getLimit() == null ? 100 : plan.getLimit(), sourceMaxRows))
 			.preAggregationModelCodes(plan.getPreAggregationModelCodes().stream().filter(modelCodes::contains).toList())
 			.sourceSubPlans(List.of(source))
 			.freshnessNotices(plan.getFreshnessNotices().stream()
 				.filter(item -> Objects.equals(item.getDatasourceId(), source.getDatasourceId())).toList())
-			.expectedResult(plan.getExpectedResult())
+			.expectedResult(expectedResult)
 			.validationWarnings(plan.getValidationWarnings())
 			.validationErrors(List.of())
 			.executable(true)
 			.build();
+	}
+
+	private InternalMergeKey internalMergeKey(SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source) {
+		if (plan.getMergePlan() == null || plan.getSourceSubPlans().size() < 2) {
+			return null;
+		}
+		Set<String> modelCodes = Set.copyOf(source.getModelCodes());
+		SemanticCatalogSnapshot catalog = semanticCatalogCache.get(plan.getProjectId(), plan.getProjectVersionId());
+		for (String alias : List.of(Objects.toString(plan.getMergePlan().getLeftInputKey(), ""),
+				Objects.toString(plan.getMergePlan().getRightInputKey(), ""))) {
+			if (alias.isBlank()) {
+				continue;
+			}
+			SemanticCatalogSnapshot.Dimension dimension = catalog.getDimensions()
+				.stream()
+				.filter(item -> alias.equals(item.getDimensionCode()))
+				.filter(item -> modelCodes.contains(item.getModelCode()))
+				.findFirst()
+				.orElse(null);
+			if (dimension != null && dimension.getColumnName() != null && !dimension.getColumnName().isBlank()) {
+				return new InternalMergeKey(dimension.getModelCode(), dimension.getColumnName(), alias);
+			}
+		}
+		return null;
+	}
+
+	private void protectInternalMergeKey(ResultSetBO result, SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source) {
+		InternalMergeKey key = internalMergeKey(plan, source);
+		if (key == null || result == null || result.getData() == null) {
+			return;
+		}
+		for (Map<String, String> row : result.getData()) {
+			if (row == null || !row.containsKey(key.alias())) {
+				continue;
+			}
+			String value = row.get(key.alias());
+			if (value != null && !value.isBlank()) {
+				row.put(key.alias(), sha256(value));
+			}
+		}
+	}
+
+	private String sha256(String value) {
+		try {
+			return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+		}
+		catch (Exception ex) {
+			throw new IllegalStateException("Unable to protect internal merge key", ex);
+		}
+	}
+
+	private record InternalMergeKey(String modelCode, String columnName, String alias) {
 	}
 
 	public record ExecutionResult(ResultArtifact artifact, ResultSetBO resultSet, String sql) {

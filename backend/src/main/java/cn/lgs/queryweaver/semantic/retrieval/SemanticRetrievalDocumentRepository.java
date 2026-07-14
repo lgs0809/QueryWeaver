@@ -53,6 +53,15 @@ public class SemanticRetrievalDocumentRepository {
 				""", projectId, projectVersionId, catalogHash).stream().map(this::map).toList();
 	}
 
+	public List<SemanticRetrievalDocument> findVersion(Long projectId, Long projectVersionId) {
+		return jdbc.queryForList("""
+				SELECT *
+				FROM qw_semantic_retrieval_document
+				WHERE project_id = ? AND project_version_id = ?
+				ORDER BY document_type, asset_key
+				""", projectId, projectVersionId).stream().map(this::map).toList();
+	}
+
 	public void upsert(SemanticRetrievalDocument document) {
 		try {
 			jdbc.update("""

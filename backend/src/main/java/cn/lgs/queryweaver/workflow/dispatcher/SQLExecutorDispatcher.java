@@ -31,6 +31,11 @@ public class SQLExecutorDispatcher implements EdgeAction {
 
 	@Override
 	public String apply(OverAllState state) {
+		String replanFeedback = StateUtil.getStringValue(state, PLAN_VALIDATION_ERROR, "");
+		if (replanFeedback.startsWith("EXECUTION_REPLAN_REQUIRED:")) {
+			log.warn("SQL repair budget exhausted; returning to PlannerNode for execution replanning.");
+			return PLANNER_NODE;
+		}
 		SqlRetryDto retryDto = StateUtil.getObjectValue(state, SQL_REGENERATE_REASON, SqlRetryDto.class);
 		if (retryDto.sqlExecuteFail()) {
 			log.warn("SQL运行失败，需要重新生成！");

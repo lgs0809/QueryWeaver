@@ -76,7 +76,7 @@ public class HumanFeedbackNode implements NodeAction {
 			String correction = StringUtils.hasLength(feedbackContent) ? feedbackContent : "Plan rejected by user";
 			updated.put(PLAN_VALIDATION_ERROR, correction);
 			updated.put(SEMANTIC_REPLAN_FEEDBACK, correction);
-			// Clear the rejected execution plan and all derived parse/validation caches. The Typed Semantic Plan
+			// Clear the rejected execution plan and all derived parse/validation caches. The Semantic Query Plan
 			// will be rebuilt by SemanticPlanNode from the original question plus the user's explicit correction.
 			updated.put(PLANNER_NODE_OUTPUT, "");
 			updated.put(PLAN_PARSED_OBJECT, null);

@@ -36,7 +36,12 @@ public class SemanticConsistenceDispatcher implements EdgeAction {
 			return SQL_EXECUTE_NODE;
 		}
 		else {
-			log.info("语义一致性校验未通过，跳转到SQL生成节点。");
+			String replanFeedback = state.value(PLAN_VALIDATION_ERROR, "");
+			if (replanFeedback.startsWith("EXECUTION_REPLAN_REQUIRED:")) {
+				log.info("语义SQL局部修复预算耗尽，保留语义绑定并回到Planner重新规划执行策略。");
+				return PLANNER_NODE;
+			}
+			log.info("语义一致性校验未通过，跳转到SQL生成节点进行有界局部修复。");
 			return SQL_GENERATE_NODE;
 		}
 	}

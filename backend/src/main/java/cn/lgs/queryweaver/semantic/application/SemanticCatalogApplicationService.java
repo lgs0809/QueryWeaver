@@ -31,6 +31,7 @@ import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
 import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
 import cn.lgs.queryweaver.semantic.retrieval.SemanticHybridRetrievalService;
 import cn.lgs.queryweaver.semantic.retrieval.SemanticHybridRetrievalService.RetrievalHit;
+import cn.lgs.queryweaver.semantic.retrieval.SemanticRetrievalDocument.DocumentType;
 import cn.lgs.queryweaver.util.JsonUtil;
 import java.time.LocalDateTime;
 import java.util.ArrayDeque;
@@ -203,7 +204,40 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 				query, limit);
 		List<String> physicalTables = hits.stream().map(RetrievalHit::physicalTable).filter(this::hasText).distinct()
 			.toList();
+		if (physicalTables.isEmpty()) {
+			PlanningRecall fallback = boundedCatalogFallback(catalogRepository.loadCatalog(projectId, projectVersionId), limit);
+			if (!fallback.physicalTables().isEmpty()) {
+				return fallback;
+			}
+		}
 		return new PlanningRecall(physicalTables, hits);
+	}
+
+	static PlanningRecall boundedCatalogFallback(SemanticCatalogSnapshot snapshot, int limit) {
+		if (snapshot == null || limit <= 0 || snapshot.getModels() == null) {
+			return PlanningRecall.empty();
+		}
+		List<SemanticCatalogSnapshot.Model> enabledModels = snapshot.getModels()
+			.stream()
+			.filter(model -> model.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(model -> model.getPhysicalTable() != null && !model.getPhysicalTable().isBlank())
+			.sorted(java.util.Comparator.comparing(SemanticCatalogSnapshot.Model::getModelCode))
+			.toList();
+		// A transient vector-channel outage must not turn a small, fully governed namespace into a random hard failure.
+		// If every enabled model fits inside the normal recall budget, hand that complete bounded namespace to the Planner.
+		// Large catalogs remain fail-closed because an arbitrary partial fallback would be less safe than RETRIEVAL_MISS.
+		if (enabledModels.isEmpty() || enabledModels.size() > limit) {
+			return PlanningRecall.empty();
+		}
+		List<RetrievalHit> fallbackHits = new ArrayList<>();
+		for (int index = 0; index < enabledModels.size(); index++) {
+			SemanticCatalogSnapshot.Model model = enabledModels.get(index);
+			fallbackHits.add(new RetrievalHit(DocumentType.MODEL, "MODEL", "model:" + model.getModelCode(),
+					model.getModelCode(), model.getPhysicalTable(), 0d, Map.of("BOUNDED_CATALOG_FALLBACK", index + 1),
+					Map.of("BOUNDED_CATALOG_FALLBACK", 0d)));
+		}
+		return new PlanningRecall(enabledModels.stream().map(SemanticCatalogSnapshot.Model::getPhysicalTable).distinct()
+			.toList(), fallbackHits);
 	}
 
 	public SemanticQueryPlan buildQueryPlan(Long projectId, Long projectVersionId, String canonicalQuery,
@@ -271,8 +305,20 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.map(QueryCaseHints.EnumBindingHint::modelCode)
 			.filter(selectedModelCodes::contains)
 			.collect(Collectors.toCollection(LinkedHashSet::new));
-		Set<String> effectiveModelCodes = strictEffectiveModelCodes(selectedModelCodes, metrics, dimensions,
-				enumFilterModelCodes, hints, snapshot.getRelationships());
+		Set<String> effectiveModelCodesBuilder = new LinkedHashSet<>(strictEffectiveModelCodes(selectedModelCodes, metrics,
+				dimensions, enumFilterModelCodes, hints, snapshot.getRelationships()));
+		multiSourcePolicyService.get(projectId, projectVersionId)
+			.getCrossSourceRelationships()
+			.stream()
+			.filter(relationship -> relationship.getStatus() == SemanticAssetStatus.ENABLED)
+			.filter(relationship -> hints.relationshipCodes().contains(relationship.getRelationshipCode()))
+			.filter(relationship -> selectedModelCodes.contains(relationship.getLeftModelCode())
+					&& selectedModelCodes.contains(relationship.getRightModelCode()))
+			.forEach(relationship -> {
+				effectiveModelCodesBuilder.add(relationship.getLeftModelCode());
+				effectiveModelCodesBuilder.add(relationship.getRightModelCode());
+			});
+		Set<String> effectiveModelCodes = Set.copyOf(effectiveModelCodesBuilder);
 		QueryCaseHints semanticHints = hints;
 		List<SemanticCatalogSnapshot.Model> effectiveSelectedModels = snapshot.getModels()
 			.stream()
@@ -313,7 +359,7 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.toList();
 		List<SemanticCatalogSnapshot.Relationship> relationshipPath = resolveRelationshipPath(effectiveModelCodes,
 				selectedRelationships);
-		List<SemanticQueryPlan.RelationshipSelection> relationships = relationshipPath.stream()
+		List<SemanticQueryPlan.RelationshipSelection> catalogRelationships = relationshipPath.stream()
 			.map(relationship -> SemanticQueryPlan.RelationshipSelection.builder()
 				.relationshipCode(relationship.getRelationshipCode())
 				.sourceModelCode(relationship.getSourceModelCode())
@@ -340,6 +386,23 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 
 		PlanningDecision multiSourceDecision = multiSourcePolicyService.plan(projectId, projectVersionId,
 				effectiveModelCodes);
+		List<SemanticQueryPlan.RelationshipSelection> relationshipSelections = new ArrayList<>(catalogRelationships);
+		multiSourceDecision.relationships()
+			.stream()
+			.filter(relationship -> hints.relationshipCodes().contains(relationship.getRelationshipCode()))
+			.filter(relationship -> effectiveModelCodes.contains(relationship.getLeftModelCode())
+					&& effectiveModelCodes.contains(relationship.getRightModelCode()))
+			.map(relationship -> SemanticQueryPlan.RelationshipSelection.builder()
+				.relationshipCode(relationship.getRelationshipCode())
+				.sourceModelCode(relationship.getLeftModelCode())
+				.targetModelCode(relationship.getRightModelCode())
+				.cardinality(relationship.getCardinality())
+				.joinType("CROSS_SOURCE_MERGE")
+				.joinCondition(relationship.getLeftModelCode() + "." + relationship.getLeftKey() + " = "
+						+ relationship.getRightModelCode() + "." + relationship.getRightKey())
+				.build())
+			.forEach(relationshipSelections::add);
+		List<SemanticQueryPlan.RelationshipSelection> relationships = List.copyOf(relationshipSelections);
 		Map<String, String> physicalTableByModelCode = effectiveSelectedModels.stream()
 			.collect(Collectors.toMap(SemanticCatalogSnapshot.Model::getModelCode,
 					SemanticCatalogSnapshot.Model::getPhysicalTable));
@@ -407,8 +470,9 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 		if (effectiveSelectedModels.isEmpty()) {
 			errors.add("No enabled semantic model matches the selected physical tables");
 		}
-		if (effectiveModelCodes.size() > 1 && !isConnected(effectiveModelCodes, selectedRelationships)) {
-			errors.add("Selected semantic models are not connected by published relationships: "
+		if (effectiveModelCodes.size() > 1 && !isConnected(effectiveModelCodes, selectedRelationships,
+				multiSourceDecision, hints.relationshipCodes())) {
+			errors.add("Selected semantic models are not connected by published semantic/cross-source relationships: "
 					+ String.join(", ", effectiveModelCodes));
 		}
 
@@ -1030,7 +1094,8 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 		return List.copyOf(path);
 	}
 
-	private boolean isConnected(Set<String> modelCodes, List<SemanticCatalogSnapshot.Relationship> relationships) {
+	private boolean isConnected(Set<String> modelCodes, List<SemanticCatalogSnapshot.Relationship> relationships,
+			PlanningDecision multiSourceDecision, Set<String> selectedRelationshipCodes) {
 		if (modelCodes.size() <= 1) {
 			return true;
 		}
@@ -1043,6 +1108,18 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 				.add(relationship.getTargetModelCode());
 			adjacency.computeIfAbsent(relationship.getTargetModelCode(), ignored -> new HashSet<>())
 				.add(relationship.getSourceModelCode());
+		}
+		if (multiSourceDecision != null) {
+			for (var relationship : multiSourceDecision.relationships()) {
+				if (selectedRelationshipCodes == null
+						|| !selectedRelationshipCodes.contains(relationship.getRelationshipCode())) {
+					continue;
+				}
+				adjacency.computeIfAbsent(relationship.getLeftModelCode(), ignored -> new HashSet<>())
+					.add(relationship.getRightModelCode());
+				adjacency.computeIfAbsent(relationship.getRightModelCode(), ignored -> new HashSet<>())
+					.add(relationship.getLeftModelCode());
+			}
 		}
 		String start = modelCodes.iterator().next();
 		Set<String> visited = new HashSet<>();

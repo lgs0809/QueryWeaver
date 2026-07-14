@@ -34,6 +34,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 @RestController
 @RequestMapping("/api/queryweaver/projects/{projectId}/versions/{versionId}/semantic-catalog")
@@ -69,13 +71,15 @@ public class SemanticCatalogController {
 	}
 
 	@PostMapping("/query-plan")
-	public SemanticQueryPlan queryPlan(@PathVariable Long projectId, @PathVariable Long versionId,
+	public Mono<SemanticQueryPlan> queryPlan(@PathVariable Long projectId, @PathVariable Long versionId,
 			@RequestBody QueryPlanRequest request) {
-		List<String> selectedTables = request.selectedPhysicalTables() == null ? List.of()
-				: List.copyOf(request.selectedPhysicalTables());
-		QueryCaseHints bindings = llmSemanticPlanningService.plan(projectId, versionId, request.canonicalQuery(),
-				selectedTables, List.of());
-		return catalogService.buildQueryPlan(projectId, versionId, request.canonicalQuery(), selectedTables, bindings);
+		return Mono.fromCallable(() -> {
+			List<String> selectedTables = request.selectedPhysicalTables() == null ? List.of()
+					: List.copyOf(request.selectedPhysicalTables());
+			QueryCaseHints bindings = llmSemanticPlanningService.plan(projectId, versionId, request.canonicalQuery(),
+					selectedTables, List.of());
+			return catalogService.buildQueryPlan(projectId, versionId, request.canonicalQuery(), selectedTables, bindings);
+		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	public record ScanDatabaseRequest(@NotNull Integer datasourceId, List<String> tables) {

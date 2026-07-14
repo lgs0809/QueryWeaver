@@ -56,7 +56,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * Governed compiler-first execution for the common Typed Semantic Plan path.
+ * Governed compiler-first execution for the common Semantic Query Plan path.
  *
  * <p>Single-source and multi-source queries use the same durable QueryRun. Source sub-runs are execution artifacts,
  * not child QueryRuns. Unsupported constrained-generation plans explicitly enter the bounded advanced fallback.</p>
@@ -80,7 +80,7 @@ public class SemanticExecutionNode implements NodeAction {
 		SemanticQueryPlan plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
 				(SemanticQueryPlan) null);
 		if (plan == null || !plan.isExecutable()) {
-			throw new IllegalStateException("Semantic execution requires an executable Typed Semantic Plan");
+			throw new IllegalStateException("Semantic execution requires an executable Semantic Query Plan");
 		}
 		Long projectId = StateUtil.getObjectValue(state, PROJECT_ID, Long.class);
 		Long versionId = StateUtil.getObjectValue(state, PROJECT_VERSION_ID, Long.class);
@@ -93,7 +93,7 @@ public class SemanticExecutionNode implements NodeAction {
 			executed = governedQueryExecutionService.execute(runId, executionKey, projectId, versionId, principalId, plan);
 		}
 		catch (ConstrainedGenerationRequiredException unsupported) {
-			log.info("Typed plan requires advanced/constrained execution fallback: {}", unsupported.getMessage());
+			log.info("Semantic Query Plan requires advanced/constrained execution fallback: {}", unsupported.getMessage());
 			return Map.of(SEMANTIC_EXECUTION_DECISION, FALLBACK_ADVANCED, ADVANCED_EXECUTION_FALLBACK, true);
 		}
 		catch (Exception failure) {

@@ -20,6 +20,8 @@ import static cn.lgs.queryweaver.constant.Constant.FORCE_SEMANTIC_REPLAN;
 import static cn.lgs.queryweaver.constant.Constant.LAST_SQL_EXECUTED_STEP;
 import static cn.lgs.queryweaver.constant.Constant.LAST_SQL_RESULT_PAYLOAD;
 import static cn.lgs.queryweaver.constant.Constant.PLAN_CURRENT_STEP;
+import static cn.lgs.queryweaver.constant.Constant.PLAN_VALIDATION_ERROR;
+import static cn.lgs.queryweaver.constant.Constant.PLANNER_NODE_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.POST_EXECUTION_REVIEW_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.PROJECT_ID;
 import static cn.lgs.queryweaver.constant.Constant.PROJECT_VERSION_ID;
@@ -29,8 +31,13 @@ import static cn.lgs.queryweaver.constant.Constant.RETRIEVAL_REPAIR_QUERY;
 import static cn.lgs.queryweaver.constant.Constant.RUN_ID;
 import static cn.lgs.queryweaver.constant.Constant.SEMANTIC_EXECUTION_DECISION;
 import static cn.lgs.queryweaver.constant.Constant.SEMANTIC_REPLAN_FEEDBACK;
+import static cn.lgs.queryweaver.constant.Constant.SQL_EXECUTE_NODE_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.SQL_EXECUTED_QUERY_OUTPUT;
+import static cn.lgs.queryweaver.constant.Constant.SQL_COMPILER_MODE;
+import static cn.lgs.queryweaver.constant.Constant.SQL_DRY_PLAN_OUTPUT;
 import static cn.lgs.queryweaver.constant.Constant.SQL_GENERATE_COUNT;
+import static cn.lgs.queryweaver.constant.Constant.SQL_RESULT_LIST_MEMORY;
+import static cn.lgs.queryweaver.constant.Constant.SQL_RESULT_MEMORY_BY_STEP;
 import static cn.lgs.queryweaver.constant.Constant.SQL_REGENERATE_REASON;
 import static cn.lgs.queryweaver.constant.Constant.TYPED_SEMANTIC_PLAN;
 
@@ -56,6 +63,7 @@ import cn.lgs.queryweaver.run.QueryRunService;
 import cn.lgs.queryweaver.run.RunNodeEffectService;
 import cn.lgs.queryweaver.semantic.application.SemanticPlanningOutcome;
 import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.sql.application.SqlResultValidator.ValidationMode;
 import cn.lgs.queryweaver.util.ChatResponseUtil;
 import cn.lgs.queryweaver.util.FluxUtil;
 import cn.lgs.queryweaver.util.JsonUtil;
@@ -107,6 +115,12 @@ public class PostExecutionReviewNode implements NodeAction {
 		Map<String, String> executedQueries = StateUtil.getObjectValue(state, SQL_EXECUTED_QUERY_OUTPUT, Map.class,
 				Map.of());
 		String sql = executedQueries.getOrDefault(String.valueOf(step), "");
+		String executionPlan = StateUtil.getStringValue(state, PLANNER_NODE_OUTPUT, "");
+		String compilerMode = StateUtil.getStringValue(state, SQL_COMPILER_MODE, "");
+		boolean advancedExecution = state.value(ADVANCED_EXECUTION_FALLBACK, false)
+				|| "SEMANTIC_SQL".equalsIgnoreCase(compilerMode);
+		ValidationMode validationMode = advancedExecution ? ValidationMode.ADVANCED_EXECUTION
+				: ValidationMode.STRICT_SEMANTIC_PLAN;
 		SemanticQueryPlan plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
 				(SemanticQueryPlan) null);
 		if (plan == null) {
@@ -119,13 +133,18 @@ public class PostExecutionReviewNode implements NodeAction {
 		effectInput.put("sql", sql);
 		effectInput.put("resultPayload", resultPayload);
 		effectInput.put("typedPlan", plan);
+		effectInput.put("executionPlan", executionPlan);
+		List<String> dryPlanWarnings = dryPlanWarnings(state);
+		effectInput.put("compilerMode", compilerMode);
+		effectInput.put("validationMode", validationMode.name());
+		effectInput.put("dryPlanWarnings", dryPlanWarnings);
 		effectInput.put("budget", budget);
 		String inputHash = runNodeEffectService.inputHash(JsonUtil.getObjectMapper().writeValueAsString(effectInput));
 		String effectKey = "post-execution-review:" + step;
 		String completed = runNodeEffectService.completedPayload(runId, effectKey, inputHash).orElse(null);
 		if (completed != null) {
 			PostReviewEffect restored = readEffect(completed);
-			recordEvidence(runId, step, plan, restored.review(), restored.budget(), inputHash);
+			recordEvidence(runId, step, plan, executionPlan, restored.review(), restored.budget(), inputHash);
 			return replay(state, restored);
 		}
 
@@ -134,7 +153,7 @@ public class PostExecutionReviewNode implements NodeAction {
 		ReviewMode reviewMode = repairPolicy.semanticReviewAvailable(budget) ? ReviewMode.CONFIGURED
 				: ReviewMode.DETERMINISTIC_ONLY;
 		PostExecutionReview review = reviewService.review(StateUtil.getCanonicalQuery(state), plan, sql, resultSet,
-				properties.getSqlExecution().getMaxRows(), reviewMode);
+				properties.getSqlExecution().getMaxRows(), executionPlan, reviewMode, validationMode, dryPlanWarnings);
 		RepairBudget updatedBudget = budget;
 		if (review.semanticReviewerUsed()) {
 			BudgetDecision semanticReviewBudget = repairPolicy.consumeSemanticReview(updatedBudget);
@@ -161,7 +180,7 @@ public class PostExecutionReviewNode implements NodeAction {
 		}
 		PostReviewEffect effect = new PostReviewEffect(review, updatedBudget, step, resultPayload, sql);
 		runNodeEffectService.recordCompleted(runId, effectKey, inputHash, writeEffect(effect));
-		recordEvidence(runId, step, plan, review, updatedBudget, inputHash);
+		recordEvidence(runId, step, plan, executionPlan, review, updatedBudget, inputHash);
 		return applyEffect(state, effect, false);
 	}
 
@@ -220,10 +239,33 @@ public class PostExecutionReviewNode implements NodeAction {
 				update.put(SQL_REGENERATE_REASON,
 						SqlRetryDto.sqlExecute("Post-execution review requested SQL repair: " + repairReason(review)));
 			}
-			case REPLAN -> {
+			case REPLAN_EXECUTION -> {
+				// Keep the governed semantic binding fixed and rebuild only the execution strategy. The previous execution
+				// artifacts are cleared from graph state so a replacement plan cannot accidentally consume abandoned results.
+				// A compiler-first run has not prepared advanced schema context yet, so mark the existing fallback path before
+				// the dispatcher sends it through QueryEnhance/SchemaRecall/TableRelation.
+				if ("EXECUTED".equals(StateUtil.getStringValue(state, SEMANTIC_EXECUTION_DECISION, ""))) {
+					update.put(ADVANCED_EXECUTION_FALLBACK, true);
+				}
+				update.put(PLAN_CURRENT_STEP, 1);
+				update.put(FORCE_SEMANTIC_REPLAN, false);
+				update.put(PLAN_VALIDATION_ERROR,
+						"Post-execution review requested execution replanning while preserving the governed semantic binding: "
+								+ repairReason(review));
+				update.put(SQL_REGENERATE_REASON, SqlRetryDto.empty());
+				update.put(SQL_GENERATE_COUNT, 0);
+				update.put(SQL_EXECUTE_NODE_OUTPUT, Map.of());
+				update.put(SQL_EXECUTED_QUERY_OUTPUT, Map.of());
+				update.put(SQL_RESULT_MEMORY_BY_STEP, Map.of());
+				update.put(SQL_RESULT_LIST_MEMORY, List.of());
+				update.put(LAST_SQL_EXECUTED_STEP, 0);
+				update.put(LAST_SQL_RESULT_PAYLOAD, "");
+			}
+			case REBIND_SEMANTIC, REPLAN -> {
 				update.put(PLAN_CURRENT_STEP, effect.step());
 				update.put(FORCE_SEMANTIC_REPLAN, true);
-				String replanFeedback = "结果验收要求修正以下语义计划问题，并保留其它已验证的受治理绑定：" + repairReason(review);
+				update.put(PLAN_VALIDATION_ERROR, "");
+				String replanFeedback = "结果验收要求修正以下语义绑定问题，并保留其它已验证的受治理绑定：" + repairReason(review);
 				update.put(SEMANTIC_REPLAN_FEEDBACK, replanFeedback);
 				update.put(RETRIEVAL_REPAIR_QUERY, "");
 				update.put(RETRIEVAL_REPAIR_HINT, "");
@@ -292,8 +334,17 @@ public class PostExecutionReviewNode implements NodeAction {
 		return review.issueType().name();
 	}
 
-	private void recordEvidence(String runId, int step, SemanticQueryPlan plan, PostExecutionReview review,
-			RepairBudget budget, String inputHash) {
+	private List<String> dryPlanWarnings(OverAllState state) {
+		Map<String, Object> dryPlan = StateUtil.getObjectValue(state, SQL_DRY_PLAN_OUTPUT, Map.class, Map.of());
+		Object rawWarnings = dryPlan.get("warnings");
+		if (!(rawWarnings instanceof List<?> values)) {
+			return List.of();
+		}
+		return values.stream().map(Objects::toString).filter(value -> !value.isBlank()).distinct().toList();
+	}
+
+	private void recordEvidence(String runId, int step, SemanticQueryPlan plan, String executionPlan,
+			PostExecutionReview review, RepairBudget budget, String inputHash) {
 		if (runId == null || runId.isBlank()) {
 			return;
 		}
@@ -303,6 +354,7 @@ public class PostExecutionReviewNode implements NodeAction {
 			payload.put("review", review);
 			payload.put("repairBudget", budget);
 			payload.put("typedPlan", plan);
+			payload.put("executionPlan", executionPlan == null ? "" : executionPlan);
 			queryRunService.appendEvent(runId, "POST_EXECUTION_REVIEW", "post-execution-review",
 					JsonUtil.getObjectMapper().writeValueAsString(payload), "Post-execution review " + review.decision(),
 					"post-review:" + step + ":" + inputHash);

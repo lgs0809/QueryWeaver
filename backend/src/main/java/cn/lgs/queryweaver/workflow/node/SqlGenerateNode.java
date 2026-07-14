@@ -124,7 +124,7 @@ public class SqlGenerateNode implements NodeAction {
 			sqlFlux = Flux.just(reusableTemplate.sql());
 		}
 		else if (compiled != null) {
-			displayMessage = "Typed Semantic Query IR 已通过确定性编译...";
+			displayMessage = "Semantic Query Plan 已通过确定性编译...";
 			sqlFlux = Flux.just(compiled.sql());
 		}
 		else {
@@ -135,9 +135,11 @@ public class SqlGenerateNode implements NodeAction {
 		// 准备返回结果，同时需要清除一些状态数据
 		Map<String, Object> result = new HashMap<>(Map.of(SQL_GENERATE_OUTPUT, StateGraph.END, SQL_GENERATE_COUNT,
 				count + 1, SQL_REGENERATE_REASON, SqlRetryDto.empty()));
+		result.put(SQL_PHYSICAL_OUTPUT, "");
+		result.put(SQL_DRY_PLAN_OUTPUT, Map.of());
 		result.put(SQL_COMPILED_PARAMETERS, compiled == null ? List.of() : compiled.parameters());
-		result.put(SQL_COMPILER_MODE, compiled == null ? "CONSTRAINED_GENERATION"
-				: reusableTemplate == null ? "DETERMINISTIC" : "PATTERN_TEMPLATE");
+		result.put(SQL_COMPILER_MODE,
+				compiled == null ? "SEMANTIC_SQL" : reusableTemplate == null ? "DETERMINISTIC" : "PATTERN_TEMPLATE");
 		if (reusableTemplate != null) {
 			result.put(SQL_PATTERN_TEMPLATE_ID, reusableTemplate.templateId());
 			result.put(QUERY_PATTERN_ID, reusableTemplate.patternId());
@@ -238,7 +240,7 @@ public class SqlGenerateNode implements NodeAction {
 			return JsonUtil.getObjectMapper().writeValueAsString(semanticPlan);
 		}
 		catch (Exception ex) {
-			throw new IllegalStateException("Failed to serialize typed semantic plan", ex);
+			throw new IllegalStateException("Failed to serialize Semantic Query Plan", ex);
 		}
 	}
 

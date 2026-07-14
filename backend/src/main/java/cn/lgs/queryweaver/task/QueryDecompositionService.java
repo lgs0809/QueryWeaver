@@ -50,13 +50,14 @@ public class QueryDecompositionService {
 			2. Do not choose metric codes, tables, data sources, joins, filters, enum values, SQL, Python, or execution steps.
 			3. Do not resolve business ambiguity. Preserve the user's wording instead of replacing it with a guessed definition.
 			4. needsTodo=true ONLY when the user explicitly asks for multiple answer goals that should be answered independently.
-			5. Multiple metrics that naturally belong in one result table are ONE answer goal.
-			6. Dimensions, filters, time ranges, groupings, ordering, comparison, ranking, top-N, ratio calculation and finding an extremum are NOT separate tasks when one semantic query can naturally answer them.
-			7. A task is an answer goal, never a reasoning step or execution step.
-			8. Keep each task question self-contained using only information already present in the request.
-			9. dependsOn contains 1-based indexes of earlier tasks only when the later answer logically requires the earlier answer.
-			10. If needsTodo=false, return tasks=[].
-			11. Return exactly one JSON object and no Markdown.
+			5. Multiple metrics that naturally belong in one result table at the same requested grain are ONE answer goal.
+			6. Separate requested outputs with incompatible result grains/shapes are independent answer goals when the user asks to receive both separately. For example, "give me the overall total; then give me a daily trend, both results" is TWO tasks: one total and one daily trend. Do not force such outputs into one UNION/result table merely because one SQL statement could technically encode them.
+			7. Dimensions, filters, time ranges, groupings, ordering, comparison, ranking, top-N, ratio calculation and finding an extremum are NOT separate tasks when they all describe one requested result grain.
+			8. A task is an answer goal, never a reasoning step or execution step.
+			9. Keep each task question self-contained using only information already present in the request.
+			10. dependsOn contains 1-based indexes of earlier tasks only when the later answer logically requires the earlier answer.
+			11. If needsTodo=false, return tasks=[].
+			12. Return exactly one JSON object and no Markdown.
 
 			Schema:
 			{"requestType":"DATA_QUERY|NON_DATA_QUERY","needsTodo":false,"tasks":[]}

@@ -46,6 +46,8 @@ public class SemanticRetrievalIndexService {
 	// build resumable because staleDocuments() skips vectors persisted by earlier batches.
 	private static final int EMBEDDING_BATCH_SIZE = 2;
 
+	private static final int REINDEX_BATCH_SIZE = 4;
+
 	private static final int VECTOR_HNSW_MAX_DIMENSION = 2000;
 
 	private static final int HALF_VECTOR_HNSW_MAX_DIMENSION = 4000;
@@ -68,7 +70,7 @@ public class SemanticRetrievalIndexService {
 	}
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
-	public IndexingResult indexDocuments(List<SemanticRetrievalDocument> documents) {
+	public synchronized IndexingResult indexDocuments(List<SemanticRetrievalDocument> documents) {
 		if (embeddingModel == null || documents == null || documents.isEmpty()) {
 			return new IndexingResult(0, false);
 		}
@@ -165,17 +167,74 @@ public class SemanticRetrievalIndexService {
 	}
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
-	public int reindexAll() {
+	public synchronized int reindexAll() {
 		if (embeddingModel == null) {
 			return 0;
 		}
 		List<SemanticRetrievalDocument> documents = jdbc.queryForList("""
 				SELECT * FROM qw_semantic_retrieval_document ORDER BY project_version_id, document_type, asset_key
 				""").stream().map(this::mapDocument).toList();
+		if (documents.isEmpty()) {
+			return 0;
+		}
+		ConfiguredIdentity identity = configuredIdentity();
+		List<PreparedEmbedding> prepared = prepareReindexEmbeddings(documents);
+		if (prepared.size() != documents.size()) {
+			throw new IllegalStateException("Semantic Catalog reindex prepared " + prepared.size() + " vectors for "
+					+ documents.size() + " documents");
+		}
+		int dimension = requireDimension(prepared.get(0).vector());
+		if (prepared.stream().anyMatch(value -> requireDimension(value.vector()) != dimension)) {
+			throw new IllegalStateException("Semantic Catalog reindex produced inconsistent embedding dimensions");
+		}
+
+		// Only switch the active identity after every new vector has been generated successfully. A provider timeout
+		// therefore leaves the previous active index intact instead of deleting the last known-good retrieval channel.
 		jdbc.execute("DROP INDEX IF EXISTS idx_qw_semantic_retrieval_embedding_hnsw");
-		jdbc.update("DELETE FROM qw_semantic_retrieval_embedding");
-		jdbc.update("DELETE FROM qw_embedding_index_registry WHERE index_scope = ?", INDEX_SCOPE);
-		return indexDocuments(documents).indexedDocuments();
+		for (PreparedEmbedding value : prepared) {
+			upsertEmbedding(value.document(), identity, value.vector());
+		}
+		activateRegistry(identity, dimension);
+		jdbc.update("DELETE FROM qw_semantic_retrieval_embedding WHERE embedding_model <> ? OR embedding_version <> ?",
+				identity.model(), identity.version());
+		ensureHnswIndex(dimension);
+		return prepared.size();
+	}
+
+	private List<PreparedEmbedding> prepareReindexEmbeddings(List<SemanticRetrievalDocument> documents) {
+		List<PreparedEmbedding> prepared = new ArrayList<>(documents.size());
+		for (int offset = 0; offset < documents.size(); offset += REINDEX_BATCH_SIZE) {
+			List<SemanticRetrievalDocument> batch = documents.subList(offset,
+					Math.min(documents.size(), offset + REINDEX_BATCH_SIZE));
+			List<float[]> vectors = embedReindexBatch(batch);
+			if (vectors.size() != batch.size()) {
+				throw new IllegalStateException("Embedding model returned " + vectors.size() + " vectors for " + batch.size()
+						+ " Semantic Catalog reindex documents");
+			}
+			for (int index = 0; index < batch.size(); index++) {
+				prepared.add(new PreparedEmbedding(batch.get(index), vectors.get(index)));
+			}
+		}
+		return List.copyOf(prepared);
+	}
+
+	private List<float[]> embedReindexBatch(List<SemanticRetrievalDocument> batch) {
+		try {
+			return EmbeddingModelSupport.embedTexts(embeddingModel,
+					batch.stream().map(SemanticRetrievalDocument::semanticText).toList());
+		}
+		catch (RuntimeException failure) {
+			if (batch.size() <= 1) {
+				throw failure;
+			}
+			int middle = batch.size() / 2;
+			List<float[]> left = embedReindexBatch(batch.subList(0, middle));
+			List<float[]> right = embedReindexBatch(batch.subList(middle, batch.size()));
+			List<float[]> combined = new ArrayList<>(left.size() + right.size());
+			combined.addAll(left);
+			combined.addAll(right);
+			return List.copyOf(combined);
+		}
 	}
 
 	public void assertConfiguredIndexCompatible() {
@@ -358,6 +417,21 @@ public class SemanticRetrievalIndexService {
 				""", INDEX_SCOPE, identity.model(), identity.version(), dimension);
 	}
 
+	private void activateRegistry(ConfiguredIdentity identity, int dimension) {
+		jdbc.update("""
+				INSERT INTO qw_embedding_index_registry
+				(index_scope, embedding_model, embedding_version, dimension, status, active_since, update_time)
+				VALUES (?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+				ON CONFLICT (index_scope) DO UPDATE
+				SET embedding_model = EXCLUDED.embedding_model,
+				    embedding_version = EXCLUDED.embedding_version,
+				    dimension = EXCLUDED.dimension,
+				    status = 'ACTIVE',
+				    active_since = CURRENT_TIMESTAMP,
+				    update_time = CURRENT_TIMESTAMP
+				""", INDEX_SCOPE, identity.model(), identity.version(), dimension);
+	}
+
 	private void assertCompatible(ConfiguredIdentity identity, RegistryEntry registry) {
 		if (!"ACTIVE".equals(registry.status()) || !Objects.equals(identity.model(), registry.model())
 				|| !Objects.equals(identity.version(), registry.version())) {
@@ -447,6 +521,9 @@ public class SemanticRetrievalIndexService {
 	}
 
 	public record IndexingResult(int indexedDocuments, boolean vectorAvailable) {
+	}
+
+	private record PreparedEmbedding(SemanticRetrievalDocument document, float[] vector) {
 	}
 
 	private record ConfiguredIdentity(String model, String version) {

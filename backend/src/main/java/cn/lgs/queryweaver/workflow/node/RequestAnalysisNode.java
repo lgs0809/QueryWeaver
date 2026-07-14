@@ -84,9 +84,15 @@ public class RequestAnalysisNode implements NodeAction {
 			if (!taskRepository.enabled(runId)) {
 				taskRepository.initialize(runId, analysis.tasks());
 			}
-			QueryTask active = taskRepository.activateFirst(runId);
-			result.put(ACTIVE_TODO_ID, active.taskId());
-			activeQuery = active.question();
+			if (taskRepository.allDone(runId)) {
+				result.put(ACTIVE_TODO_ID, "");
+			}
+			else {
+				QueryTask active = taskRepository.activateFirst(runId);
+				result.put(ACTIVE_TODO_ID, active.taskId());
+				activeQuery = active.question();
+				persistTodoActivation(runId, active);
+			}
 		}
 		else {
 			result.put(ACTIVE_TODO_ID, "");
@@ -100,6 +106,25 @@ public class RequestAnalysisNode implements NodeAction {
 		log.info("Request analysis completed: runId={}, type={}, todoEnabled={}, todoCount={}", runId,
 				analysis.requestType(), analysis.needsTodo(), analysis.tasks().size());
 		return result;
+	}
+
+	private void persistTodoActivation(String runId, QueryTask task) {
+		if (!StringUtils.hasText(runId) || task == null) {
+			return;
+		}
+		String idempotencyKey = "todo-activated:" + runId + ":" + task.taskId();
+		if (runService.eventByIdempotency(runId, idempotencyKey).isPresent()) {
+			return;
+		}
+		try {
+			String payload = JsonUtil.getObjectMapper().writeValueAsString(
+					Map.of("taskId", task.taskId(), "ordinal", task.ordinal(), "question", task.question()));
+			runService.appendEvent(runId, "TODO_ACTIVATED", "request-analysis", payload,
+					"Query Todo active for request execution", idempotencyKey);
+		}
+		catch (Exception ex) {
+			throw new IllegalStateException("Unable to persist active Todo", ex);
+		}
 	}
 
 	private RequestAnalysis loadPersisted(String runId) {

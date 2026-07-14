@@ -104,8 +104,26 @@ public class QueryWeaverProperties {
 		/** Maximum number of physical tables referenced by one query. */
 		private int maxJoinTables = 8;
 
-		/** Maximum row count reported by EXPLAIN before execution is rejected. */
+		/** Maximum estimated rows scanned across physical scan operators. */
 		private long maxEstimatedRows = 10000000L;
+
+		/** Maximum estimated rows materialized by any intermediate plan operator. */
+		private long maxEstimatedIntermediateRows = 20000000L;
+
+		/** Maximum estimated rows produced by a join operator before execution is rejected. */
+		private long maxEstimatedJoinRows = 20000000L;
+
+		/** Maximum estimated rows entering a sort/filesort operator. */
+		private long maxEstimatedSortRows = 10000000L;
+
+		/** Maximum estimated rows produced/handled by aggregation/grouping operators. */
+		private long maxEstimatedAggregateRows = 20000000L;
+
+		/** Maximum dialect-reported optimizer cost. Disabled by default because cost units are dialect-specific. */
+		private double maxEstimatedCost = 0D;
+
+		/** Reject a full-table scan once its estimated scan rows exceed this threshold. */
+		private long maxFullScanRows = 5000000L;
 
 		/** Whether the SQL must constrain one of the semantic time columns. */
 		private boolean requireTimeFilter = false;

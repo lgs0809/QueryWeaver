@@ -80,7 +80,7 @@ public class ReportGeneratorNode implements NodeAction {
 		ExecutionStep executionStep = typedPlan == null ? getCurrentExecutionStep(plan, currentStep) : null;
 		String summaryAndRecommendations = typedPlan == null
 				? executionStep.getToolParameters().getSummaryAndRecommendations()
-				: "请只根据受治理 Typed Semantic Plan、实际执行 SQL 与实际执行结果回答，不补充未实际执行的过滤条件或业务规则。";
+				: "请只根据受治理 Semantic Query Plan、实际执行 SQL 与实际执行结果回答，不补充未实际执行的过滤条件或业务规则。";
 
 		// Generate report streaming flux
 		Flux<ChatResponse> reportGenerationFlux = generateReport(userInput, plan, typedPlan, executionResults,
@@ -132,7 +132,7 @@ public class ReportGeneratorNode implements NodeAction {
 	 */
 	private Flux<ChatResponse> generateReport(String userInput, Plan plan, SemanticQueryPlan typedPlan,
 			Map<String, String> executionResults, Map<String, String> executedQueries, String summaryAndRecommendations) {
-		// QueryWeaver reports must be grounded in the governed typed plan and actual
+		// QueryWeaver reports must be grounded in the governed Semantic Query Plan and actual
 		// execution evidence. The advanced planner narrative is not an execution fact.
 		String userRequirementsAndPlan = buildUserRequirementsAndPlan(userInput, plan, typedPlan);
 
@@ -154,7 +154,7 @@ public class ReportGeneratorNode implements NodeAction {
 		sb.append(userInput).append("\n\n");
 
 		if (typedPlan != null) {
-			sb.append("## 受治理的 Typed Semantic Plan（事实约束）\n");
+			sb.append("## 受治理的 Semantic Query Plan（事实约束）\n");
 			sb.append("以下结构化计划是 QueryWeaver 对本次查询意图的正式约束；不得使用 advanced fallback planner 的思考过程或参数描述补充其中不存在的过滤条件。\n");
 			sb.append("```json\n").append(json(typedPlan)).append("\n```\n\n");
 			return sb.toString();
