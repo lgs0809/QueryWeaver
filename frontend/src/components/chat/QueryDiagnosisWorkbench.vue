@@ -58,10 +58,70 @@
           </div>
         </section>
 
-        <section v-if="hasSemanticEvidence" class="workbench-section">
+        <section v-if="diagnosis.pipeline" class="workbench-section">
           <div class="section-heading">
             <div>
               <span class="section-index">02</span>
+              <h3>执行证据链</h3>
+            </div>
+            <small>Semantic Binding → Planner → Semantic SQL → Dry Plan → Physical SQL → Guard / Cost → Review</small>
+          </div>
+
+          <div class="pipeline-facts">
+            <el-tag effect="plain">Dry Plan {{ String(diagnosis.pipeline.dryPlan?.status || 'N/A') }}</el-tag>
+            <el-tag effect="plain">SQL Trace {{ diagnosis.pipeline.sqlTraces?.length || 0 }}</el-tag>
+            <el-tag
+              v-if="diagnosis.pipeline.reviewDecision"
+              :type="diagnosis.pipeline.reviewDecision === 'PASS' ? 'success' : 'warning'"
+              effect="plain"
+            >
+              Review {{ diagnosis.pipeline.reviewDecision }}
+            </el-tag>
+          </div>
+
+          <el-collapse class="pipeline-collapse">
+            <el-collapse-item v-if="diagnosis.pipeline.semanticPlanJson" title="Semantic Query Plan" name="semantic-plan">
+              <pre class="evidence-code">{{ prettyJson(diagnosis.pipeline.semanticPlanJson) }}</pre>
+            </el-collapse-item>
+            <el-collapse-item v-if="diagnosis.pipeline.executionPlanJson" title="Planner Execution Plan" name="execution-plan">
+              <pre class="evidence-code">{{ prettyJson(diagnosis.pipeline.executionPlanJson) }}</pre>
+            </el-collapse-item>
+            <el-collapse-item v-if="diagnosis.pipeline.semanticSql" title="Semantic SQL" name="semantic-sql">
+              <pre class="evidence-code">{{ diagnosis.pipeline.semanticSql }}</pre>
+            </el-collapse-item>
+            <el-collapse-item title="Dry Plan" name="dry-plan">
+              <pre class="evidence-code">{{ prettyJson(diagnosis.pipeline.dryPlan) }}</pre>
+            </el-collapse-item>
+            <el-collapse-item v-if="diagnosis.pipeline.physicalSql" title="Physical SQL" name="physical-sql">
+              <pre class="evidence-code">{{ diagnosis.pipeline.physicalSql }}</pre>
+            </el-collapse-item>
+            <el-collapse-item
+              v-for="(trace, index) in diagnosis.pipeline.sqlTraces || []"
+              :key="`sql-trace-${index}`"
+              :title="`SQL Guard / Cost #${index + 1} · ${String(trace.status || '-')}`"
+              :name="`sql-trace-${index}`"
+            >
+              <pre class="evidence-code">{{ prettyJson(trace) }}</pre>
+            </el-collapse-item>
+            <el-collapse-item
+              v-if="diagnosis.pipeline.reviewDecision || diagnosis.pipeline.reviewEvidence"
+              title="Post-Execution Review / Repair Budget"
+              name="post-review"
+            >
+              <pre class="evidence-code">{{ prettyJson({
+                decision: diagnosis.pipeline.reviewDecision,
+                issueType: diagnosis.pipeline.reviewIssueType,
+                evidence: diagnosis.pipeline.reviewEvidence,
+                repairBudget: diagnosis.pipeline.repairBudget,
+              }) }}</pre>
+            </el-collapse-item>
+          </el-collapse>
+        </section>
+
+        <section v-if="hasSemanticEvidence" class="workbench-section">
+          <div class="section-heading">
+            <div>
+              <span class="section-index">03</span>
               <h3>召回与最终绑定</h3>
             </div>
             <small v-if="!diagnosis.retrievalCandidates.length">当前角色只展示最终绑定摘要</small>
@@ -104,7 +164,7 @@
         <section class="workbench-section">
           <div class="section-heading">
             <div>
-              <span class="section-index">03</span>
+              <span class="section-index">04</span>
               <h3>最小修复</h3>
             </div>
             <small>优先局部修复；只有项目级语义变化才进入治理发布</small>
@@ -236,7 +296,7 @@
         <section v-if="diagnosis.governance" class="workbench-section governance-section">
           <div class="section-heading">
             <div>
-              <span class="section-index">04</span>
+              <span class="section-index">05</span>
               <h3>定向回归与发布</h3>
             </div>
             <el-tag effect="plain">{{ governanceStatusLabel(diagnosis.governance.status) }}</el-tag>
@@ -593,6 +653,15 @@
 
   const actionEnabled = (code: string) =>
     Boolean(diagnosis.value?.repairActions.find(action => action.code === code)?.enabled);
+  const prettyJson = (value: unknown) => {
+    if (value === undefined || value === null || value === '') return '-';
+    try {
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return String(value);
+    }
+  };
   const compactRanks = (ranks: Record<string, number>) =>
     Object.entries(ranks || {})
       .sort(([, left], [, right]) => left - right)
@@ -618,7 +687,7 @@
       PLANNER_REJECTED: 'Planner 输出被治理拒绝',
       CLARIFICATION_REQUIRED: '需要业务澄清',
       SEMANTIC_DEFINITION_GAP: '业务定义缺口',
-      PLAN_RESOLUTION_ERROR: 'Typed Plan 解析失败',
+      PLAN_RESOLUTION_ERROR: 'Semantic Query Plan 解析失败',
       SQL_COMPILATION_ERROR: 'SQL 编译失败',
       SQL_GUARD_ERROR: 'SQL 安全/准入拒绝',
       SQL_EXECUTION_ERROR: 'SQL / 数据源执行失败',
@@ -882,6 +951,29 @@
   }
   .permission-hint {
     margin: 10px 0 0;
+  }
+  .pipeline-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .pipeline-collapse {
+    border-top: 1px solid #e2e8f0;
+  }
+  .evidence-code {
+    max-height: 360px;
+    margin: 0;
+    overflow: auto;
+    padding: 12px;
+    border-radius: 10px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .advanced-evidence {
     border-top: 1px solid #e2e8f0;

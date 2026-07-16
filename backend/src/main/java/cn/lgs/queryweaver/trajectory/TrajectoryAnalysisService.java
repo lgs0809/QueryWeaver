@@ -502,7 +502,10 @@ public class TrajectoryAnalysisService {
 			}
 			String originalIssue = defaultText(postExecutionReview.get("issueType"), SemanticIssueType.UNKNOWN.name());
 			String persistedIssue = originalIssue;
-			String rootCause = Set.of("RETRIEVAL_MISS", "DEFINITION_GAP").contains(originalIssue)
+			String normalizedDecision = reviewDecision.toUpperCase(Locale.ROOT);
+			boolean semanticRepair = Set.of("REBIND_SEMANTIC", "REPLAN", "RERETRIEVE", "CLARIFY")
+					.contains(normalizedDecision);
+			String rootCause = semanticRepair || Set.of("RETRIEVAL_MISS", "DEFINITION_GAP").contains(originalIssue)
 					? "SEMANTIC_EVOLUTION" : "PLANNER_DEFECT";
 			Map<String, Object> evidence = new LinkedHashMap<>();
 			evidence.put("decision", reviewDecision);
@@ -516,10 +519,14 @@ public class TrajectoryAnalysisService {
 			if (!rejectedPlan.isEmpty()) {
 				evidence.put("rejectedPlan", rejectedPlan);
 			}
+			String executionPlan = text(postExecutionReview.get("executionPlan"));
+			if (StringUtils.hasText(executionPlan)) {
+				evidence.put("executionPlan", executionPlan);
+			}
 			Map<String, Object> acceptedReview = acceptedReviewAfter(postExecutionReviews, reviewIndex);
 			Map<String, Object> acceptedPlan = mapValue(acceptedReview.get("typedPlan"));
-			if ("REPLAN".equalsIgnoreCase(reviewDecision) && "PLANNER_DEFECT".equals(rootCause)
-					&& !rejectedPlan.isEmpty() && !acceptedPlan.isEmpty()) {
+			if (Set.of("REBIND_SEMANTIC", "REPLAN").contains(normalizedDecision) && !rejectedPlan.isEmpty()
+					&& !acceptedPlan.isEmpty()) {
 				rootCause = "SEMANTIC_EVOLUTION";
 				persistedIssue = SemanticIssueType.PLANNING_POLICY_GAP.name();
 				evidence.put("acceptedPlan", acceptedPlan);
@@ -1348,21 +1355,24 @@ public class TrajectoryAnalysisService {
 		return Math.max(0.6, Math.min(0.79, decimal(signal, "confidence")));
 	}
 
-	private SemanticIssueType classifySqlIssue(String errors) {
-		String value = Objects.toString(errors, "").toLowerCase(Locale.ROOT);
-		if (value.contains("enum") || value.contains("value")) {
+	static SemanticIssueType classifySqlIssue(String errors) {
+		String value = Objects.toString(errors, "").toUpperCase(Locale.ROOT);
+		// Raw SQL/JDBC error wording is not authoritative business-semantic evidence. Date functions, WEEK/LAG,
+		// JOIN syntax, unknown aliases, cost rejections and ordinary column hallucinations stay execution defects.
+		// Only explicit governed semantic error codes are allowed to promote repeated SQL repair into Semantic Evolution.
+		if (value.contains("ENUM_MAPPING_MISSING")) {
 			return SemanticIssueType.ENUM_MAPPING_MISSING;
 		}
-		if (value.contains("join") || value.contains("relationship")) {
-			return SemanticIssueType.RELATIONSHIP_INCORRECT;
+		if (value.contains("SEMANTIC_METRIC_NOT_FOUND")) {
+			return SemanticIssueType.METRIC_MISSING;
 		}
-		if (value.contains("grain")) {
-			return SemanticIssueType.GRAIN_INCORRECT;
+		if (value.contains("SEMANTIC_RELATIONSHIP_NOT_FOUND")) {
+			return SemanticIssueType.RELATIONSHIP_MISSING;
 		}
-		if (value.contains("time") || value.contains("date")) {
-			return SemanticIssueType.TIME_SEMANTICS_AMBIGUOUS;
+		if (value.contains("SEMANTIC_GRAIN_NOT_FOUND")) {
+			return SemanticIssueType.GRAIN_MISSING;
 		}
-		if (value.contains("column") || value.contains("unknown")) {
+		if (value.contains("SCHEMA_DRIFT")) {
 			return SemanticIssueType.SCHEMA_DRIFT;
 		}
 		return SemanticIssueType.LLM_SQL_GENERATION_DEFECT;

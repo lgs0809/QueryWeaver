@@ -125,13 +125,13 @@ public class QueryCaseCaptureService {
 		String catalogHash = Objects.toString(source.get("catalog_hash"), "");
 		Integer datasourceId = source.get("datasource_id") == null ? null
 				: ((Number) source.get("datasource_id")).intValue();
-		Optional<SemanticQueryPlan> plan = readPlan(Objects.toString(source.get("execution_snapshot"), ""));
+		String runId = Objects.toString(source.get("run_id"), "");
+		Optional<SemanticQueryPlan> plan = readPlan(Objects.toString(source.get("execution_snapshot"), ""), runId);
 		String typedIrJson = plan.map(value -> versionedJson.write(JsonPayloadRegistry.SEMANTIC_QUERY_PLAN, value))
 			.orElse(null);
 		String intentType = plan.map(this::intentType).orElse(null);
 		String timeRangeJson = plan.map(SemanticQueryPlan::getTimeRange).map(this::json).orElse(null);
 		String shapeHash = plan.map(this::shapeHash).orElse(null);
-		String runId = Objects.toString(source.get("run_id"), "");
 		List<Map<String, Object>> resolutions = contextFingerprintService.resolutions(runId);
 		boolean conversationIndependent = contextFingerprintService.conversationIndependent(question, resolutions);
 		String contextHash = contextFingerprintService.fingerprint(runId, question);
@@ -168,8 +168,22 @@ public class QueryCaseCaptureService {
 				lineageService.json(lineage.derivedFromCaseIds()), lineageService.json(lineage.rootEvidenceIds()),
 				lineage.lineageHash(), qualitySummary);
 		if (inserted == 0) {
-			return repository.findByFingerprint(fingerprint)
-				.map(row -> repository.get(number(row.get("project_id")), Objects.toString(row.get("id"))));
+			Optional<Map<String, Object>> existing = repository.findByFingerprint(fingerprint);
+			if (existing.isPresent() && plan.isPresent()) {
+				String existingId = Objects.toString(existing.get().get("id"), "");
+				jdbc.update("""
+						UPDATE qw_query_example
+						SET typed_ir_json = COALESCE(typed_ir_json, ?::jsonb),
+						    intent_type = COALESCE(intent_type, ?),
+						    resolved_time_range_json = COALESCE(resolved_time_range_json, ?::jsonb),
+						    canonical_shape_hash = COALESCE(canonical_shape_hash, ?),
+						    quality_proof_json = ?, quality_summary = ?, update_time = CURRENT_TIMESTAMP
+						WHERE id = ?
+						""", typedIrJson, intentType, timeRangeJson, shapeHash,
+						versionedJson.write(JsonPayloadRegistry.QUERY_CASE_QUALITY_PROOF, proof), qualitySummary, existingId);
+				persistAssetReferences(existingId, catalogHash, plan.get());
+			}
+			return existing.map(row -> repository.get(number(row.get("project_id")), Objects.toString(row.get("id"))));
 		}
 		plan.ifPresent(value -> persistAssetReferences(id, catalogHash, value));
 		lineageService.appendEvent(id, "QUERY_CASE_CAPTURED", null, "CANDIDATE", "queryweaver-system", "SYSTEM",
@@ -181,7 +195,7 @@ public class QueryCaseCaptureService {
 			jdbc.update("""
 					UPDATE qw_query_example
 					SET status = 'APPROVED', reviewed_by = 'queryweaver-system',
-					    review_comment = 'Automatically reusable deterministic typed plan',
+					    review_comment = 'Automatically reusable deterministic Semantic Query Plan',
 					    reviewed_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP
 					WHERE id = ? AND status = 'CANDIDATE'
 					""", id);
@@ -254,15 +268,32 @@ public class QueryCaseCaptureService {
 		}
 	}
 
-	private Optional<SemanticQueryPlan> readPlan(String executionSnapshotJson) {
-		if (!StringUtils.hasText(executionSnapshotJson)) {
+	private Optional<SemanticQueryPlan> readPlan(String executionSnapshotJson, String runId) {
+		if (StringUtils.hasText(executionSnapshotJson)) {
+			try {
+				JsonNode root = versionedJson.payload(executionSnapshotJson, JsonPayloadRegistry.EXECUTION_SNAPSHOT);
+				JsonNode plan = root.get("semanticPlan");
+				if (plan != null && !plan.isNull()) {
+					return Optional.of(mapper.treeToValue(plan, SemanticQueryPlan.class));
+				}
+			}
+			catch (Exception ignored) {
+				// Fall through to the authoritative runtime Semantic Plan snapshot below.
+			}
+		}
+		if (!StringUtils.hasText(runId)) {
+			return Optional.empty();
+		}
+		List<String> snapshots = jdbc.queryForList("""
+				SELECT payload FROM qw_run_event
+				WHERE run_id = ? AND event_type = 'SEMANTIC_PLAN_SNAPSHOT'
+				ORDER BY sequence DESC LIMIT 1
+				""", String.class, runId);
+		if (snapshots.isEmpty() || !StringUtils.hasText(snapshots.get(0))) {
 			return Optional.empty();
 		}
 		try {
-			JsonNode root = versionedJson.payload(executionSnapshotJson, JsonPayloadRegistry.EXECUTION_SNAPSHOT);
-			JsonNode plan = root.get("semanticPlan");
-			return plan == null || plan.isNull() ? Optional.empty()
-					: Optional.of(mapper.treeToValue(plan, SemanticQueryPlan.class));
+			return Optional.of(mapper.readValue(snapshots.get(0), SemanticQueryPlan.class));
 		}
 		catch (Exception invalid) {
 			return Optional.empty();

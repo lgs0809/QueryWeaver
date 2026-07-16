@@ -65,15 +65,18 @@ public class QueryCaseUsageService {
 		}
 		boolean failed = "FAILED".equalsIgnoreCase(outcome);
 		for (Map<String, Object> usage : jdbc.queryForList("""
-				SELECT u.* FROM qw_query_case_usage u
+				SELECT u.*, r.error_code AS run_error_code
+				FROM qw_query_case_usage u
 				JOIN qw_query_run r ON r.run_id = u.run_id
 				WHERE r.episode_id = ?
 				""", episodeId)) {
 			String usageId = Objects.toString(usage.get("id"));
 			String queryCaseId = Objects.toString(usage.get("query_example_id"));
 			String runId = Objects.toString(usage.get("run_id"));
-			boolean issue = failed || hasClarificationOrRepair(runId);
-			if (failed) {
+			String errorCode = Objects.toString(usage.get("run_error_code"), "");
+			boolean attributableFailure = failed && failureAttributableToQueryCase(runId, errorCode);
+			boolean issue = failed ? attributableFailure : hasClarificationOrRepair(runId);
+			if (attributableFailure) {
 				int changed = jdbc.update("""
 						UPDATE qw_query_case_usage
 						SET failed_after_recall = TRUE, outcome = 'FAILED', update_time = CURRENT_TIMESTAMP
@@ -88,9 +91,10 @@ public class QueryCaseUsageService {
 				}
 			}
 			else {
+				String recordedOutcome = failed ? "FAILED_NON_ATTRIBUTABLE" : outcome.toUpperCase(Locale.ROOT);
 				jdbc.update("""
 						UPDATE qw_query_case_usage SET outcome = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?
-						""", outcome.toUpperCase(Locale.ROOT), usageId);
+						""", recordedOutcome, usageId);
 			}
 			jdbc.update(issue ? """
 					UPDATE qw_query_example
@@ -133,6 +137,23 @@ public class QueryCaseUsageService {
 				UPDATE qw_query_example SET recall_count = recall_count + 1,
 				 last_recalled_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP WHERE id = ?
 				""", queryCaseId);
+	}
+
+	private boolean failureAttributableToQueryCase(String runId, String errorCode) {
+		if (nonAttributableRuntimeFailure(errorCode)) {
+			return false;
+		}
+		return hasClarificationOrRepair(runId);
+	}
+
+	static boolean nonAttributableRuntimeFailure(String errorCode) {
+		if (!StringUtils.hasText(errorCode)) {
+			return false;
+		}
+		String normalized = errorCode.trim().toUpperCase(Locale.ROOT);
+		return normalized.contains("EXECUTION_SNAPSHOT_MISMATCH") || normalized.contains("WEBCLIENT")
+				|| normalized.contains("MODELUNAVAILABLE") || normalized.contains("RUNLEASE")
+				|| normalized.contains("RUNINPROGRESS") || normalized.contains("CANCELLATION");
 	}
 
 	private boolean hasClarificationOrRepair(String runId) {

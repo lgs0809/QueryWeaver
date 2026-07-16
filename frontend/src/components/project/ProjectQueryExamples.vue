@@ -35,7 +35,7 @@
             :value="item"
           />
         </el-select>
-        <el-button @click="load">刷新</el-button>
+        <el-button @click="refreshAll">刷新</el-button>
       </div>
     </div>
 
@@ -45,6 +45,30 @@
       show-icon
       title="系统只复用与当前业务模型和安全规则相容、并且已经通过治理确认的案例；每次查询仍会重新生成、校验并执行。"
     />
+
+    <div v-if="indexReadiness" class="index-readiness">
+      <div>
+        <div class="index-summary">
+          <el-tag :type="indexStatusType(indexReadiness.status)">
+            {{ indexStatusLabel(indexReadiness.status) }}
+          </el-tag>
+          <span>
+            向量覆盖 {{ indexReadiness.vectorCount }} / {{ indexReadiness.approvedCaseCount }}
+            <template v-if="indexReadiness.dimension"> · {{ indexReadiness.dimension }} 维</template>
+          </span>
+        </div>
+        <div class="subtle">{{ indexReadiness.detail }}</div>
+      </div>
+      <el-button
+        v-if="props.canReindex"
+        type="primary"
+        plain
+        :loading="reindexing"
+        @click="reindexCurrentProject"
+      >
+        重建本项目向量索引
+      </el-button>
+    </div>
 
     <el-table :data="examples" class="example-table" empty-text="暂无已验证案例">
       <el-table-column label="案例" min-width="290">
@@ -214,7 +238,7 @@
 
         <h3>Resolved Time Range</h3>
         <pre>{{ pretty(selected.resolved_time_range_json) }}</pre>
-        <h3>Typed IR</h3>
+        <h3>Semantic Query Plan</h3>
         <pre>{{ pretty(selected.typed_ir_json) }}</pre>
         <h3>Resolution</h3>
         <pre>{{ pretty(selected.resolution_json) }}</pre>
@@ -271,6 +295,7 @@
   import { ElMessage, ElMessageBox } from 'element-plus';
   import {
     queryWeaverService,
+    type QueryCaseIndexReadiness,
     type SemanticProjectVersion,
     type ValidatedQueryExample,
   } from '@/services/queryweaver';
@@ -280,6 +305,7 @@
     versions: SemanticProjectVersion[];
     activeVersionId?: number;
     canGovern?: boolean;
+    canReindex?: boolean;
   }>();
   const canGovern = props.canGovern !== false;
 
@@ -288,7 +314,9 @@
   const rebindStatus = ref('');
   const examples = ref<ValidatedQueryExample[]>([]);
   const selected = ref<ValidatedQueryExample>();
+  const indexReadiness = ref<QueryCaseIndexReadiness>();
   const loading = ref(false);
+  const reindexing = ref(false);
   const governingId = ref('');
   const drawerVisible = ref(false);
   const rebindStatuses = [
@@ -320,6 +348,38 @@
       ElMessage.error(error instanceof Error ? error.message : 'Query Case 加载失败');
     } finally {
       loading.value = false;
+    }
+  };
+
+  const loadIndexReadiness = async () => {
+    if (!props.projectId) return;
+    try {
+      indexReadiness.value = await queryWeaverService.queryCaseIndexReadiness(props.projectId);
+    } catch (error) {
+      indexReadiness.value = undefined;
+      ElMessage.warning(error instanceof Error ? error.message : 'Query Case 索引状态加载失败');
+    }
+  };
+
+  const refreshAll = async () => {
+    await Promise.all([load(), loadIndexReadiness()]);
+  };
+
+  const reindexCurrentProject = async () => {
+    try {
+      await ElMessageBox.confirm(
+        '将使用当前 Embedding 模型重建本项目已批准 Query Case 的向量索引。重建期间 Exact/BM25 召回仍可使用。',
+        '重建 Query Case 向量索引',
+        { type: 'warning', confirmButtonText: '开始重建', cancelButtonText: '取消' },
+      );
+      reindexing.value = true;
+      const result = await queryWeaverService.reindexQueryCaseIndex(props.projectId);
+      ElMessage.success(`Query Case 向量索引已重建：${result.indexedEmbeddings} 条`);
+      await loadIndexReadiness();
+    } catch (error) {
+      if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
+    } finally {
+      reindexing.value = false;
     }
   };
 
@@ -398,6 +458,18 @@
   };
   const statusLabel = (value: string) => statusLabels[value] || value;
   const rebindLabel = (value: string) => rebindLabels[value] || value;
+  const indexStatusLabel = (value: QueryCaseIndexReadiness['status']) =>
+    ({
+      INDEX_READY: '向量索引就绪',
+      PARTIAL: '向量索引部分就绪',
+      REINDEX_REQUIRED: '需要重建向量索引',
+      LEXICAL_ONLY: '当前仅 Exact / BM25',
+    })[value];
+  const indexStatusType = (value: QueryCaseIndexReadiness['status']) => {
+    if (value === 'INDEX_READY') return 'success';
+    if (value === 'PARTIAL' || value === 'REINDEX_REQUIRED') return 'warning';
+    return 'info';
+  };
   const truth = (value: boolean | number) => value === true || value === 1;
   const versionNumber = (versionId: number) =>
     props.versions.find(item => item.id === versionId)?.versionNumber || String(versionId);
@@ -422,12 +494,12 @@
     () => [props.activeVersionId, props.versions.length],
     () => {
       if (!selectedVersionId.value) selectedVersionId.value = preferredVersion();
-      void load();
+      void refreshAll();
     },
   );
   onMounted(() => {
     selectedVersionId.value = preferredVersion();
-    void load();
+    void refreshAll();
   });
 </script>
 
@@ -460,6 +532,22 @@
   }
   .filters .el-select {
     width: 190px;
+  }
+  .index-readiness {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+  }
+  .index-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #334155;
   }
   .subtle {
     margin-top: 5px;

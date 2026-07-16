@@ -601,8 +601,9 @@ public class ProjectOnboardingApplicationService {
 					options.add(label);
 				}
 			}
+			boolean hasCandidateOptions = !options.isEmpty();
 			options.add("其他");
-			if ("MISSING_REQUIRED_SEMANTIC".equals(gap.getGapType())) {
+			if ("MISSING_REQUIRED_SEMANTIC".equals(gap.getGapType()) && !hasCandidateOptions) {
 				String requirementType = evidence.path("requirementType").asText();
 				Map<String, Object> definition = null;
 				if ("FILTER".equals(requirementType)) {
@@ -625,8 +626,30 @@ public class ProjectOnboardingApplicationService {
 							Map.of("type", Map.of("type", "string", "enum", List.of("DERIVED_METRIC")), "metricCode",
 									Map.of("type", "string"), "businessName", Map.of("type", "string"), "modelCode",
 									Map.of("type", "string"), "expression", Map.of("type", "string"), "aggregation",
-									Map.of("type", "string", "enum", List.of("SUM", "AVG", "MIN", "MAX")), "timeColumn",
+									Map.of("type", "string", "enum", List.of("SUM", "AVG", "MIN", "MAX", "COUNT", "COUNT_DISTINCT")), "timeColumn",
 									Map.of("type", "string"), "unit", Map.of("type", "string")));
+				}
+				else if ("DIMENSION".equals(requirementType) || "TIME".equals(requirementType)) {
+					String assetType = "TIME".equals(requirementType) ? "TIME_COLUMN" : "DIMENSION";
+					definition = new LinkedHashMap<>();
+					definition.put("type", "object");
+					definition.put("required", List.of("type", "assetType", "assetKey"));
+					definition.put("properties",
+							Map.of("type", Map.of("type", "string", "enum", List.of("EXISTING_ASSET")), "assetType",
+									Map.of("type", "string", "enum", List.of(assetType)), "assetKey", Map.of("type", "string")));
+				}
+				else if ("RELATIONSHIP".equals(requirementType)) {
+					definition = new LinkedHashMap<>();
+					definition.put("type", "object");
+					definition.put("required", List.of("type", "relationshipCode", "sourceModelCode", "sourceColumn",
+							"targetModelCode", "targetColumn", "cardinality", "joinType"));
+					definition.put("properties",
+							Map.of("type", Map.of("type", "string", "enum", List.of("RELATIONSHIP")), "relationshipCode",
+									Map.of("type", "string"), "sourceModelCode", Map.of("type", "string"), "sourceColumn",
+									Map.of("type", "string"), "targetModelCode", Map.of("type", "string"), "targetColumn",
+									Map.of("type", "string"), "cardinality",
+									Map.of("type", "string", "enum", List.of("ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_ONE", "MANY_TO_MANY")),
+									"joinType", Map.of("type", "string", "enum", List.of("INNER", "LEFT", "RIGHT", "FULL"))));
 				}
 				if (definition != null) {
 					return json(Map.of("type", "object", "required", List.of("choice", "other", "definition"),

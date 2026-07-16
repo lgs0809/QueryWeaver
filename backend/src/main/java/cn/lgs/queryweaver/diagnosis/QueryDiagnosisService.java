@@ -90,11 +90,12 @@ public class QueryDiagnosisService {
 				? safe(planning.retrievalCandidates()) : List.of();
 		AdvancedEvidence advanced = operator.role() == OperatorRole.ADMIN
 				? advanced(planning, run, events) : null;
+		PipelineEvidence pipeline = governedReader ? pipeline(run, events, explanation, review) : null;
 		return new DiagnosisView(run.runId(), run.projectId(), run.projectVersionId(), run.threadId(),
 				explanation.understoodQuery(), run.status().name(), decision.rootCause().name(), decision.confidence().name(),
 				decision.summary(), stages(run, events, planning, explanation, review),
 				planning == null ? null : planning.selectedAssets(), retrieval, correction, governance,
-				actions(run, operator, projectRole, governance), advanced);
+				actions(run, operator, projectRole, governance), pipeline, advanced);
 	}
 
 	private Optional<QueryExecutionEvidence> planningEvidence(List<RunEvent> events) {
@@ -331,6 +332,44 @@ public class QueryDiagnosisService {
 		return List.copyOf(actions);
 	}
 
+	private PipelineEvidence pipeline(QueryRun run, List<RunEvent> events, QueryExecutionExplanation explanation,
+			ReviewEvidence review) {
+		String semanticPlanJson = latestEventPayload(events, "SEMANTIC_PLAN_SNAPSHOT");
+		String executionPlanJson = latestEventPayload(events, "PLANNER_PLAN_SNAPSHOT");
+		Map<String, Object> dryPlanEvent = readMap(latestEventPayload(events, "SEMANTIC_SQL_DRY_PLAN"));
+		String semanticSql = text(dryPlanEvent.get("semanticSql"));
+		String physicalSql = text(dryPlanEvent.get("physicalSql"));
+		Map<String, Object> dryPlan = dryPlanEvent.get("dryPlan") instanceof Map<?, ?> value
+				? stringKeyMap(value) : Map.of();
+		List<Map<String, Object>> sqlTraces = StringUtils.hasText(run.attemptId()) ? jdbc.queryForList("""
+				SELECT sql_text AS sql, guard_summary AS "guardSummary", cost_summary AS "costSummary",
+				       explain_summary AS "explainSummary", preview_summary AS "previewSummary",
+				       result_summary AS "resultSummary", status, retry_count AS "retryCount",
+				       duration_ms AS "durationMs", error_type AS "errorType"
+				FROM qw_sql_trace WHERE attempt_id = ? ORDER BY create_time
+				""", run.attemptId()) : List.of();
+		return new PipelineEvidence(semanticPlanJson, executionPlanJson, semanticSql, physicalSql, dryPlan,
+				List.copyOf(sqlTraces), explanation.sqlExecutions(), review == null ? "" : review.decision(),
+				review == null ? "" : review.issueType(), review == null ? "" : review.evidence(),
+				review == null ? "" : review.repairBudget());
+	}
+
+	private String latestEventPayload(List<RunEvent> events, String eventType) {
+		for (int index = events.size() - 1; index >= 0; index--) {
+			RunEvent event = events.get(index);
+			if (eventType.equals(event.eventType()) && StringUtils.hasText(event.payload())) {
+				return event.payload();
+			}
+		}
+		return "";
+	}
+
+	private Map<String, Object> stringKeyMap(Map<?, ?> source) {
+		LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+		source.forEach((key, value) -> result.put(Objects.toString(key, ""), value));
+		return Map.copyOf(result);
+	}
+
 	private AdvancedEvidence advanced(QueryExecutionEvidence planning, QueryRun run, List<RunEvent> events) {
 		return new AdvancedEvidence(run.errorCode(), run.currentNode(), planning == null ? List.of()
 				: safe(planning.historicalExampleIds()), events.stream().map(RunEvent::eventType).distinct().toList());
@@ -437,7 +476,7 @@ public class QueryDiagnosisService {
 			String question, String runStatus, String rootCause, String confidence, String summary, List<StageView> stages,
 			QueryExecutionEvidence.SelectedAssets selectedAssets,
 			List<QueryExecutionEvidence.RetrievalCandidate> retrievalCandidates, CorrectionEvidence correction,
-			GovernanceView governance, List<RepairAction> repairActions, AdvancedEvidence advanced) {
+			GovernanceView governance, List<RepairAction> repairActions, PipelineEvidence pipeline, AdvancedEvidence advanced) {
 	}
 
 	public record StageView(String code, String label, String state, String summary) {
@@ -458,6 +497,12 @@ public class QueryDiagnosisService {
 
 	public record RepairAction(String code, String label, String description, String requiredRole, boolean enabled,
 			String kind) {
+	}
+
+	public record PipelineEvidence(String semanticPlanJson, String executionPlanJson, String semanticSql,
+			String physicalSql, Map<String, Object> dryPlan, List<Map<String, Object>> sqlTraces,
+			List<Map<String, Object>> sourceExecutions, String reviewDecision, String reviewIssueType,
+			String reviewEvidence, String repairBudget) {
 	}
 
 	public record AdvancedEvidence(String runErrorCode, String currentNode, List<String> historicalExampleIds,

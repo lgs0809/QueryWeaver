@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -42,9 +43,13 @@ import org.springframework.util.StringUtils;
 @Service
 public class QueryCaseRetrievalIndexService {
 
-	private static final int EMBEDDING_BATCH_SIZE = 64;
+	private static final int EMBEDDING_BATCH_SIZE = 4;
 
 	private static final int TERM_BATCH_SIZE = 1_000;
+
+	private static final int VECTOR_HNSW_MAX_DIMENSION = 2_000;
+
+	private static final int HALF_VECTOR_HNSW_MAX_DIMENSION = 4_000;
 
 	private static final String TERM_INSERT_SQL = """
 			INSERT INTO qw_query_case_term(query_example_id, term, term_frequency, document_length)
@@ -118,13 +123,8 @@ public class QueryCaseRetrievalIndexService {
 		}
 		indexTerms(queryCaseId, normalizedQuestion);
 		invalidateCatalogCaches(catalogKey(queryCaseId));
-		if (embeddingModel.isPresent()) {
-			Map<String, Object> row = Map.of("id", queryCaseId, "normalized_question", normalizedQuestion);
-			int dimension = resolveDimension(row);
-			EmbeddingDescriptor descriptor = descriptor(dimension);
-			ensureActiveEmbedding(descriptor);
-			persistEmbeddings(List.of(row), descriptor);
-		}
+		// Query Case persistence and user feedback are authoritative facts. Do not make that synchronous transaction wait
+		// for the optional embedding channel; vector coverage is rebuilt explicitly or lazily outside this write path.
 	}
 
 	@Transactional
@@ -141,7 +141,13 @@ public class QueryCaseRetrievalIndexService {
 			return Map.of();
 		}
 		EmbeddingDescriptor descriptor = descriptor(queryVector.length);
-		ensureActiveEmbedding(descriptor);
+		try {
+			ensureActiveEmbedding(descriptor);
+		}
+		catch (RuntimeException ex) {
+			log.warn("Query Case vector recall is unavailable; continuing with lexical recall", ex);
+			return Map.of();
+		}
 		Map<String, String> indexedHashes = readEmbeddingHashes(rows, descriptor);
 		List<Map<String, Object>> staleOrMissing = rows.stream()
 			.filter(row -> !Objects.equals(indexedHashes.get(Objects.toString(row.get("id"))), contentHash(row)))
@@ -157,28 +163,79 @@ public class QueryCaseRetrievalIndexService {
 		return currentRows.isEmpty() ? Map.of() : queryVectorScores(queryVector, currentRows, descriptor);
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public int reindexApprovedCases() {
+		return reindexApprovedCases(null);
+	}
+
+	public QueryCaseIndexReadiness readiness(Long projectId) {
+		long approvedCaseCount = countApprovedCases(projectId);
+		List<Map<String, Object>> registry = jdbc.queryForList("""
+				SELECT embedding_model, embedding_version, dimension, status
+				FROM qw_embedding_index_registry
+				WHERE index_scope = 'QUERY_CASE'
+				""");
+		if (registry.isEmpty()) {
+			return new QueryCaseIndexReadiness("LEXICAL_ONLY", approvedCaseCount, 0, null,
+					"Query Case vector index has not been built; Exact/BM25 recall remains available");
+		}
+		Map<String, Object> active = registry.get(0);
+		int dimension = ((Number) active.get("dimension")).intValue();
+		EmbeddingDescriptor configured = descriptor(dimension);
+		boolean identityAligned = "ACTIVE".equals(Objects.toString(active.get("status")))
+				&& Objects.equals(configured.model(), Objects.toString(active.get("embedding_model")))
+				&& Objects.equals(configured.version(), Objects.toString(active.get("embedding_version")));
+		long vectorCount = countCurrentVectors(projectId, active, dimension);
+		if (!identityAligned) {
+			return new QueryCaseIndexReadiness("REINDEX_REQUIRED", approvedCaseCount, vectorCount, dimension,
+					"Configured embedding model differs from the active Query Case index; lexical recall remains available");
+		}
+		if (vectorCount < approvedCaseCount) {
+			return new QueryCaseIndexReadiness("PARTIAL", approvedCaseCount, vectorCount, dimension,
+					"Some approved Query Cases do not yet have vectors for the active embedding model");
+		}
+		return new QueryCaseIndexReadiness("INDEX_READY", approvedCaseCount, vectorCount, dimension,
+				"Query Case vector index is aligned with the active embedding model");
+	}
+
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public synchronized int reindexApprovedCases(Long projectId) {
 		if (embeddingModel.isEmpty()) {
 			return 0;
 		}
+		String projectPredicate = projectId == null ? "" : " AND project_id = ?";
+		Object[] queryArgs = projectId == null ? new Object[0] : new Object[] { projectId };
 		List<Map<String, Object>> rows = jdbc.queryForList("""
 				SELECT id, normalized_question
 				FROM qw_query_example
 				WHERE status = 'APPROVED' AND rebind_status IN ('VALID','REBOUND')
+				%s
 				ORDER BY id
-				""");
+				""".formatted(projectPredicate), queryArgs);
 		if (rows.isEmpty()) {
 			return 0;
 		}
-		int dimension = resolveDimension(rows.get(0));
+		List<PreparedEmbedding> prepared = prepareEmbeddings(rows);
+		int dimension = prepared.get(0).vector().length;
+		if (prepared.stream().anyMatch(value -> value.vector().length != dimension)) {
+			throw new IllegalStateException("Query Case reindex produced inconsistent embedding dimensions");
+		}
 		EmbeddingDescriptor descriptor = descriptor(dimension);
+		boolean preserveOtherProjects = projectId != null && activeEmbeddingCompatible(descriptor);
+		markEmbeddingIndexBuilding(descriptor);
 		jdbc.execute("DROP INDEX IF EXISTS idx_qw_query_case_embedding_hnsw");
-		jdbc.update("DELETE FROM qw_query_case_embedding");
-		jdbc.update("DELETE FROM qw_embedding_index_registry WHERE index_scope = ?", "QUERY_CASE");
+		if (preserveOtherProjects) {
+			deleteEmbeddings(rows);
+		}
+		else {
+			jdbc.update("DELETE FROM qw_query_case_embedding");
+		}
+		for (PreparedEmbedding value : prepared) {
+			upsertEmbedding(value.row(), descriptor, value.vector());
+		}
+		activateEmbeddingIndex(descriptor);
 		ensureActiveEmbedding(descriptor);
-		persistEmbeddings(rows, descriptor);
-		return rows.size();
+		return prepared.size();
 	}
 
 	public Map<String, Double> bm25Scores(Long projectId, Long projectVersionId, String catalogHash, String contextHash,
@@ -267,11 +324,8 @@ public class QueryCaseRetrievalIndexService {
 		for (int offset = 0; offset < rows.size(); offset += EMBEDDING_BATCH_SIZE) {
 			List<Map<String, Object>> batch = rows.subList(offset,
 					Math.min(rows.size(), offset + EMBEDDING_BATCH_SIZE));
-			List<String> texts = batch.stream()
-				.map(row -> Objects.toString(row.get("normalized_question"), ""))
-				.toList();
 			try {
-				List<float[]> vectors = EmbeddingModelSupport.embedTexts(embeddingModel.orElseThrow(), texts);
+				List<float[]> vectors = embedRows(batch);
 				if (vectors.size() != batch.size()) {
 					log.warn("Embedding model returned {} vectors for {} Query Cases", vectors.size(), batch.size());
 					return;
@@ -285,22 +339,7 @@ public class QueryCaseRetrievalIndexService {
 						throw new IllegalStateException("Embedding dimension changed from " + descriptor.dimension()
 								+ " to " + vector.length + "; reindex is required");
 					}
-					String queryCaseId = Objects.toString(batch.get(index).get("id"));
-					String text = texts.get(index);
-					jdbc.update(
-							"""
-									INSERT INTO qw_query_case_embedding
-									(query_example_id, embedding_model, embedding_version, content_hash, dimension, embedding, update_time)
-									VALUES (?, ?, ?, ?, ?, ?::vector, CURRENT_TIMESTAMP)
-									ON CONFLICT (query_example_id, embedding_model, embedding_version)
-									DO UPDATE SET content_hash = EXCLUDED.content_hash,
-									              dimension = EXCLUDED.dimension,
-									              embedding = EXCLUDED.embedding,
-									              update_time = CURRENT_TIMESTAMP
-									""",
-							queryCaseId, descriptor.model(), descriptor.version(),
-							canonicalJson.hash(QueryCaseTextFeatures.normalize(text)), vector.length,
-							vectorLiteral(vector));
+					upsertEmbedding(batch.get(index), descriptor, vector);
 				}
 			}
 			catch (RuntimeException ex) {
@@ -309,6 +348,64 @@ public class QueryCaseRetrievalIndexService {
 				return;
 			}
 		}
+	}
+
+	private List<PreparedEmbedding> prepareEmbeddings(List<Map<String, Object>> rows) {
+		List<PreparedEmbedding> prepared = new ArrayList<>(rows.size());
+		for (int offset = 0; offset < rows.size(); offset += EMBEDDING_BATCH_SIZE) {
+			List<Map<String, Object>> batch = rows.subList(offset,
+					Math.min(rows.size(), offset + EMBEDDING_BATCH_SIZE));
+			List<float[]> vectors = embedRows(batch);
+			if (vectors.size() != batch.size()) {
+				throw new IllegalStateException("Embedding model returned " + vectors.size() + " vectors for " + batch.size()
+						+ " Query Case reindex rows");
+			}
+			for (int index = 0; index < batch.size(); index++) {
+				float[] vector = vectors.get(index);
+				if (vector == null || vector.length == 0) {
+					throw new IllegalStateException("Embedding model returned an empty Query Case vector");
+				}
+				prepared.add(new PreparedEmbedding(batch.get(index), vector));
+			}
+		}
+		return List.copyOf(prepared);
+	}
+
+	private List<float[]> embedRows(List<Map<String, Object>> rows) {
+		List<String> texts = rows.stream()
+			.map(row -> Objects.toString(row.get("normalized_question"), ""))
+			.toList();
+		try {
+			return EmbeddingModelSupport.embedTexts(embeddingModel.orElseThrow(), texts);
+		}
+		catch (RuntimeException failure) {
+			if (rows.size() <= 1) {
+				throw failure;
+			}
+			int middle = rows.size() / 2;
+			List<float[]> left = embedRows(rows.subList(0, middle));
+			List<float[]> right = embedRows(rows.subList(middle, rows.size()));
+			List<float[]> combined = new ArrayList<>(left.size() + right.size());
+			combined.addAll(left);
+			combined.addAll(right);
+			return List.copyOf(combined);
+		}
+	}
+
+	private void upsertEmbedding(Map<String, Object> row, EmbeddingDescriptor descriptor, float[] vector) {
+		String queryCaseId = Objects.toString(row.get("id"));
+		String text = Objects.toString(row.get("normalized_question"), "");
+		jdbc.update("""
+				INSERT INTO qw_query_case_embedding
+				(query_example_id, embedding_model, embedding_version, content_hash, dimension, embedding, update_time)
+				VALUES (?, ?, ?, ?, ?, ?::vector, CURRENT_TIMESTAMP)
+				ON CONFLICT (query_example_id, embedding_model, embedding_version)
+				DO UPDATE SET content_hash = EXCLUDED.content_hash,
+				              dimension = EXCLUDED.dimension,
+				              embedding = EXCLUDED.embedding,
+				              update_time = CURRENT_TIMESTAMP
+				""", queryCaseId, descriptor.model(), descriptor.version(),
+				canonicalJson.hash(QueryCaseTextFeatures.normalize(text)), vector.length, vectorLiteral(vector));
 	}
 
 	private CorpusStatistics corpusStatistics(Long projectId, Long projectVersionId, String catalogHash,
@@ -427,18 +524,18 @@ public class QueryCaseRetrievalIndexService {
 			EmbeddingDescriptor descriptor) {
 		List<String> ids = rows.stream().map(row -> Objects.toString(row.get("id"))).distinct().toList();
 		String vector = vectorLiteral(queryVector);
+		String distanceType = distanceType(descriptor.dimension());
 		String sql = """
 				SELECT query_example_id,
-				       1 - ((embedding::vector(%d)) <=> (?::vector(%d))) AS similarity
+				       1 - ((embedding::%s) <=> (?::%s)) AS similarity
 				FROM qw_query_case_embedding
 				WHERE query_example_id IN (%s)
 				  AND embedding_model = ?
 				  AND embedding_version = ?
 				  AND dimension = ?
-				ORDER BY (embedding::vector(%d)) <=> (?::vector(%d))
+				ORDER BY (embedding::%s) <=> (?::%s)
 				LIMIT ?
-				""".formatted(descriptor.dimension(), descriptor.dimension(), placeholders(ids.size()),
-				descriptor.dimension(), descriptor.dimension());
+				""".formatted(distanceType, distanceType, placeholders(ids.size()), distanceType, distanceType);
 		List<Object> args = new ArrayList<>();
 		args.add(vector);
 		args.addAll(ids);
@@ -455,6 +552,84 @@ public class QueryCaseRetrievalIndexService {
 			}
 		}
 		return result;
+	}
+
+	private long countApprovedCases(Long projectId) {
+		String projectPredicate = projectId == null ? "" : " AND project_id = ?";
+		Object[] args = projectId == null ? new Object[0] : new Object[] { projectId };
+		Long count = jdbc.queryForObject("""
+				SELECT COUNT(*)
+				FROM qw_query_example
+				WHERE status = 'APPROVED' AND rebind_status IN ('VALID','REBOUND')
+				%s
+				""".formatted(projectPredicate), Long.class, args);
+		return count == null ? 0 : count;
+	}
+
+	private long countCurrentVectors(Long projectId, Map<String, Object> registry, int dimension) {
+		String projectPredicate = projectId == null ? "" : " AND q.project_id = ?";
+		List<Object> args = new ArrayList<>();
+		args.add(Objects.toString(registry.get("embedding_model")));
+		args.add(Objects.toString(registry.get("embedding_version")));
+		args.add(dimension);
+		if (projectId != null) {
+			args.add(projectId);
+		}
+		Long count = jdbc.queryForObject("""
+				SELECT COUNT(*)
+				FROM qw_query_case_embedding e
+				JOIN qw_query_example q ON q.id = e.query_example_id
+				WHERE q.status = 'APPROVED' AND q.rebind_status IN ('VALID','REBOUND')
+				  AND e.embedding_model = ? AND e.embedding_version = ? AND e.dimension = ?
+				%s
+				""".formatted(projectPredicate), Long.class, args.toArray());
+		return count == null ? 0 : count;
+	}
+
+	private boolean activeEmbeddingCompatible(EmbeddingDescriptor descriptor) {
+		return jdbc.queryForList("""
+				SELECT embedding_model, embedding_version, dimension, status
+				FROM qw_embedding_index_registry
+				WHERE index_scope = 'QUERY_CASE'
+				""")
+			.stream()
+			.findFirst()
+			.map(active -> Objects.equals(descriptor.model(), Objects.toString(active.get("embedding_model")))
+					&& Objects.equals(descriptor.version(), Objects.toString(active.get("embedding_version")))
+					&& ((Number) active.get("dimension")).intValue() == descriptor.dimension()
+					&& "ACTIVE".equals(Objects.toString(active.get("status"))))
+			.orElse(false);
+	}
+
+	private void deleteEmbeddings(List<Map<String, Object>> rows) {
+		List<String> ids = rows.stream().map(row -> Objects.toString(row.get("id"))).filter(StringUtils::hasText).toList();
+		if (!ids.isEmpty()) {
+			jdbc.update("DELETE FROM qw_query_case_embedding WHERE query_example_id IN (" + placeholders(ids.size()) + ")",
+					ids.toArray());
+		}
+	}
+
+	private void markEmbeddingIndexBuilding(EmbeddingDescriptor descriptor) {
+		jdbc.update("""
+				INSERT INTO qw_embedding_index_registry
+				(index_scope, embedding_model, embedding_version, dimension, status, active_since, update_time)
+				VALUES ('QUERY_CASE', ?, ?, ?, 'BUILDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+				ON CONFLICT (index_scope) DO UPDATE
+				SET status = 'BUILDING', update_time = CURRENT_TIMESTAMP
+				""", descriptor.model(), descriptor.version(), descriptor.dimension());
+	}
+
+	private void activateEmbeddingIndex(EmbeddingDescriptor descriptor) {
+		jdbc.update("""
+				INSERT INTO qw_embedding_index_registry
+				(index_scope, embedding_model, embedding_version, dimension, status, active_since, update_time)
+				VALUES ('QUERY_CASE', ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+				ON CONFLICT (index_scope) DO UPDATE
+				SET embedding_model = EXCLUDED.embedding_model,
+				    embedding_version = EXCLUDED.embedding_version,
+				    dimension = EXCLUDED.dimension,
+				    status = 'ACTIVE', active_since = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP
+				""", descriptor.model(), descriptor.version(), descriptor.dimension());
 	}
 
 	private void ensureActiveEmbedding(EmbeddingDescriptor descriptor) {
@@ -486,10 +661,27 @@ public class QueryCaseRetrievalIndexService {
 					"Active Query Case embedding index differs from configured embedding model; "
 							+ "run reindex before vector recall");
 		}
-		String indexSql = "CREATE INDEX IF NOT EXISTS idx_qw_query_case_embedding_hnsw "
-				+ "ON qw_query_case_embedding USING hnsw ((embedding::vector(" + descriptor.dimension()
-				+ ")) vector_cosine_ops)";
-		jdbc.execute(indexSql);
+		ensureHnswIndex(descriptor.dimension());
+	}
+
+	private void ensureHnswIndex(int dimension) {
+		if (dimension <= 0) {
+			throw new IllegalArgumentException("Embedding dimension must be positive");
+		}
+		if (dimension > HALF_VECTOR_HNSW_MAX_DIMENSION) {
+			log.warn("Query Case embedding dimension {} exceeds pgvector HNSW limits; vector recall remains exact-scan capable without HNSW",
+					dimension);
+			return;
+		}
+		String castType = distanceType(dimension);
+		String operatorClass = dimension <= VECTOR_HNSW_MAX_DIMENSION ? "vector_cosine_ops" : "halfvec_cosine_ops";
+		jdbc.execute("CREATE INDEX IF NOT EXISTS idx_qw_query_case_embedding_hnsw "
+				+ "ON qw_query_case_embedding USING hnsw ((embedding::" + castType + ") " + operatorClass + ")");
+	}
+
+	private String distanceType(int dimension) {
+		String type = dimension <= VECTOR_HNSW_MAX_DIMENSION ? "vector" : "halfvec";
+		return type + "(" + dimension + ")";
 	}
 
 	private EmbeddingDescriptor descriptor(int dimension) {
@@ -507,15 +699,6 @@ public class QueryCaseRetrievalIndexService {
 			identity.put("embeddingsPath", config.getEmbeddingsPath());
 		}
 		return new EmbeddingDescriptor(truncate(model, 255), canonicalJson.hash(identity), dimension);
-	}
-
-	private int resolveDimension(Map<String, Object> row) {
-		List<float[]> vectors = EmbeddingModelSupport.embedTexts(embeddingModel.orElseThrow(),
-				List.of(Objects.toString(row.get("normalized_question"), "")));
-		if (vectors.size() != 1 || vectors.get(0) == null || vectors.get(0).length == 0) {
-			throw new IllegalStateException("Embedding model did not return a usable vector");
-		}
-		return vectors.get(0).length;
 	}
 
 	private String contentHash(Map<String, Object> row) {
@@ -583,6 +766,13 @@ public class QueryCaseRetrievalIndexService {
 		return Objects.equals(catalog.projectId(), projectId)
 				&& Objects.equals(catalog.projectVersionId(), projectVersionId)
 				&& Objects.equals(catalog.catalogHash(), catalogHash);
+	}
+
+	public record QueryCaseIndexReadiness(String status, long approvedCaseCount, long vectorCount, Integer dimension,
+			String detail) {
+	}
+
+	private record PreparedEmbedding(Map<String, Object> row, float[] vector) {
 	}
 
 	private record CatalogKey(Long projectId, Long projectVersionId, String catalogHash) {

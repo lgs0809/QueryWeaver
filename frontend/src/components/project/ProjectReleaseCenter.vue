@@ -63,9 +63,14 @@
 
         <div class="release-facts">
           <div>
-            <span>自动回归</span>
+            <span>演进回归</span>
             <strong>{{ replayText(version.replay) }}</strong>
-            <small>自动回归结果，不等同于人工发布决定</small>
+            <small>Semantic Evolution 变更的定向回归，不等同于人工发布决定</small>
+          </div>
+          <div>
+            <span>当前 Golden 回归</span>
+            <strong>{{ goldenReplayText(version.goldenReplay) }}</strong>
+            <small>{{ goldenReplayDetail(version.goldenReplay) }}</small>
           </div>
           <div>
             <span>激活记录</span>
@@ -228,8 +233,20 @@
   };
 
   const replayText = (replay: ProjectReleaseCenter['versions'][number]['replay']) => {
-    if (!replay.total) return '尚无自动回归记录';
+    if (!replay.total) return '尚无演进回归记录';
     return `${replay.passed} 通过 · ${replay.needsAttention} 需关注 · ${replay.failed} 失败`;
+  };
+  const goldenReplayText = (replay: ProjectReleaseCenter['versions'][number]['goldenReplay']) => {
+    if (!replay.latestJobStatus) return `${replay.registeredCaseCount} 条已注册 · 尚未回归`;
+    if (replay.latestJobStatus === 'RUNNING' || replay.latestJobStatus === 'PENDING') {
+      return `${replay.registeredCaseCount} 条已注册 · 回归进行中`;
+    }
+    return `${replay.passed}/${replay.total} 通过 · ${replay.failed} 失败`;
+  };
+  const goldenReplayDetail = (replay: ProjectReleaseCenter['versions'][number]['goldenReplay']) => {
+    if (!replay.latestJobStatus) return '这是当前 Golden Case 状态；发布时 releaseReport 仍保留当时的不可变快照';
+    const safety = replay.safetyPassed === undefined ? '' : replay.safetyPassed ? ' · Safety PASS' : ' · Safety FAIL';
+    return `最近任务 ${replay.latestJobStatus}${safety} · ${formatTime(replay.observedAt)}`;
   };
   const diffSymbol = (kind: string) => (kind === 'ADDED' ? '+' : kind === 'REMOVED' ? '-' : '~');
   const changeLabel = (assetType: string) => {
@@ -334,7 +351,7 @@
   }
   .release-facts {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 10px;
     margin: 16px 0;
   }

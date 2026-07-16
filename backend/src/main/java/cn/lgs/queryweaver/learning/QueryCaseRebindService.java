@@ -146,7 +146,7 @@ public class QueryCaseRebindService {
 			}
 			try {
 				SemanticQueryPlan sourcePlan = readPlanJson(Objects.toString(source.get("typed_ir_json"), ""))
-					.orElseThrow(() -> new IllegalStateException("Source Query Case has no Typed IR"));
+					.orElseThrow(() -> new IllegalStateException("Source Query Case has no Semantic Query Plan"));
 				List<String> targetTables = targetCatalog.getModels()
 					.stream()
 					.filter(model -> sourcePlan.getModels()
@@ -333,7 +333,7 @@ public class QueryCaseRebindService {
 		compareCodes("grain", source.getGrains().stream().map(SemanticQueryPlan.GrainSelection::getGrainCode).toList(),
 				target.getGrains().stream().map(SemanticQueryPlan.GrainSelection::getGrainCode).toList(), reasons);
 		if (!target.isExecutable()) {
-			reasons.add("Target Typed IR is not executable");
+			reasons.add("Target Semantic Query Plan is not executable");
 		}
 		return List.copyOf(reasons);
 	}

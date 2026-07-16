@@ -302,6 +302,15 @@ export interface ProjectReleaseCenter {
       candidateStatus: string;
     }>;
     replay: { total: number; passed: number; failed: number; needsAttention: number };
+    goldenReplay: {
+      registeredCaseCount: number;
+      latestJobStatus?: string;
+      total: number;
+      passed: number;
+      failed: number;
+      safetyPassed?: boolean;
+      observedAt?: string;
+    };
   }>;
   controlledReleases: Array<{
     id: string;
@@ -727,6 +736,19 @@ export interface QueryDiagnosis {
   };
   governance?: QueryDiagnosisGovernance;
   repairActions: QueryDiagnosisRepairAction[];
+  pipeline?: {
+    semanticPlanJson?: string;
+    executionPlanJson?: string;
+    semanticSql?: string;
+    physicalSql?: string;
+    dryPlan: Record<string, unknown>;
+    sqlTraces: Array<Record<string, unknown>>;
+    sourceExecutions: Array<Record<string, unknown>>;
+    reviewDecision?: string;
+    reviewIssueType?: string;
+    reviewEvidence?: string;
+    repairBudget?: string;
+  };
   advanced?: {
     runErrorCode?: string;
     currentNode?: string;
@@ -775,6 +797,14 @@ export interface ResultArtifact {
   status: string;
   createTime: string;
   updateTime: string;
+}
+
+export interface QueryCaseIndexReadiness {
+  status: 'INDEX_READY' | 'PARTIAL' | 'REINDEX_REQUIRED' | 'LEXICAL_ONLY';
+  approvedCaseCount: number;
+  vectorCount: number;
+  dimension?: number;
+  detail: string;
 }
 
 export interface ValidatedQueryExample {
@@ -1124,6 +1154,17 @@ export const queryWeaverService = {
   },
   async queryExample(projectId: number, exampleId: string): Promise<ValidatedQueryExample> {
     return (await axios.get(`${apiBase}/projects/${projectId}/query-examples/${exampleId}`)).data;
+  },
+  async queryCaseIndexReadiness(projectId: number): Promise<QueryCaseIndexReadiness> {
+    return (await axios.get(`${apiBase}/operations/projects/${projectId}/query-case-index`)).data;
+  },
+  async reindexQueryCaseIndex(projectId: number): Promise<{ indexedEmbeddings: number; projectId: number }> {
+    return (
+      await axios.post(`${apiBase}/operations/query-case-index/reindex`, undefined, {
+        params: { projectId },
+        headers: governedMutationHeaders(`query-case-index-reindex:${projectId}`),
+      })
+    ).data;
   },
   async restoreQuarantinedQueryExample(
     projectId: number,

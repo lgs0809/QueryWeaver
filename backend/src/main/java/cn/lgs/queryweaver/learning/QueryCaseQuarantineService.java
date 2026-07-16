@@ -136,10 +136,12 @@ public class QueryCaseQuarantineService {
 		int updated = jdbc.update("""
 				UPDATE qw_query_example
 				SET status = ?, quarantine_reason = NULL, quarantine_time = NULL,
-				    consecutive_recall_issue_count = 0, review_comment = ?, reviewed_by = ?,
-				    reviewed_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP
+				    consecutive_recall_issue_count = 0,
+				    failed_after_recall_count = CASE WHEN ? = 'APPROVED' THEN 0 ELSE failed_after_recall_count END,
+				    review_comment = ?, reviewed_by = ?, reviewed_time = CURRENT_TIMESTAMP,
+				    update_time = CURRENT_TIMESTAMP
 				WHERE id = ? AND project_id = ? AND status = 'QUARANTINED'
-				""", targetStatus, reason.trim(), operator.operator(), queryCaseId, projectId);
+				""", targetStatus, targetStatus, reason.trim(), operator.operator(), queryCaseId, projectId);
 		if (updated != 1) {
 			throw new IllegalStateException("Only QUARANTINED Query Cases can be restored or rejected");
 		}

@@ -18,8 +18,11 @@ package cn.lgs.queryweaver.operations;
 import cn.lgs.queryweaver.common.OperatorAuthorizationService;
 import cn.lgs.queryweaver.common.OperatorContext;
 import cn.lgs.queryweaver.common.OperatorRole;
+import cn.lgs.queryweaver.learning.QueryCaseRetrievalIndexService;
+import cn.lgs.queryweaver.learning.QueryCaseRetrievalIndexService.QueryCaseIndexReadiness;
 import cn.lgs.queryweaver.operations.QueryWeaverProductionService.CanaryRequest;
 import cn.lgs.queryweaver.project.application.ProjectRuntimeGate;
+import cn.lgs.queryweaver.semantic.retrieval.SemanticRetrievalDocumentBuildService;
 import cn.lgs.queryweaver.semantic.retrieval.SemanticRetrievalIndexService;
 import cn.lgs.queryweaver.semantic.retrieval.SemanticRetrievalIndexService.IndexReadiness;
 import cn.lgs.queryweaver.operations.QueryWeaverProductionService.CompletionRequest;
@@ -68,6 +71,10 @@ public class QueryWeaverProductionController {
 	private final ProjectRuntimeGate projectRuntimeGate;
 
 	private final SemanticRetrievalIndexService semanticRetrievalIndexService;
+
+	private final SemanticRetrievalDocumentBuildService semanticRetrievalDocumentBuildService;
+
+	private final QueryCaseRetrievalIndexService queryCaseRetrievalIndexService;
 
 	@PostMapping("/episodes")
 	public Map<String, Object> createEpisode(@RequestBody EpisodeRequest request, @RequestHeader HttpHeaders headers,
@@ -218,6 +225,31 @@ public class QueryWeaverProductionController {
 		require(headers, principal, "semantic-index-reindex", OperatorRole.ADMIN);
 		return Mono.fromCallable(() -> Map.<String, Object>of("indexedEmbeddings",
 				semanticRetrievalIndexService.reindexAll())).subscribeOn(Schedulers.boundedElastic());
+	}
+
+	@PostMapping("/projects/{projectId}/versions/{versionId}/semantic-index/reindex")
+	public Mono<Map<String, Object>> reindexSemanticIndexVersion(@PathVariable Long projectId,
+			@PathVariable Long versionId, @RequestHeader HttpHeaders headers, Principal principal) {
+		require(headers, principal, "semantic-index-reindex:" + projectId + ":" + versionId, OperatorRole.ADMIN);
+		return Mono.fromCallable(() -> {
+			var result = semanticRetrievalDocumentBuildService.reindexEmbeddings(projectId, versionId);
+			return Map.<String, Object>of("indexedEmbeddings", result.indexedDocuments(), "vectorAvailable",
+					result.vectorAvailable());
+		}).subscribeOn(Schedulers.boundedElastic());
+	}
+
+	@GetMapping("/projects/{projectId}/query-case-index")
+	public QueryCaseIndexReadiness queryCaseIndex(@PathVariable Long projectId) {
+		return queryCaseRetrievalIndexService.readiness(projectId);
+	}
+
+	@PostMapping("/query-case-index/reindex")
+	public Mono<Map<String, Object>> reindexQueryCaseIndex(@RequestParam(required = false) Long projectId,
+			@RequestHeader HttpHeaders headers, Principal principal) {
+		require(headers, principal, "query-case-index-reindex", OperatorRole.ADMIN);
+		return Mono.fromCallable(() -> Map.<String, Object>of("indexedEmbeddings",
+				queryCaseRetrievalIndexService.reindexApprovedCases(projectId), "projectId", projectId == null ? "ALL" : projectId))
+			.subscribeOn(Schedulers.boundedElastic());
 	}
 
 	@GetMapping("/cache")

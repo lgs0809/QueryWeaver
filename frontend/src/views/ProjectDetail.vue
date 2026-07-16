@@ -166,6 +166,7 @@
                   :versions="versions"
                   :active-version-id="projectView?.project.activePublishedVersionId"
                   :can-govern="canReviewProject"
+                  :can-reindex="canAdminOperations"
                 />
               </el-tab-pane>
               <el-tab-pane label="运行优化" name="optimization" lazy>
@@ -425,6 +426,9 @@
       Boolean(projectAccess.value?.globalAdmin) ||
       (['EDITOR', 'OWNER'].includes(projectAccess.value?.accessRole || '') &&
         ['PUBLISHER', 'ADMIN'].includes(operator.value?.role || '')),
+  );
+  const canAdminOperations = computed(
+    () => Boolean(projectAccess.value?.globalAdmin) || operator.value?.role === 'ADMIN',
   );
   const canManageMembers = computed(() =>
     canManageProjectCapability(

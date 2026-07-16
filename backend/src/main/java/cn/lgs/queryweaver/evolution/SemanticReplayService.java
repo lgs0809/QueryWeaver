@@ -221,7 +221,7 @@ public class SemanticReplayService {
 		SemanticQueryPlan sourcePlan = readPlan(text(queryCase.get("typed_ir_json"))).orElse(null);
 		if (sourcePlan == null) {
 			persist(candidateId, targetVersionId, caseId, "IR", "REVIEW_REQUIRED", Map.of(),
-					Map.of("reason", "Historical case has no Typed IR"), null);
+					Map.of("reason", "Historical case has no Semantic Query Plan"), null);
 			return CaseReplay.reviewRequired(caseId);
 		}
 		SemanticQueryPlan targetPlan;

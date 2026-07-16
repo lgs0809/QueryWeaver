@@ -56,6 +56,8 @@ public class ProjectReleaseCenterApplicationService {
 		Map<Long, List<VersionActivity>> activities = loadActivities(projectId);
 		Map<Long, List<CandidateChange>> changes = loadCandidateChanges(projectId);
 		Map<Long, ReplaySummary> replay = loadReplaySummaries(projectId);
+		long enabledGoldenCaseCount = enabledGoldenCaseCount(projectId);
+		Map<Long, GoldenReplaySummary> goldenReplay = loadGoldenReplaySummaries(projectId, enabledGoldenCaseCount);
 		Map<Long, String> governanceDeciders = loadGovernanceDeciders(projectId);
 
 		List<ReleaseVersion> versions = repository.findVersions(projectId)
@@ -64,6 +66,7 @@ public class ProjectReleaseCenterApplicationService {
 			.map(version -> version(version, project.getActiveVersionId(),
 					activities.getOrDefault(version.getId(), List.of()),
 					changes.getOrDefault(version.getId(), List.of()), replay.get(version.getId()),
+					goldenReplay.getOrDefault(version.getId(), GoldenReplaySummary.empty(enabledGoldenCaseCount)),
 					governanceDeciders.get(version.getId())))
 			.toList();
 		return new ReleaseCenterView(projectId, project.getActiveVersionId(), versions,
@@ -72,7 +75,7 @@ public class ProjectReleaseCenterApplicationService {
 
 	private ReleaseVersion version(SemanticProjectVersion version, Long activeVersionId,
 			List<VersionActivity> activities, List<CandidateChange> changes, ReplaySummary replay,
-			String governanceDecidedBy) {
+			GoldenReplaySummary goldenReplay, String governanceDecidedBy) {
 		VersionActivity published = latest(activities, "PUBLISHED");
 		VersionActivity activated = latest(activities, "ACTIVATED");
 		return new ReleaseVersion(version.getId(), version.getVersionNumber(), version.getParentVersionId(),
@@ -80,7 +83,7 @@ public class ProjectReleaseCenterApplicationService {
 				version.getPublishedTime(), published == null ? null : published.operatorName(),
 				activeVersionId != null && activeVersionId.equals(version.getId()),
 				activated == null ? null : activated.createTime(), activated == null ? null : activated.operatorName(),
-				governanceDecidedBy, changes, replay == null ? ReplaySummary.empty() : replay);
+				governanceDecidedBy, changes, replay == null ? ReplaySummary.empty() : replay, goldenReplay);
 	}
 
 	private Map<Long, List<VersionActivity>> loadActivities(Long projectId) {
@@ -166,6 +169,45 @@ public class ProjectReleaseCenterApplicationService {
 		return result;
 	}
 
+	private long enabledGoldenCaseCount(Long projectId) {
+		Long count = jdbc.queryForObject("SELECT COUNT(*) FROM qw_golden_case WHERE project_id = ? AND enabled = TRUE",
+				Long.class, projectId);
+		return count == null ? 0 : count;
+	}
+
+	private Map<Long, GoldenReplaySummary> loadGoldenReplaySummaries(Long projectId, long registeredCaseCount) {
+		Map<Long, GoldenReplaySummary> result = new HashMap<>();
+		jdbc.query("""
+				SELECT DISTINCT ON (project_version_id)
+				       project_version_id, status, result_json, finished_time, update_time
+				FROM qw_evaluation_job
+				WHERE project_id = ? AND job_type = 'REPLAY' AND project_version_id IS NOT NULL
+				ORDER BY project_version_id, create_time DESC, id DESC
+				""", rs -> {
+			Long versionId = rs.getLong("project_version_id");
+			JsonNode replayResult = null;
+			String resultJson = rs.getString("result_json");
+			if (resultJson != null && !resultJson.isBlank()) {
+				try {
+					replayResult = JsonUtil.getObjectMapper().readTree(resultJson);
+				}
+				catch (Exception ignored) {
+					replayResult = null;
+				}
+			}
+			long total = replayResult == null ? 0 : replayResult.path("total").asLong(0);
+			long passed = replayResult == null ? 0 : replayResult.path("passed").asLong(0);
+			long failed = replayResult == null ? 0 : replayResult.path("failed").asLong(0);
+			Boolean safetyPassed = replayResult == null || !replayResult.has("safetyPassed") ? null
+					: replayResult.path("safetyPassed").asBoolean();
+			Timestamp finished = rs.getTimestamp("finished_time");
+			result.put(versionId,
+					new GoldenReplaySummary(registeredCaseCount, rs.getString("status"), total, passed, failed,
+							safetyPassed, timestamp(finished == null ? rs.getTimestamp("update_time") : finished)));
+		}, projectId);
+		return result;
+	}
+
 	private Map<Long, String> loadGovernanceDeciders(Long projectId) {
 		Map<Long, String> result = new HashMap<>();
 		jdbc.query("""
@@ -229,7 +271,7 @@ public class ProjectReleaseCenterApplicationService {
 	public record ReleaseVersion(Long id, String versionNumber, Long parentVersionId, String status, String catalogHash,
 			String structuredReleaseReport, LocalDateTime publishedTime, String publishedBy, boolean active,
 			LocalDateTime activatedTime, String activatedBy, String governanceDecidedBy, List<CandidateChange> changes,
-			ReplaySummary replay) {
+			ReplaySummary replay, GoldenReplaySummary goldenReplay) {
 	}
 
 	public record CandidateChange(String kind, String operation, String assetType, String assetKey, String businessName,
@@ -239,6 +281,13 @@ public class ProjectReleaseCenterApplicationService {
 	public record ReplaySummary(long total, long passed, long failed, long needsAttention) {
 		static ReplaySummary empty() {
 			return new ReplaySummary(0, 0, 0, 0);
+		}
+	}
+
+	public record GoldenReplaySummary(long registeredCaseCount, String latestJobStatus, long total, long passed,
+			long failed, Boolean safetyPassed, LocalDateTime observedAt) {
+		static GoldenReplaySummary empty(long registeredCaseCount) {
+			return new GoldenReplaySummary(registeredCaseCount, null, 0, 0, 0, null, null);
 		}
 	}
 

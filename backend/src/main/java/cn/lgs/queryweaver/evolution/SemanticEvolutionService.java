@@ -26,6 +26,7 @@ import cn.lgs.queryweaver.learning.LearningAssetTrustPolicy;
 import cn.lgs.queryweaver.project.application.ProjectInitializationApplicationService;
 import cn.lgs.queryweaver.project.application.ProjectInitializationApplicationService.ProjectInitializationView;
 import cn.lgs.queryweaver.project.domain.ProjectVersionCreationMode;
+import cn.lgs.queryweaver.util.JsonUtil;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -97,8 +98,11 @@ public class SemanticEvolutionService {
 				SELECT * FROM qw_candidate_evidence WHERE candidate_id = ? ORDER BY weight DESC, create_time
 				""", candidateId));
 		result.put("replayResults", replayResults(candidateId));
+		String patchJson = text(result.get("patch_json"));
+		boolean proposalOnly = proposalOnly(patchJson);
+		result.put("proposalOnly", proposalOnly);
 		if (patchValidator != null && !policyCandidate(result)) {
-			result.put("assetDiff", patchValidator.assetDiff(candidateId, parsePatch(text(result.get("patch_json")))));
+			result.put("assetDiff", proposalOnly ? List.of() : patchValidator.assetDiff(candidateId, parsePatch(patchJson)));
 		}
 		if (auditService != null) {
 			result.put("events", auditService.events(candidateId));
@@ -390,8 +394,11 @@ public class SemanticEvolutionService {
 		if (policyCandidate(current)) {
 			throw new IllegalArgumentException("Use the MultiSourcePolicyPatch preflight endpoint for this candidate");
 		}
-		return patchValidator.validateCandidate(candidateId,
-				patch == null ? parsePatch(text(current.get("patch_json"))) : patch);
+		String patchJson = text(current.get("patch_json"));
+		if (patch == null && proposalOnly(patchJson)) {
+			return proposalOnlyValidationReport();
+		}
+		return patchValidator.validateCandidate(candidateId, patch == null ? parsePatch(patchJson) : patch);
 	}
 
 	public MultiSourcePolicyPatchService.ValidationReport preflightPolicy(String candidateId,
@@ -474,6 +481,25 @@ public class SemanticEvolutionService {
 		return Objects.toString(value, "");
 	}
 
+	private boolean proposalOnly(String patchJson) {
+		if (!StringUtils.hasText(patchJson)) {
+			return false;
+		}
+		try {
+			return JsonUtil.getObjectMapper().readTree(patchJson).path("proposalOnly").asBoolean(false);
+		}
+		catch (Exception invalid) {
+			return false;
+		}
+	}
+
+	private SemanticPatchValidator.ValidationReport proposalOnlyValidationReport() {
+		SemanticPatchValidator.Violation error = new SemanticPatchValidator.Violation(
+				SemanticPatchValidator.Severity.ERROR, "PROPOSAL_ONLY", "patch",
+				"Proposal-only semantic candidate requires an explicit reviewed Semantic Patch before draft or replay");
+		return new SemanticPatchValidator.ValidationReport(false, List.of(error), List.of(), 0, 0);
+	}
+
 	private SemanticPatch parsePatch(String patchJson) {
 		return versionedJson.read(patchJson, JsonPayloadRegistry.SEMANTIC_PATCH, SemanticPatch.class);
 	}
@@ -492,11 +518,16 @@ public class SemanticEvolutionService {
 	}
 
 	private void requireCandidatePatchValid(String candidateId, Map<String, Object> candidate) {
+		String patchJson = text(candidate.get("patch_json"));
 		if (policyCandidate(candidate)) {
-			requirePolicyValid(candidateId, parsePolicyPatch(text(candidate.get("patch_json"))));
+			requirePolicyValid(candidateId, parsePolicyPatch(patchJson));
+		}
+		else if (proposalOnly(patchJson)) {
+			throw new IllegalStateException(
+					"Proposal-only semantic candidate requires an explicit reviewed Semantic Patch before draft or replay");
 		}
 		else {
-			requireValid(candidateId, parsePatch(text(candidate.get("patch_json"))));
+			requireValid(candidateId, parsePatch(patchJson));
 		}
 	}
 
