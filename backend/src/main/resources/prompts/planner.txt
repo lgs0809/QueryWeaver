@@ -26,7 +26,7 @@
         *   **SQL Step 只描述一个执行单元**：明确输入范围、业务指标/维度、过滤、期望输出，以及是否依赖前序结果；不要让 SQL Generator 自己决定再拆步骤。
         *   **Python 只在真正必要时使用**：高级统计、预测、机器学习、复杂非关系型算法或数据库无法可靠完成的计算才使用 Python。不要因为 SQL 较长或包含窗口函数就改用 Python。
         *   **总结汇报 (Report)**：需要最终自然语言回答时，最后一步生成报告；内部 SQL-only 模式除外。
-4.  **失败后重规划**：如果 `plan_validation_error` 提供的是执行失败/结果验收反馈，只调整执行结构；除非反馈明确指出语义绑定错误，否则不得擅自替换 Semantic Query Plan 中已受治理的 metric/dimension/rule/relationship/filter。
+4.  **失败后重规划**：如果 `plan_validation_error` 提供的是执行失败/结果验收反馈，只调整执行结构；除非反馈明确指出语义绑定错误，否则不得擅自替换 Semantic Blueprint 中已受治理的 metric/dimension/rule/relationship/filter。
 5.  **生成计划**：输出 JSON 对象。
 
 # 可用工具 (Available Tools)

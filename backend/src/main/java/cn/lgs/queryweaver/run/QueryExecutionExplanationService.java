@@ -15,7 +15,7 @@
  */
 package cn.lgs.queryweaver.run;
 
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -46,7 +46,7 @@ public class QueryExecutionExplanationService {
 	}
 
 	public QueryExecutionExplanation explain(QueryRun run) {
-		SemanticQueryPlan plan = persistedSemanticPlan(run);
+		SemanticBlueprint plan = persistedSemanticPlan(run);
 		MessageEvidence message = messageEvidence(run.runId());
 		if (plan == null) {
 			return new QueryExecutionExplanation(message.question(), message.bindings(), List.of(), List.of(), Map.of(),
@@ -121,7 +121,7 @@ public class QueryExecutionExplanationService {
 				execution(run));
 	}
 
-	private List<Map<String, Object>> semanticBindings(SemanticQueryPlan plan) {
+	private List<Map<String, Object>> semanticBindings(SemanticBlueprint plan) {
 		List<Map<String, Object>> result = new ArrayList<>();
 		plan.getMetrics().forEach(metric -> result.add(compact(Map.of(
 				"assetType", "METRIC",
@@ -147,8 +147,8 @@ public class QueryExecutionExplanationService {
 		return List.copyOf(result);
 	}
 
-	private SemanticQueryPlan persistedSemanticPlan(QueryRun run) {
-		SemanticQueryPlan snapshotPlan = snapshotService.readTyped(run.executionSnapshot())
+	private SemanticBlueprint persistedSemanticPlan(QueryRun run) {
+		SemanticBlueprint snapshotPlan = snapshotService.readTyped(run.executionSnapshot())
 			.map(ExecutionSnapshot::semanticPlan)
 			.orElse(null);
 		if (snapshotPlan != null) {
@@ -160,7 +160,7 @@ public class QueryExecutionExplanationService {
 				  AND payload IS NOT NULL
 				ORDER BY sequence DESC LIMIT 1
 				""", String.class, run.runId());
-		SemanticQueryPlan eventPlan = readPlan(eventPlans.isEmpty() ? null : eventPlans.get(0));
+		SemanticBlueprint eventPlan = readPlan(eventPlans.isEmpty() ? null : eventPlans.get(0));
 		if (eventPlan != null) {
 			return eventPlan;
 		}
@@ -172,12 +172,12 @@ public class QueryExecutionExplanationService {
 		return readPlan(todoPlans.isEmpty() ? null : todoPlans.get(0));
 	}
 
-	private SemanticQueryPlan readPlan(String payload) {
+	private SemanticBlueprint readPlan(String payload) {
 		if (!StringUtils.hasText(payload)) {
 			return null;
 		}
 		try {
-			return mapper.readValue(payload, SemanticQueryPlan.class);
+			return mapper.readValue(payload, SemanticBlueprint.class);
 		}
 		catch (Exception ignored) {
 			return null;

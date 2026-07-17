@@ -29,7 +29,7 @@ import cn.lgs.queryweaver.semantic.domain.ScenarioResolution;
 import cn.lgs.queryweaver.semantic.domain.SemanticAssetStatus;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogRepository;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.DatabaseUtil;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -50,7 +50,7 @@ import org.springframework.stereotype.Service;
 /**
  * Release-time compile preflight for declared CORE business query scenarios. It never
  * executes production SQL; it proves that the resolved business requirements can still be
- * rebound into an executable Typed Semantic Query Plan and deterministically compiled for
+ * rebound into an executable Semantic Blueprint and deterministically compiled for
  * the current datasource dialects.
  */
 @Service
@@ -97,7 +97,7 @@ public class ScenarioPreflightService {
 				return failed(scenario, "Resolved scenario has no physical model binding");
 			}
 			String canonicalQuery = canonicalQuery(scenario, requirement);
-			SemanticQueryPlan plan = catalogApplicationService.buildQueryPlan(scenario.getProjectId(),
+			SemanticBlueprint plan = catalogApplicationService.buildBlueprint(scenario.getProjectId(),
 					scenario.getProjectVersionId(), canonicalQuery, selectedTables, hints);
 			List<String> contractViolations = validateResolvedContract(bindings, plan);
 			if (!contractViolations.isEmpty()) {
@@ -105,10 +105,10 @@ public class ScenarioPreflightService {
 			}
 			if (!plan.isExecutable()) {
 				return failed(scenario,
-						"Semantic Query Plan is not executable: " + String.join("; ", plan.getValidationErrors()));
+						"Semantic Blueprint is not executable: " + String.join("; ", plan.getValidationErrors()));
 			}
 			if (!"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())) {
-				return failed(scenario, "Semantic Query Plan requires constrained generation: " + plan.getCompilerMode());
+				return failed(scenario, "Semantic Blueprint requires constrained generation: " + plan.getCompilerMode());
 			}
 			CompiledSemanticQuery compiled = sqlCompiler.compile(plan, catalog, dialects(plan), Clock.systemUTC(),
 					ZoneId.of("UTC"));
@@ -180,23 +180,23 @@ public class ScenarioPreflightService {
 			.toList();
 	}
 
-	private List<String> validateResolvedContract(List<ResolvedBinding> bindings, SemanticQueryPlan plan) {
+	private List<String> validateResolvedContract(List<ResolvedBinding> bindings, SemanticBlueprint plan) {
 		List<String> violations = new ArrayList<>();
 		Set<String> planMetrics = plan.getMetrics()
 			.stream()
-			.map(SemanticQueryPlan.MetricSelection::getMetricCode)
+			.map(SemanticBlueprint.MetricSelection::getMetricCode)
 			.collect(Collectors.toSet());
 		Set<String> planDimensions = plan.getDimensions()
 			.stream()
-			.map(SemanticQueryPlan.DimensionSelection::getDimensionCode)
+			.map(SemanticBlueprint.DimensionSelection::getDimensionCode)
 			.collect(Collectors.toSet());
 		Set<String> planRules = plan.getRules()
 			.stream()
-			.map(SemanticQueryPlan.RuleSelection::getRuleCode)
+			.map(SemanticBlueprint.RuleSelection::getRuleCode)
 			.collect(Collectors.toSet());
 		Set<String> planRelationships = plan.getRelationships()
 			.stream()
-			.map(SemanticQueryPlan.RelationshipSelection::getRelationshipCode)
+			.map(SemanticBlueprint.RelationshipSelection::getRelationshipCode)
 			.collect(Collectors.toSet());
 		Set<String> planEnums = plan.getEnumResolutions()
 			.stream()
@@ -236,13 +236,13 @@ public class ScenarioPreflightService {
 
 	private void require(boolean valid, String type, String key, List<String> violations) {
 		if (!valid) {
-			violations.add("Resolved " + type + " was not preserved in Semantic Query Plan: " + key);
+			violations.add("Resolved " + type + " was not preserved in Semantic Blueprint: " + key);
 		}
 	}
 
-	private Map<Integer, SqlDialect> dialects(SemanticQueryPlan plan) {
+	private Map<Integer, SqlDialect> dialects(SemanticBlueprint plan) {
 		Map<Integer, SqlDialect> values = new LinkedHashMap<>();
-		for (SemanticQueryPlan.SourceSubPlan source : plan.getSourceSubPlans()) {
+		for (SemanticBlueprint.SourceSubPlan source : plan.getSourceSubPlans()) {
 			if (source.getDatasourceId() != null) {
 				values.put(source.getDatasourceId(),
 						SqlDialect.from(databaseUtil.getDatasourceDbConfig(source.getDatasourceId()).getDialectType()));

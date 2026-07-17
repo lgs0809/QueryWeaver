@@ -15,7 +15,7 @@
  */
 package cn.lgs.queryweaver.dto;
 
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
@@ -71,8 +71,8 @@ public class GraphRequest {
 	/** Legacy advanced-planner recovery payload retained for backward compatibility. */
 	private String recoveredPlannerOutput;
 
-	/** Exact approved Typed Semantic Plan used when the native human-review checkpoint was lost. */
-	private SemanticQueryPlan recoveredSemanticPlan;
+	/** Exact approved Semantic Blueprint used when the native human-review checkpoint was lost. */
+	private SemanticBlueprint recoveredSemanticPlan;
 
 	/** Process-local marker set only by the durable recovery scanner after lease expiry. */
 	@JsonIgnore

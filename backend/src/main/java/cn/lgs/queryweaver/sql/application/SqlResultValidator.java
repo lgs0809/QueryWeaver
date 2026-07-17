@@ -16,7 +16,7 @@
 package cn.lgs.queryweaver.sql.application;
 
 import cn.lgs.queryweaver.bo.schema.ResultSetBO;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -31,11 +31,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class SqlResultValidator {
 
-	public ValidationResult validate(ResultSetBO resultSet, SemanticQueryPlan plan, int configuredMaxRows) {
+	public ValidationResult validate(ResultSetBO resultSet, SemanticBlueprint plan, int configuredMaxRows) {
 		return validate(resultSet, plan, configuredMaxRows, ValidationMode.STRICT_SEMANTIC_PLAN);
 	}
 
-	public ValidationResult validate(ResultSetBO resultSet, SemanticQueryPlan plan, int configuredMaxRows,
+	public ValidationResult validate(ResultSetBO resultSet, SemanticBlueprint plan, int configuredMaxRows,
 			ValidationMode mode) {
 		ValidationMode effectiveMode = mode == null ? ValidationMode.STRICT_SEMANTIC_PLAN : mode;
 		List<String> errors = new ArrayList<>();
@@ -68,9 +68,9 @@ public class SqlResultValidator {
 			.rejected(List.copyOf(new LinkedHashSet<>(errors)), List.copyOf(new LinkedHashSet<>(warnings)));
 	}
 
-	private void validateExpectedShape(List<String> columns, List<Map<String, String>> rows, SemanticQueryPlan plan,
+	private void validateExpectedShape(List<String> columns, List<Map<String, String>> rows, SemanticBlueprint plan,
 			ValidationMode mode, List<String> errors, List<String> warnings) {
-		SemanticQueryPlan.ExpectedResultShape expected = plan.getExpectedResult();
+		SemanticBlueprint.ExpectedResultShape expected = plan.getExpectedResult();
 		if (expected != null && mode == ValidationMode.STRICT_SEMANTIC_PLAN) {
 			for (String expectedColumn : safe(expected.getColumns())) {
 				if (hasText(expectedColumn) && findOutputColumn(columns, expectedColumn) == null) {
@@ -96,8 +96,8 @@ public class SqlResultValidator {
 	}
 
 	private void validateOrdering(List<String> columns, List<Map<String, String>> rows,
-			List<SemanticQueryPlan.OrderSelection> ordering, List<String> warnings) {
-		for (SemanticQueryPlan.OrderSelection order : safe(ordering)) {
+			List<SemanticBlueprint.OrderSelection> ordering, List<String> warnings) {
+		for (SemanticBlueprint.OrderSelection order : safe(ordering)) {
 			String outputColumn = findOutputColumn(columns, order.getExpression());
 			if (outputColumn == null) {
 				warnings.add("Cannot deterministically validate ordering expression: " + order.getExpression());
@@ -166,8 +166,8 @@ public class SqlResultValidator {
 	}
 
 	private void validateMetricColumns(List<String> columns, List<Map<String, String>> rows,
-			List<SemanticQueryPlan.MetricSelection> metrics, List<String> errors, List<String> warnings) {
-		for (SemanticQueryPlan.MetricSelection metric : safe(metrics)) {
+			List<SemanticBlueprint.MetricSelection> metrics, List<String> errors, List<String> warnings) {
+		for (SemanticBlueprint.MetricSelection metric : safe(metrics)) {
 			String outputColumn = findOutputColumn(columns, metric.getMetricCode(), metric.getBusinessName());
 			if (outputColumn == null) {
 				warnings.add("Cannot identify output column for published metric: " + metric.getMetricCode());
@@ -204,9 +204,9 @@ public class SqlResultValidator {
 	}
 
 	private void validateGroupingUniqueness(List<String> columns, List<Map<String, String>> rows,
-			List<SemanticQueryPlan.GroupSelection> groups, ValidationMode mode, List<String> errors, List<String> warnings) {
+			List<SemanticBlueprint.GroupSelection> groups, ValidationMode mode, List<String> errors, List<String> warnings) {
 		List<String> groupingColumns = new ArrayList<>();
-		for (SemanticQueryPlan.GroupSelection group : safe(groups)) {
+		for (SemanticBlueprint.GroupSelection group : safe(groups)) {
 			String outputColumn = findOutputColumn(columns, group.getAlias(), group.getColumnName(), group.getExpression());
 			if (outputColumn == null) {
 				if (mode == ValidationMode.STRICT_SEMANTIC_PLAN) {

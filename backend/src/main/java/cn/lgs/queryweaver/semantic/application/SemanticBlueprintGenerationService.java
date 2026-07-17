@@ -56,10 +56,10 @@ import org.springframework.util.StringUtils;
  * <p>The model is allowed to choose only already-published Semantic Catalog assets. It never
  * supplies SQL, metric formulae, join predicates, datasource identifiers or arbitrary columns.
  * QueryWeaver validates every selected code against the candidate Catalog slice and then lets the
- * deterministic semantic resolver expand those codes into the authoritative Semantic Query Plan.
+ * deterministic semantic resolver expand those codes into the authoritative Semantic Blueprint.
  */
 @Service
-public class LlmSemanticPlanningService {
+public class SemanticBlueprintGenerationService {
 
 	private static final int MAX_CANDIDATE_MODELS = 24;
 
@@ -157,7 +157,7 @@ public class LlmSemanticPlanningService {
 	private final MultiSourcePolicyService multiSourcePolicyService;
 
 	@Autowired
-	public LlmSemanticPlanningService(SemanticCatalogRepository catalogRepository,
+	public SemanticBlueprintGenerationService(SemanticCatalogRepository catalogRepository,
 			SemanticDocumentExtractionClient extractionClient, PlannerReasoningProperties reasoningProperties,
 			MultiSourcePolicyService multiSourcePolicyService) {
 		this.catalogRepository = catalogRepository;
@@ -166,7 +166,7 @@ public class LlmSemanticPlanningService {
 		this.multiSourcePolicyService = multiSourcePolicyService;
 	}
 
-	LlmSemanticPlanningService(SemanticCatalogRepository catalogRepository,
+	SemanticBlueprintGenerationService(SemanticCatalogRepository catalogRepository,
 			SemanticDocumentExtractionClient extractionClient) {
 		this.catalogRepository = catalogRepository;
 		this.extractionClient = extractionClient;

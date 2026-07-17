@@ -36,9 +36,9 @@ import cn.lgs.queryweaver.bo.schema.ResultSetBO;
 import cn.lgs.queryweaver.review.PostExecutionReview.Decision;
 import cn.lgs.queryweaver.review.QueryRepairPolicy;
 import cn.lgs.queryweaver.review.QueryRepairPolicy.RepairBudget;
-import cn.lgs.queryweaver.semantic.application.GovernedQueryExecutionService;
+import cn.lgs.queryweaver.semantic.application.VerifiedQueryExecutionService;
 import cn.lgs.queryweaver.semantic.compiler.SemanticSqlCompiler.ConstrainedGenerationRequiredException;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.sql.application.SqlValidationClassifier;
 import cn.lgs.queryweaver.util.JsonUtil;
 import cn.lgs.queryweaver.util.StateUtil;
@@ -56,7 +56,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * Governed compiler-first execution for the common Semantic Query Plan path.
+ * Governed compiler-first execution for the common Semantic Blueprint path.
  *
  * <p>Single-source and multi-source queries use the same durable QueryRun. Source sub-runs are execution artifacts,
  * not child QueryRuns. Unsupported constrained-generation plans explicitly enter the bounded advanced fallback.</p>
@@ -69,7 +69,7 @@ public class SemanticExecutionNode implements NodeAction {
 	public static final String EXECUTED = "EXECUTED";
 	public static final String FALLBACK_ADVANCED = "FALLBACK_ADVANCED";
 
-	private final GovernedQueryExecutionService governedQueryExecutionService;
+	private final VerifiedQueryExecutionService verifiedQueryExecutionService;
 
 	private final SqlValidationClassifier sqlValidationClassifier;
 
@@ -77,10 +77,10 @@ public class SemanticExecutionNode implements NodeAction {
 
 	@Override
 	public Map<String, Object> apply(OverAllState state) throws Exception {
-		SemanticQueryPlan plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		if (plan == null || !plan.isExecutable()) {
-			throw new IllegalStateException("Semantic execution requires an executable Semantic Query Plan");
+			throw new IllegalStateException("Semantic execution requires an executable Semantic Blueprint");
 		}
 		Long projectId = StateUtil.getObjectValue(state, PROJECT_ID, Long.class);
 		Long versionId = StateUtil.getObjectValue(state, PROJECT_VERSION_ID, Long.class);
@@ -88,12 +88,12 @@ public class SemanticExecutionNode implements NodeAction {
 		String principalId = StateUtil.getStringValue(state, PRINCIPAL_ID, "anonymous");
 
 		String executionKey = executionKey(state, plan);
-		GovernedQueryExecutionService.ExecutionResult executed;
+		VerifiedQueryExecutionService.ExecutionResult executed;
 		try {
-			executed = governedQueryExecutionService.execute(runId, executionKey, projectId, versionId, principalId, plan);
+			executed = verifiedQueryExecutionService.execute(runId, executionKey, projectId, versionId, principalId, plan);
 		}
 		catch (ConstrainedGenerationRequiredException unsupported) {
-			log.info("Semantic Query Plan requires advanced/constrained execution fallback: {}", unsupported.getMessage());
+			log.info("Semantic Blueprint requires advanced/constrained execution fallback: {}", unsupported.getMessage());
 			return Map.of(SEMANTIC_EXECUTION_DECISION, FALLBACK_ADVANCED, ADVANCED_EXECUTION_FALLBACK, true);
 		}
 		catch (Exception failure) {
@@ -135,7 +135,7 @@ public class SemanticExecutionNode implements NodeAction {
 		return update;
 	}
 
-	private String executionKey(OverAllState state, SemanticQueryPlan plan) {
+	private String executionKey(OverAllState state, SemanticBlueprint plan) {
 		String todo = StateUtil.getStringValue(state, ACTIVE_TODO_ID, "simple");
 		if (todo == null || todo.isBlank()) {
 			todo = "simple";

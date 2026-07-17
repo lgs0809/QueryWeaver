@@ -30,11 +30,11 @@ import cn.lgs.queryweaver.run.QueryRun.RunStatus;
 import cn.lgs.queryweaver.run.QueryRun.RunType;
 import cn.lgs.queryweaver.run.QueryRunService;
 import cn.lgs.queryweaver.run.QueryRunService.CreateRunCommand;
-import cn.lgs.queryweaver.semantic.application.GovernedQueryExecutionService;
+import cn.lgs.queryweaver.semantic.application.VerifiedQueryExecutionService;
 import cn.lgs.queryweaver.semantic.application.SemanticCatalogApplicationService;
 import cn.lgs.queryweaver.semantic.domain.SemanticAssetStatus;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.semantic.retrieval.SemanticHybridRetrievalService.RetrievalHit;
 import cn.lgs.queryweaver.util.JsonUtil;
 import java.nio.charset.StandardCharsets;
@@ -62,7 +62,7 @@ public class ExternalSemanticQueryFacade {
 
     private final ProjectAccessService accessService;
     private final SemanticCatalogApplicationService catalogService;
-    private final GovernedQueryExecutionService executionService;
+    private final VerifiedQueryExecutionService executionService;
     private final MultiSourceRunService multiSourceRunService;
     private final QueryRunService runService;
     private final ProjectMcpRepository repository;
@@ -95,7 +95,7 @@ public class ExternalSemanticQueryFacade {
     public PlanValidationResult validate(ProjectMcpDeployment deployment, ExternalQueryPlan request) {
         requireDeployment(deployment, "validate_query_plan");
         try {
-            SemanticQueryPlan plan = buildPlan(deployment, request);
+            SemanticBlueprint plan = buildPlan(deployment, request);
             List<String> errors = new ArrayList<>(plan.getValidationErrors());
             if ("CONSTRAINED_GENERATION".equalsIgnoreCase(plan.getCompilerMode())) {
                 errors.add("This plan requires model-based constrained generation; split or simplify the query for the MCP data plane");
@@ -115,7 +115,7 @@ public class ExternalSemanticQueryFacade {
 
     public QueryExecutionResult execute(ProjectMcpDeployment deployment, ExternalQueryPlan request) {
         requireDeployment(deployment, "execute_query_plan");
-        SemanticQueryPlan plan = buildPlan(deployment, request);
+        SemanticBlueprint plan = buildPlan(deployment, request);
         if ("CONSTRAINED_GENERATION".equalsIgnoreCase(plan.getCompilerMode())) {
             throw new IllegalArgumentException(
                     "This query requires model-based constrained generation; the BYO-Agent MCP path accepts deterministic plans only");
@@ -136,7 +136,7 @@ public class ExternalSemanticQueryFacade {
         repository.audit(deployment.deploymentId(), deployment.projectId(), deployment.principalId(),
                 "EXECUTE_QUERY_PLAN", "STARTED", queryId);
         try {
-            GovernedQueryExecutionService.ExecutionResult executed = executionService.execute(run.runId(), "mcp",
+            VerifiedQueryExecutionService.ExecutionResult executed = executionService.execute(run.runId(), "mcp",
                     deployment.projectId(), deployment.projectVersionId(), deployment.principalId(), plan);
             runService.transition(run.runId(), RunStatus.SUCCEEDED, "mcp-data-plane", null, null);
             runService.appendEvent(run.runId(), "RUN_SUCCEEDED", "mcp-data-plane", null,
@@ -182,7 +182,7 @@ public class ExternalSemanticQueryFacade {
         return new QueryExecutionResult(queryId, "RUNNING", null, 0, List.of(), List.of(), null, null);
     }
 
-    private SemanticQueryPlan buildPlan(ProjectMcpDeployment deployment, ExternalQueryPlan request) {
+    private SemanticBlueprint buildPlan(ProjectMcpDeployment deployment, ExternalQueryPlan request) {
         if (request == null) {
             throw new IllegalArgumentException("plan is required");
         }
@@ -211,7 +211,7 @@ public class ExternalSemanticQueryFacade {
         QueryCaseHints hints = new QueryCaseHints(modelCodes, request.metricCodes(), request.dimensionCodes(),
                 request.grainCodes(), request.relationshipCodes(), request.ruleCodes(), List.of(), filters, List.of(),
                 timeBinding, true, "MCP_EXTERNAL", List.of(), 1.0d, Map.of());
-        SemanticQueryPlan plan = catalogService.buildQueryPlan(deployment.projectId(), deployment.projectVersionId(),
+        SemanticBlueprint plan = catalogService.buildBlueprint(deployment.projectId(), deployment.projectVersionId(),
                 question, physicalTables, hints);
         if (!plan.isExecutable()) {
             throw new IllegalArgumentException("Submitted semantic plan is not executable: "
@@ -362,7 +362,7 @@ public class ExternalSemanticQueryFacade {
             return JsonUtil.getObjectMapper().writeValueAsString(value);
         }
         catch (Exception ex) {
-            throw new IllegalStateException("Unable to serialize external semantic query plan", ex);
+            throw new IllegalStateException("Unable to serialize external semantic blueprint", ex);
         }
     }
 
@@ -439,7 +439,7 @@ public class ExternalSemanticQueryFacade {
     public record ExternalTimeBinding(String rawText, String modelCode, String columnName, String groupGranularity) {
     }
 
-    public record PlanValidationResult(boolean valid, String compilerMode, SemanticQueryPlan normalizedPlan,
+    public record PlanValidationResult(boolean valid, String compilerMode, SemanticBlueprint normalizedPlan,
             List<String> errors, List<String> warnings) {
     }
 

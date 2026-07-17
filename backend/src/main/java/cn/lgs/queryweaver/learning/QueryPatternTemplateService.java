@@ -17,7 +17,7 @@ package cn.lgs.queryweaver.learning;
 
 import cn.lgs.queryweaver.common.json.CanonicalJson;
 import cn.lgs.queryweaver.semantic.compiler.CompiledSemanticQuery.CompiledSourceQuery;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -53,7 +53,7 @@ public class QueryPatternTemplateService {
 
 	@Transactional
 	public CaptureMode captureSuccessful(String patternId, Long projectId, Long projectVersionId, String catalogHash,
-			String runId, String attemptId, SemanticQueryPlan plan, List<Map<String, Object>> sqlTraces,
+			String runId, String attemptId, SemanticBlueprint plan, List<Map<String, Object>> sqlTraces,
 			boolean hadClarification, boolean corrected) {
 		return captureSuccessful(patternId, projectId, projectVersionId, catalogHash, runId, attemptId, plan, sqlTraces,
 				hadClarification, corrected, true);
@@ -61,7 +61,7 @@ public class QueryPatternTemplateService {
 
 	@Transactional
 	public CaptureMode captureSuccessful(String patternId, Long projectId, Long projectVersionId, String catalogHash,
-			String runId, String attemptId, SemanticQueryPlan plan, List<Map<String, Object>> sqlTraces,
+			String runId, String attemptId, SemanticBlueprint plan, List<Map<String, Object>> sqlTraces,
 			boolean hadClarification, boolean corrected, boolean postExecutionReviewPassed) {
 		if (plan == null || !plan.isExecutable() || corrected || projectId == null || projectVersionId == null
 				|| !StringUtils.hasText(patternId)) {
@@ -94,7 +94,7 @@ public class QueryPatternTemplateService {
 	}
 
 	public Optional<ReusableTemplate> findExecutable(Long projectId, Long projectVersionId, String catalogHash,
-			SemanticQueryPlan plan, CompiledSourceQuery compiled) {
+			SemanticBlueprint plan, CompiledSourceQuery compiled) {
 		if (plan == null || compiled == null || projectId == null || projectVersionId == null) {
 			return Optional.empty();
 		}
@@ -148,12 +148,12 @@ public class QueryPatternTemplateService {
 				""", trim(reason, 1000), runId);
 	}
 
-	public String executionShapeHash(SemanticQueryPlan plan, Integer datasourceId) {
+	public String executionShapeHash(SemanticBlueprint plan, Integer datasourceId) {
 		return canonicalJson.hash(executionShape(plan, datasourceId));
 	}
 
 	private void upsertPlanOnly(String patternId, Long projectId, Long projectVersionId, String catalogHash,
-			String runId, String attemptId, SemanticQueryPlan plan, Integer datasourceId) {
+			String runId, String attemptId, SemanticBlueprint plan, Integer datasourceId) {
 		Integer sourceId = datasourceId == null && plan.getSourceSubPlans().size() == 1
 				? plan.getSourceSubPlans().get(0).getDatasourceId() : datasourceId;
 		if (sourceId == null) {
@@ -164,7 +164,7 @@ public class QueryPatternTemplateService {
 	}
 
 	private void upsert(String patternId, Long projectId, Long projectVersionId, String catalogHash, String shapeHash,
-			Integer datasourceId, String reuseMode, SemanticQueryPlan plan, String sql, int parameterCount,
+			Integer datasourceId, String reuseMode, SemanticBlueprint plan, String sql, int parameterCount,
 			String runId, String attemptId, String invalidationReason) {
 		jdbc.update(
 				"""
@@ -193,7 +193,7 @@ public class QueryPatternTemplateService {
 				datasourceId, reuseMode, json(plan), sql, parameterCount, runId, attemptId, invalidationReason);
 	}
 
-	private Map<String, Object> executionShape(SemanticQueryPlan plan, Integer datasourceId) {
+	private Map<String, Object> executionShape(SemanticBlueprint plan, Integer datasourceId) {
 		LinkedHashMap<String, Object> shape = new LinkedHashMap<>();
 		shape.put("datasourceId", datasourceId);
 		shape.put("models", plan.getModels().stream().map(value -> value.getModelCode()).sorted().toList());
@@ -220,7 +220,7 @@ public class QueryPatternTemplateService {
 					"expression", nullSafe(value.getExpression()), "operator", nullSafe(value.getOperator()),
 					"valueType", nullSafe(value.getValueType()), "valueShape", valueShape(value.getValue())))
 			.toList());
-		SemanticQueryPlan.TimeRangeSelection time = plan.getTimeRange();
+		SemanticBlueprint.TimeRangeSelection time = plan.getTimeRange();
 		shape.put("time",
 				time == null ? Map.of() : Map.of("model", nullSafe(time.getModelCode()), "column",
 						nullSafe(time.getTimeColumn()), "hasStart", StringUtils.hasText(time.getStartInclusive()),

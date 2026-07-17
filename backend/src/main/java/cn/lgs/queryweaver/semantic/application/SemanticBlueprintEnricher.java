@@ -21,7 +21,7 @@ import cn.lgs.queryweaver.learning.QueryCaseHints.FilterBindingHint;
 import cn.lgs.queryweaver.semantic.domain.SemanticAssetStatus;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
 import cn.lgs.queryweaver.semantic.domain.SemanticColumnRole;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import java.text.Normalizer;
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -38,9 +38,9 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-/** Builds the explicitly governed portion of the Semantic Query Plan. */
+/** Builds the explicitly governed portion of the Semantic Blueprint. */
 @Service
-public class SemanticQueryIrEnricher {
+public class SemanticBlueprintEnricher {
 
 	private static final Set<String> SUPPORTED_LITERAL_FILTER_OPERATORS = Set.of("EQ", "NE", "GT", "GTE", "LT",
 			"LTE", "IN", "IS_NULL", "IS_NOT_NULL");
@@ -87,13 +87,13 @@ public class SemanticQueryIrEnricher {
 			"[\\[（(]?\\s*(?:当前时间|current\\s+time)\\s*[:：]\\s*\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?\\s*[\\]）)]?",
 			Pattern.CASE_INSENSITIVE);
 
-	public List<SemanticQueryPlan.MetricSelection> metricsForIntent(String query,
-			List<SemanticQueryPlan.MetricSelection> metrics) {
+	public List<SemanticBlueprint.MetricSelection> metricsForIntent(String query,
+			List<SemanticBlueprint.MetricSelection> metrics) {
 		if (!rowLevelRanking(normalize(query))) {
 			return metrics == null ? List.of() : List.copyOf(metrics);
 		}
-		return (metrics == null ? List.<SemanticQueryPlan.MetricSelection>of() : metrics).stream()
-			.map(metric -> SemanticQueryPlan.MetricSelection.builder()
+		return (metrics == null ? List.<SemanticBlueprint.MetricSelection>of() : metrics).stream()
+			.map(metric -> SemanticBlueprint.MetricSelection.builder()
 				.metricCode(metric.getMetricCode())
 				.modelCode(metric.getModelCode())
 				.businessName(metric.getBusinessName())
@@ -108,14 +108,14 @@ public class SemanticQueryIrEnricher {
 	}
 
 	public IrDetails enrich(SemanticCatalogSnapshot snapshot, String query,
-			List<SemanticQueryPlan.ModelSelection> models, List<SemanticQueryPlan.MetricSelection> metrics,
-			List<SemanticQueryPlan.DimensionSelection> dimensions, List<SemanticQueryPlan.GrainSelection> grains) {
+			List<SemanticBlueprint.ModelSelection> models, List<SemanticBlueprint.MetricSelection> metrics,
+			List<SemanticBlueprint.DimensionSelection> dimensions, List<SemanticBlueprint.GrainSelection> grains) {
 		return enrich(snapshot, query, models, metrics, dimensions, grains, QueryCaseHints.empty());
 	}
 
 	public IrDetails enrich(SemanticCatalogSnapshot snapshot, String query,
-			List<SemanticQueryPlan.ModelSelection> models, List<SemanticQueryPlan.MetricSelection> metrics,
-			List<SemanticQueryPlan.DimensionSelection> dimensions, List<SemanticQueryPlan.GrainSelection> grains,
+			List<SemanticBlueprint.ModelSelection> models, List<SemanticBlueprint.MetricSelection> metrics,
+			List<SemanticBlueprint.DimensionSelection> dimensions, List<SemanticBlueprint.GrainSelection> grains,
 			QueryCaseHints caseHints) {
 		QueryCaseHints hints = caseHints == null ? QueryCaseHints.empty() : caseHints;
 		String normalized = normalize(query);
@@ -127,13 +127,13 @@ public class SemanticQueryIrEnricher {
 		}
 		List<String> errors = new ArrayList<>();
 		List<String> warnings = new ArrayList<>();
-		List<SemanticQueryPlan.ProjectionSelection> projections = new ArrayList<>();
-		List<SemanticQueryPlan.GroupSelection> groups = new ArrayList<>();
+		List<SemanticBlueprint.ProjectionSelection> projections = new ArrayList<>();
+		List<SemanticBlueprint.GroupSelection> groups = new ArrayList<>();
 		boolean rowLevelRanking = rowLevelRanking(normalized);
-		List<SemanticQueryPlan.DimensionSelection> selectedDimensions = dimensions.stream()
+		List<SemanticBlueprint.DimensionSelection> selectedDimensions = dimensions.stream()
 			.filter(dimension -> !metricBackedScalarDimension(normalized, dimension, metrics))
 			.toList();
-		for (SemanticQueryPlan.DimensionSelection dimension : selectedDimensions) {
+		for (SemanticBlueprint.DimensionSelection dimension : selectedDimensions) {
 			SemanticCatalogSnapshot.Column column = columns
 				.get(key(dimension.getModelCode(), dimension.getColumnName()));
 			if (column != null && !Boolean.TRUE.equals(column.getAllowProjection())) {
@@ -142,7 +142,7 @@ public class SemanticQueryIrEnricher {
 				continue;
 			}
 			String expression = firstText(dimension.getExpression(), dimension.getColumnName());
-			projections.add(SemanticQueryPlan.ProjectionSelection.builder()
+			projections.add(SemanticBlueprint.ProjectionSelection.builder()
 				.modelCode(dimension.getModelCode())
 				.columnName(dimension.getColumnName())
 				.expression(expression)
@@ -151,7 +151,7 @@ public class SemanticQueryIrEnricher {
 				.masked(column != null && !"NONE".equalsIgnoreCase(column.getMaskingPolicy()))
 				.build());
 			if (!rowLevelRanking) {
-				groups.add(SemanticQueryPlan.GroupSelection.builder()
+				groups.add(SemanticBlueprint.GroupSelection.builder()
 					.modelCode(dimension.getModelCode())
 					.columnName(dimension.getColumnName())
 					.expression(expression)
@@ -162,8 +162,8 @@ public class SemanticQueryIrEnricher {
 		if (rowLevelRanking) {
 			addRowIdentifierProjection(projections, models, metrics, grains, columns, errors);
 		}
-		for (SemanticQueryPlan.MetricSelection metric : metrics) {
-			projections.add(SemanticQueryPlan.ProjectionSelection.builder()
+		for (SemanticBlueprint.MetricSelection metric : metrics) {
+			projections.add(SemanticBlueprint.ProjectionSelection.builder()
 				.modelCode(metric.getModelCode())
 				.expression(metricExpression(metric))
 				.alias(metric.getMetricCode())
@@ -172,10 +172,10 @@ public class SemanticQueryIrEnricher {
 				.build());
 		}
 
-		List<SemanticQueryPlan.EnumResolution> enumResolutions = new ArrayList<>();
-		List<SemanticQueryPlan.FilterSelection> filters = new ArrayList<>();
+		List<SemanticBlueprint.EnumResolution> enumResolutions = new ArrayList<>();
+		List<SemanticBlueprint.FilterSelection> filters = new ArrayList<>();
 		Set<String> selectedModelCodes = models.stream()
-			.map(SemanticQueryPlan.ModelSelection::getModelCode)
+			.map(SemanticBlueprint.ModelSelection::getModelCode)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		for (SemanticCatalogSnapshot.EnumValue value : snapshot.getEnumValues()) {
 			if (hints.strictAssetBinding() || value.getStatus() != SemanticAssetStatus.ENABLED
@@ -264,7 +264,7 @@ public class SemanticQueryIrEnricher {
 						&& Objects.equals(existing.getOperator(), operator)
 						&& Objects.equals(existing.getValue(), hint.value()));
 			if (!duplicate) {
-				filters.add(SemanticQueryPlan.FilterSelection.builder()
+				filters.add(SemanticBlueprint.FilterSelection.builder()
 					.modelCode(hint.modelCode())
 					.columnName(hint.columnName())
 					.expression(hint.columnName())
@@ -279,7 +279,7 @@ public class SemanticQueryIrEnricher {
 		Set<String> timeRelevantModelCodes = timeRelevantModelCodes(metrics, selectedDimensions, selectedModelCodes);
 		boolean timeIntentCoveredByGovernedFilter = hasGovernedTimeFilter(hints, columns);
 		boolean timeRangeCoveredByGovernedFilter = hasGovernedTimeLiteralFilter(hints, columns);
-		SemanticQueryPlan.TimeRangeSelection timeRange = timeRangeCoveredByGovernedFilter ? null
+		SemanticBlueprint.TimeRangeSelection timeRange = timeRangeCoveredByGovernedFilter ? null
 				: timeRange(normalized, metrics, timeRelevantModelCodes, columns, hints);
 		if (containsTimeRangeIntent(normalized) && timeRange == null && !timeIntentCoveredByGovernedFilter) {
 			if (hints.strictAssetBinding()) {
@@ -291,14 +291,14 @@ public class SemanticQueryIrEnricher {
 		}
 		addTimeGrouping(hints.timeBinding(), columns, projections, groups, errors);
 		int limit = limit(normalized);
-		List<SemanticQueryPlan.OrderSelection> order = order(normalized, metrics);
+		List<SemanticBlueprint.OrderSelection> order = order(normalized, metrics);
 		List<String> resultColumns = projections.stream()
-			.map(SemanticQueryPlan.ProjectionSelection::getAlias)
+			.map(SemanticBlueprint.ProjectionSelection::getAlias)
 			.filter(StringUtils::hasText)
 			.toList();
 		String grain = rowLevelRanking ? rowRankingGrain(metrics, grains)
 				: expectedResultGrain(selectedDimensions, grains, metrics, hints.timeBinding());
-		SemanticQueryPlan.ExpectedResultShape expected = SemanticQueryPlan.ExpectedResultShape.builder()
+		SemanticBlueprint.ExpectedResultShape expected = SemanticBlueprint.ExpectedResultShape.builder()
 			.columns(resultColumns)
 			.grain(grain)
 			.maxRows(limit)
@@ -316,7 +316,7 @@ public class SemanticQueryIrEnricher {
 
 	private void addTimeGrouping(QueryCaseHints.TimeBindingHint timeBinding,
 			Map<String, SemanticCatalogSnapshot.Column> columns,
-			List<SemanticQueryPlan.ProjectionSelection> projections, List<SemanticQueryPlan.GroupSelection> groups,
+			List<SemanticBlueprint.ProjectionSelection> projections, List<SemanticBlueprint.GroupSelection> groups,
 			List<String> errors) {
 		if (timeBinding == null || !StringUtils.hasText(timeBinding.groupGranularity())) {
 			return;
@@ -338,7 +338,7 @@ public class SemanticQueryIrEnricher {
 		boolean projectionExists = projections.stream().anyMatch(projection -> Objects.equals(projection.getModelCode(),
 				timeBinding.modelCode()) && Objects.equals(projection.getAlias(), alias));
 		if (!projectionExists) {
-			projections.add(SemanticQueryPlan.ProjectionSelection.builder()
+			projections.add(SemanticBlueprint.ProjectionSelection.builder()
 				.modelCode(timeBinding.modelCode())
 				.columnName(timeBinding.columnName())
 				.expression(expression)
@@ -351,7 +351,7 @@ public class SemanticQueryIrEnricher {
 		boolean groupExists = groups.stream().anyMatch(group -> Objects.equals(group.getModelCode(), timeBinding.modelCode())
 				&& Objects.equals(group.getAlias(), alias));
 		if (!groupExists) {
-			groups.add(SemanticQueryPlan.GroupSelection.builder()
+			groups.add(SemanticBlueprint.GroupSelection.builder()
 				.modelCode(timeBinding.modelCode())
 				.columnName(timeBinding.columnName())
 				.expression(expression)
@@ -370,11 +370,11 @@ public class SemanticQueryIrEnricher {
 		};
 	}
 
-	private String expectedResultGrain(List<SemanticQueryPlan.DimensionSelection> dimensions,
-			List<SemanticQueryPlan.GrainSelection> grains, List<SemanticQueryPlan.MetricSelection> metrics,
+	private String expectedResultGrain(List<SemanticBlueprint.DimensionSelection> dimensions,
+			List<SemanticBlueprint.GrainSelection> grains, List<SemanticBlueprint.MetricSelection> metrics,
 			QueryCaseHints.TimeBindingHint timeBinding) {
 		List<String> components = new ArrayList<>(dimensions.stream()
-			.map(SemanticQueryPlan.DimensionSelection::getDimensionCode)
+			.map(SemanticBlueprint.DimensionSelection::getDimensionCode)
 			.filter(StringUtils::hasText)
 			.toList());
 		if (timeBinding != null && StringUtils.hasText(timeBinding.groupGranularity())) {
@@ -384,23 +384,23 @@ public class SemanticQueryIrEnricher {
 			return String.join(",", components);
 		}
 		return !metrics.isEmpty() ? "SCALAR"
-				: grains.stream().findFirst().map(SemanticQueryPlan.GrainSelection::getGrainCode).orElse("SCALAR");
+				: grains.stream().findFirst().map(SemanticBlueprint.GrainSelection::getGrainCode).orElse("SCALAR");
 	}
 
-	private void addRowIdentifierProjection(List<SemanticQueryPlan.ProjectionSelection> projections,
-			List<SemanticQueryPlan.ModelSelection> models, List<SemanticQueryPlan.MetricSelection> metrics,
-			List<SemanticQueryPlan.GrainSelection> grains, Map<String, SemanticCatalogSnapshot.Column> columns,
+	private void addRowIdentifierProjection(List<SemanticBlueprint.ProjectionSelection> projections,
+			List<SemanticBlueprint.ModelSelection> models, List<SemanticBlueprint.MetricSelection> metrics,
+			List<SemanticBlueprint.GrainSelection> grains, Map<String, SemanticCatalogSnapshot.Column> columns,
 			List<String> errors) {
-		Set<String> metricModels = metrics.stream().map(SemanticQueryPlan.MetricSelection::getModelCode)
+		Set<String> metricModels = metrics.stream().map(SemanticBlueprint.MetricSelection::getModelCode)
 			.filter(StringUtils::hasText).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		String modelCode = metricModels.size() == 1 ? metricModels.iterator().next()
-				: models.stream().map(SemanticQueryPlan.ModelSelection::getModelCode).filter(StringUtils::hasText).findFirst()
+				: models.stream().map(SemanticBlueprint.ModelSelection::getModelCode).filter(StringUtils::hasText).findFirst()
 					.orElse(null);
 		if (!StringUtils.hasText(modelCode)) {
 			errors.add("Row-level ranking requires one governed semantic model");
 			return;
 		}
-		SemanticQueryPlan.GrainSelection grain = grains.stream().filter(value -> modelCode.equals(value.getModelCode()))
+		SemanticBlueprint.GrainSelection grain = grains.stream().filter(value -> modelCode.equals(value.getModelCode()))
 			.findFirst().orElse(null);
 		String keyColumn = grain == null ? null : firstKeyColumn(grain.getKeyColumns());
 		SemanticCatalogSnapshot.Column column = columns.get(key(modelCode, keyColumn));
@@ -411,7 +411,7 @@ public class SemanticQueryIrEnricher {
 		boolean duplicate = projections.stream().anyMatch(value -> modelCode.equals(value.getModelCode())
 				&& keyColumn.equals(value.getColumnName()));
 		if (!duplicate) {
-			projections.add(SemanticQueryPlan.ProjectionSelection.builder()
+			projections.add(SemanticBlueprint.ProjectionSelection.builder()
 				.modelCode(modelCode)
 				.columnName(keyColumn)
 				.expression(keyColumn)
@@ -433,22 +433,22 @@ public class SemanticQueryIrEnricher {
 			.orElse(null);
 	}
 
-	private String rowRankingGrain(List<SemanticQueryPlan.MetricSelection> metrics,
-			List<SemanticQueryPlan.GrainSelection> grains) {
-		Set<String> models = metrics.stream().map(SemanticQueryPlan.MetricSelection::getModelCode)
+	private String rowRankingGrain(List<SemanticBlueprint.MetricSelection> metrics,
+			List<SemanticBlueprint.GrainSelection> grains) {
+		Set<String> models = metrics.stream().map(SemanticBlueprint.MetricSelection::getModelCode)
 			.filter(StringUtils::hasText).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		if (models.size() != 1) {
 			return "ROW";
 		}
 		String modelCode = models.iterator().next();
 		return grains.stream().filter(value -> modelCode.equals(value.getModelCode()))
-			.map(SemanticQueryPlan.GrainSelection::getGrainCode).findFirst().orElse("ROW");
+			.map(SemanticBlueprint.GrainSelection::getGrainCode).findFirst().orElse("ROW");
 	}
 
-	private void addEnumResolution(List<SemanticQueryPlan.EnumResolution> resolutions,
-			List<SemanticQueryPlan.FilterSelection> filters, SemanticCatalogSnapshot.EnumValue value, String inputText,
+	private void addEnumResolution(List<SemanticBlueprint.EnumResolution> resolutions,
+			List<SemanticBlueprint.FilterSelection> filters, SemanticCatalogSnapshot.EnumValue value, String inputText,
 			double confidence) {
-		resolutions.add(SemanticQueryPlan.EnumResolution.builder()
+		resolutions.add(SemanticBlueprint.EnumResolution.builder()
 			.modelCode(value.getModelCode())
 			.columnName(value.getColumnName())
 			.inputText(inputText)
@@ -456,7 +456,7 @@ public class SemanticQueryIrEnricher {
 			.businessName(value.getBusinessName())
 			.confidence(confidence)
 			.build());
-		filters.add(SemanticQueryPlan.FilterSelection.builder()
+		filters.add(SemanticBlueprint.FilterSelection.builder()
 			.modelCode(value.getModelCode())
 			.columnName(value.getColumnName())
 			.expression(value.getColumnName())
@@ -467,7 +467,7 @@ public class SemanticQueryIrEnricher {
 			.build());
 	}
 
-	private boolean sameEnum(SemanticQueryPlan.EnumResolution existing, EnumBindingHint hint) {
+	private boolean sameEnum(SemanticBlueprint.EnumResolution existing, EnumBindingHint hint) {
 		return Objects.equals(existing.getModelCode(), hint.modelCode())
 				&& Objects.equals(existing.getColumnName(), hint.columnName())
 				&& Objects.equals(existing.getValueCode(), hint.valueCode());
@@ -499,24 +499,24 @@ public class SemanticQueryIrEnricher {
 		return false;
 	}
 
-	private Set<String> timeRelevantModelCodes(List<SemanticQueryPlan.MetricSelection> metrics,
-			List<SemanticQueryPlan.DimensionSelection> dimensions, Set<String> selectedModelCodes) {
+	private Set<String> timeRelevantModelCodes(List<SemanticBlueprint.MetricSelection> metrics,
+			List<SemanticBlueprint.DimensionSelection> dimensions, Set<String> selectedModelCodes) {
 		Set<String> metricModels = metrics.stream()
-			.map(SemanticQueryPlan.MetricSelection::getModelCode)
+			.map(SemanticBlueprint.MetricSelection::getModelCode)
 			.filter(StringUtils::hasText)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		if (!metricModels.isEmpty()) {
 			return metricModels;
 		}
 		Set<String> dimensionModels = dimensions.stream()
-			.map(SemanticQueryPlan.DimensionSelection::getModelCode)
+			.map(SemanticBlueprint.DimensionSelection::getModelCode)
 			.filter(StringUtils::hasText)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		return dimensionModels.isEmpty() ? selectedModelCodes : dimensionModels;
 	}
 
-	private SemanticQueryPlan.TimeRangeSelection timeRange(String query,
-			List<SemanticQueryPlan.MetricSelection> metrics, Set<String> selectedModelCodes,
+	private SemanticBlueprint.TimeRangeSelection timeRange(String query,
+			List<SemanticBlueprint.MetricSelection> metrics, Set<String> selectedModelCodes,
 			Map<String, SemanticCatalogSnapshot.Column> columns, QueryCaseHints hints) {
 		String relative = relativeRange(query);
 		AbsoluteTimeRange absolute = absoluteRange(query);
@@ -546,7 +546,7 @@ public class SemanticQueryIrEnricher {
 		String modelCode = selectedModelCodes.iterator().next();
 		Set<String> metricTimeColumns = metrics.stream()
 			.filter(metric -> modelCode.equals(metric.getModelCode()))
-			.map(SemanticQueryPlan.MetricSelection::getTimeColumn)
+			.map(SemanticBlueprint.MetricSelection::getTimeColumn)
 			.filter(StringUtils::hasText)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		if (metricTimeColumns.size() > 1) {
@@ -574,9 +574,9 @@ public class SemanticQueryIrEnricher {
 		return timeRangeSelection(modelCode, timeColumn, relative, absolute, granularity(query));
 	}
 
-	private SemanticQueryPlan.TimeRangeSelection timeRangeSelection(String modelCode, String timeColumn, String relative,
+	private SemanticBlueprint.TimeRangeSelection timeRangeSelection(String modelCode, String timeColumn, String relative,
 			AbsoluteTimeRange absolute, String granularity) {
-		SemanticQueryPlan.TimeRangeSelection.TimeRangeSelectionBuilder builder = SemanticQueryPlan.TimeRangeSelection
+		SemanticBlueprint.TimeRangeSelection.TimeRangeSelectionBuilder builder = SemanticBlueprint.TimeRangeSelection
 			.builder()
 			.modelCode(modelCode)
 			.timeColumn(timeColumn)
@@ -744,8 +744,8 @@ public class SemanticQueryIrEnricher {
 		return RANKED_ENTITY_COUNT_PATTERN.matcher(query).find();
 	}
 
-	private List<SemanticQueryPlan.OrderSelection> order(String query,
-			List<SemanticQueryPlan.MetricSelection> metrics) {
+	private List<SemanticBlueprint.OrderSelection> order(String query,
+			List<SemanticBlueprint.MetricSelection> metrics) {
 		if (metrics.isEmpty()) {
 			return List.of();
 		}
@@ -761,23 +761,23 @@ public class SemanticQueryIrEnricher {
 		if (direction == null) {
 			return List.of();
 		}
-		SemanticQueryPlan.MetricSelection sortMetric = metrics.get(0);
+		SemanticBlueprint.MetricSelection sortMetric = metrics.get(0);
 		int latestMention = -1;
-		for (SemanticQueryPlan.MetricSelection metric : metrics) {
+		for (SemanticBlueprint.MetricSelection metric : metrics) {
 			int mention = lastMetricMention(query, metric);
 			if (mention > latestMention) {
 				latestMention = mention;
 				sortMetric = metric;
 			}
 		}
-		return List.of(SemanticQueryPlan.OrderSelection.builder()
+		return List.of(SemanticBlueprint.OrderSelection.builder()
 			.expression(sortMetric.getMetricCode())
 			.direction(direction)
 			.nulls("LAST")
 			.build());
 	}
 
-	private int lastMetricMention(String query, SemanticQueryPlan.MetricSelection metric) {
+	private int lastMetricMention(String query, SemanticBlueprint.MetricSelection metric) {
 		String businessName = Objects.toString(metric.getBusinessName(), "");
 		String metricCode = Objects.toString(metric.getMetricCode(), "");
 		int businessMention = StringUtils.hasText(businessName) ? query.lastIndexOf(businessName) : -1;
@@ -793,7 +793,7 @@ public class SemanticQueryIrEnricher {
 		return matcher.matches() ? matcher.group(1).trim() : expression;
 	}
 
-	private String metricExpression(SemanticQueryPlan.MetricSelection metric) {
+	private String metricExpression(SemanticBlueprint.MetricSelection metric) {
 		String expression = firstText(metric.getExpression(), metric.getMetricCode());
 		if (!StringUtils.hasText(metric.getAggregation()) || "NONE".equalsIgnoreCase(metric.getAggregation())) {
 			return expression;
@@ -808,8 +808,8 @@ public class SemanticQueryIrEnricher {
 		return aggregation + "(" + expression + ")";
 	}
 
-	private boolean metricBackedScalarDimension(String query, SemanticQueryPlan.DimensionSelection dimension,
-			List<SemanticQueryPlan.MetricSelection> metrics) {
+	private boolean metricBackedScalarDimension(String query, SemanticBlueprint.DimensionSelection dimension,
+			List<SemanticBlueprint.MetricSelection> metrics) {
 		if (!StringUtils.hasText(dimension.getColumnName()) || explicitGroupingIntent(query, dimension)) {
 			return false;
 		}
@@ -817,12 +817,12 @@ public class SemanticQueryIrEnricher {
 			.compile("(?i)(?<![a-zA-Z0-9_$])" + Pattern.quote(dimension.getColumnName()) + "(?![a-zA-Z0-9_$])");
 		return metrics.stream()
 			.filter(metric -> Objects.equals(metric.getModelCode(), dimension.getModelCode()))
-			.map(SemanticQueryPlan.MetricSelection::getExpression)
+			.map(SemanticBlueprint.MetricSelection::getExpression)
 			.filter(StringUtils::hasText)
 			.anyMatch(expression -> column.matcher(expression).find());
 	}
 
-	private boolean explicitGroupingIntent(String query, SemanticQueryPlan.DimensionSelection dimension) {
+	private boolean explicitGroupingIntent(String query, SemanticBlueprint.DimensionSelection dimension) {
 		for (String value : List.of(Objects.toString(dimension.getBusinessName(), ""),
 				Objects.toString(dimension.getDimensionCode(), ""))) {
 			String normalized = normalize(value);
@@ -851,7 +851,7 @@ public class SemanticQueryIrEnricher {
 	}
 
 	private boolean metricOwnsEnumPhrase(String query, String matched,
-			List<SemanticQueryPlan.MetricSelection> metrics) {
+			List<SemanticBlueprint.MetricSelection> metrics) {
 		return metrics.stream().filter(metric -> StringUtils.hasText(metric.getFilterExpression())).anyMatch(metric -> {
 			String businessName = normalize(metric.getBusinessName());
 			String metricCode = normalize(metric.getMetricCode());
@@ -881,11 +881,11 @@ public class SemanticQueryIrEnricher {
 	private record AbsoluteDateToken(LocalDate start, LocalDate endExclusive, int startIndex, int endIndex) {
 	}
 
-	public record IrDetails(List<SemanticQueryPlan.ProjectionSelection> projections,
-			List<SemanticQueryPlan.DimensionSelection> dimensions, List<SemanticQueryPlan.FilterSelection> filters,
-			List<SemanticQueryPlan.EnumResolution> enumResolutions, SemanticQueryPlan.TimeRangeSelection timeRange,
-			List<SemanticQueryPlan.GroupSelection> groupBy, List<SemanticQueryPlan.OrderSelection> orderBy, int limit,
-			SemanticQueryPlan.ExpectedResultShape expectedResult, String compilerMode, List<String> warnings,
+	public record IrDetails(List<SemanticBlueprint.ProjectionSelection> projections,
+			List<SemanticBlueprint.DimensionSelection> dimensions, List<SemanticBlueprint.FilterSelection> filters,
+			List<SemanticBlueprint.EnumResolution> enumResolutions, SemanticBlueprint.TimeRangeSelection timeRange,
+			List<SemanticBlueprint.GroupSelection> groupBy, List<SemanticBlueprint.OrderSelection> orderBy, int limit,
+			SemanticBlueprint.ExpectedResultShape expectedResult, String compilerMode, List<String> warnings,
 			List<String> errors) {
 	}
 

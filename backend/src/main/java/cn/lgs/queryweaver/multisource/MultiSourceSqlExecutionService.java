@@ -25,7 +25,7 @@ import cn.lgs.queryweaver.properties.QueryWeaverProperties;
 import cn.lgs.queryweaver.operations.SemanticCatalogCache;
 import cn.lgs.queryweaver.semantic.compiler.SqlDialect;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.sql.application.SensitiveResultSanitizer;
 import cn.lgs.queryweaver.sql.application.SqlCostGuard;
 import cn.lgs.queryweaver.sql.application.SqlExecutionAdmissionControl;
@@ -82,21 +82,21 @@ public class MultiSourceSqlExecutionService {
 	}
 
 	public ResultSetBO execute(Long projectId, Long projectVersionId, String executionOwner, Integer datasourceId,
-			Set<String> allowedTables, String sql, SemanticQueryPlan semanticPlan) throws Exception {
+			Set<String> allowedTables, String sql, SemanticBlueprint semanticPlan) throws Exception {
 		return execute(projectId, projectVersionId, executionOwner, executionOwner, datasourceId, allowedTables, sql,
 				List.of(), semanticPlan, null, null);
 	}
 
 	public ResultSetBO execute(Long projectId, Long projectVersionId, String principalId, String executionOwner,
 			Integer datasourceId, Set<String> allowedTables, String sql, List<Object> parameters,
-			SemanticQueryPlan semanticPlan) throws Exception {
+			SemanticBlueprint semanticPlan) throws Exception {
 		return execute(projectId, projectVersionId, principalId, executionOwner, datasourceId, allowedTables, sql, parameters,
 				semanticPlan, null, null);
 	}
 
 	public ResultSetBO execute(Long projectId, Long projectVersionId, String principalId, String executionOwner,
 			Integer datasourceId, Set<String> allowedTables, String sql, List<Object> parameters,
-			SemanticQueryPlan semanticPlan, String attemptId, String traceKey) throws Exception {
+			SemanticBlueprint semanticPlan, String attemptId, String traceKey) throws Exception {
 		long startNanos = System.nanoTime();
 		Map<String, Object> guardSummary = new LinkedHashMap<>();
 		Map<String, Object> costSummary = new LinkedHashMap<>();
@@ -177,7 +177,7 @@ public class MultiSourceSqlExecutionService {
 	}
 
 	public String readFreshnessWatermark(Long projectId, Integer datasourceId, String executionOwner,
-			SemanticQueryPlan.SourceSubPlan sourcePlan, SemanticQueryPlan.FreshnessNotice freshness) throws Exception {
+			SemanticBlueprint.SourceSubPlan sourcePlan, SemanticBlueprint.FreshnessNotice freshness) throws Exception {
 		if (freshness == null || freshness.getBusinessDateField() == null
 				|| freshness.getBusinessDateField().isBlank()) {
 			throw new IllegalStateException("Freshness policy is missing for datasource " + datasourceId);
@@ -241,7 +241,7 @@ public class MultiSourceSqlExecutionService {
 
 	private SqlCostGuard.CostAssessment runPreflight(Accessor accessor, DbConfigBO dbConfig, String sql,
 			List<Object> parameters, int tableCount, SemanticCatalogSnapshot catalog, String cancellationKey,
-			Map<String, Object> explainSummary, Map<String, Object> previewSummary, SemanticQueryPlan semanticPlan)
+			Map<String, Object> explainSummary, Map<String, Object> previewSummary, SemanticBlueprint semanticPlan)
 			throws Exception {
 		QueryWeaverProperties.SqlExecutionPolicy policy = properties.getSqlExecution();
 		explainSummary.put("explainEnabled", policy.isExplainEnabled());
@@ -296,22 +296,22 @@ public class MultiSourceSqlExecutionService {
 							Math.max(0, (System.nanoTime() - startNanos) / 1_000_000), errorType));
 		}
 		catch (RuntimeException traceError) {
-			log.warn("Unable to persist governed SQL trace for attempt {}: {}", attemptId, traceError.getMessage());
+			log.warn("Unable to persist verified SQL trace for attempt {}: {}", attemptId, traceError.getMessage());
 		}
 	}
 
-	private Set<String> semanticTimeColumns(SemanticQueryPlan semanticPlan) {
+	private Set<String> semanticTimeColumns(SemanticBlueprint semanticPlan) {
 		if (semanticPlan == null) {
 			return Set.of();
 		}
 		Set<String> columns = semanticPlan.getMetrics()
 			.stream()
-			.map(SemanticQueryPlan.MetricSelection::getTimeColumn)
+			.map(SemanticBlueprint.MetricSelection::getTimeColumn)
 			.filter(value -> value != null && !value.isBlank())
 			.collect(Collectors.toCollection(LinkedHashSet::new));
 		semanticPlan.getGrains()
 			.stream()
-			.map(SemanticQueryPlan.GrainSelection::getTimeColumn)
+			.map(SemanticBlueprint.GrainSelection::getTimeColumn)
 			.filter(value -> value != null && !value.isBlank())
 			.forEach(columns::add);
 		return Set.copyOf(columns);

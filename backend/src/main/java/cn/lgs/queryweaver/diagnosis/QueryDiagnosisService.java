@@ -163,7 +163,7 @@ public class QueryDiagnosisService {
 						"Post-Execution Review 指向受治理语义定义缺口；该信号仅作为 Evolution evidence，不会直接修改正式 Catalog。 ");
 				case "SEMANTIC_BINDING_SUSPECTED", "RESULT_SEMANTIC_MISMATCH" -> decision(
 						RootCause.PLANNER_SELECTION_ERROR, Confidence.MEDIUM,
-						"Post-Execution Review 发现执行结果与当前 Typed Plan 的语义绑定可疑；已按统一预算进入受限 replan。 ");
+						"Post-Execution Review 发现执行结果与当前 Semantic Blueprint 的语义绑定可疑；已按统一预算进入受限 replan。 ");
 				case "AMBIGUITY" -> decision(RootCause.CLARIFICATION_REQUIRED, Confidence.HIGH,
 						"Post-Execution Review 检测到真实业务歧义；需要用户确认后继续同一个 Durable Run。 ");
 				default -> decision(RootCause.RESULT_REVIEW_ERROR, Confidence.MEDIUM,
@@ -179,7 +179,7 @@ public class QueryDiagnosisService {
 					"检索产生了候选，但无法构造成可用的受治理语义模型。 ");
 		if ("PLAN_RESOLUTION_ERROR".equals(code))
 			return decision(RootCause.PLAN_RESOLUTION_ERROR, Confidence.HIGH,
-					"Planner 已完成语义绑定，但确定性的 Typed Plan 解析/校验没有通过。 ");
+					"Planner 已完成语义绑定，但 Semantic Blueprint 的确定性解析/校验没有通过。 ");
 		if (PLANNER_ERROR_CODES.contains(code) || code.startsWith("PLANNER_"))
 			return decision(RootCause.PLANNER_REJECTED, Confidence.HIGH,
 					"候选已经进入 Planner，但 Planner 输出被治理校验拒绝。不能据此进一步武断归因到 Prompt 或模型能力。 ");
@@ -215,7 +215,7 @@ public class QueryDiagnosisService {
 			result.add(stage("CANDIDATE", "候选构建", StageState.PASSED,
 					planning.planningTrace().candidateModelCount() + " 个模型候选"));
 			result.add(stage("PLANNER", "语义绑定", StageState.PASSED, "Planner 输出已通过 governed candidate 校验"));
-			result.add(stage("PLAN", "Typed Plan", StageState.PASSED, "确定性 SemanticQueryPlan 已解析并通过校验"));
+			result.add(stage("BLUEPRINT", "Semantic Blueprint", StageState.PASSED, "Semantic Blueprint 已解析并通过确定性校验"));
 		}
 		else {
 			result.add(stage("RETRIEVAL", "语义召回", "RETRIEVAL_MISS".equals(errorCode) ? StageState.FAILED

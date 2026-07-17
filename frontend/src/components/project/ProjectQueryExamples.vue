@@ -238,7 +238,7 @@
 
         <h3>Resolved Time Range</h3>
         <pre>{{ pretty(selected.resolved_time_range_json) }}</pre>
-        <h3>Semantic Query Plan</h3>
+        <h3>Semantic Blueprint</h3>
         <pre>{{ pretty(selected.typed_ir_json) }}</pre>
         <h3>Resolution</h3>
         <pre>{{ pretty(selected.resolution_json) }}</pre>

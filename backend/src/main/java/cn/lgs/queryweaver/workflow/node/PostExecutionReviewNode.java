@@ -62,7 +62,7 @@ import cn.lgs.queryweaver.review.RetrievalRepairService.RepairQuery;
 import cn.lgs.queryweaver.run.QueryRunService;
 import cn.lgs.queryweaver.run.RunNodeEffectService;
 import cn.lgs.queryweaver.semantic.application.SemanticPlanningOutcome;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.sql.application.SqlResultValidator.ValidationMode;
 import cn.lgs.queryweaver.util.ChatResponseUtil;
 import cn.lgs.queryweaver.util.FluxUtil;
@@ -121,10 +121,10 @@ public class PostExecutionReviewNode implements NodeAction {
 				|| "SEMANTIC_SQL".equalsIgnoreCase(compilerMode);
 		ValidationMode validationMode = advancedExecution ? ValidationMode.ADVANCED_EXECUTION
 				: ValidationMode.STRICT_SEMANTIC_PLAN;
-		SemanticQueryPlan plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		if (plan == null) {
-			throw new PostExecutionReviewFailedException("Typed semantic plan is unavailable for post-execution review");
+			throw new PostExecutionReviewFailedException("Semantic Blueprint is unavailable for post-execution review");
 		}
 		RepairBudget budget = StateUtil.getObjectValue(state, QUERY_REPAIR_BUDGET, RepairBudget.class,
 				RepairBudget.empty());
@@ -302,10 +302,10 @@ public class PostExecutionReviewNode implements NodeAction {
 					StateUtil.getCanonicalQuery(state), gap);
 			throw new RuntimeClarificationRequiredException(runId, clarification.clarificationId());
 		}
-		SemanticQueryPlan plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		List<String> physicalTables = plan == null ? List.of()
-				: plan.getModels().stream().map(SemanticQueryPlan.ModelSelection::getPhysicalTable).filter(Objects::nonNull)
+				: plan.getModels().stream().map(SemanticBlueprint.ModelSelection::getPhysicalTable).filter(Objects::nonNull)
 					.distinct().toList();
 		RuntimeClarification clarification = clarificationService
 			.detect(runId, projectId, projectVersionId, StateUtil.getCanonicalQuery(state), physicalTables)
@@ -343,7 +343,7 @@ public class PostExecutionReviewNode implements NodeAction {
 		return values.stream().map(Objects::toString).filter(value -> !value.isBlank()).distinct().toList();
 	}
 
-	private void recordEvidence(String runId, int step, SemanticQueryPlan plan, String executionPlan,
+	private void recordEvidence(String runId, int step, SemanticBlueprint plan, String executionPlan,
 			PostExecutionReview review, RepairBudget budget, String inputHash) {
 		if (runId == null || runId.isBlank()) {
 			return;

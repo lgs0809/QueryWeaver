@@ -38,7 +38,7 @@ import cn.lgs.queryweaver.run.ExecutionSnapshot.PromptSnapshot;
 import cn.lgs.queryweaver.run.ExecutionSnapshot.RuntimeSnapshot;
 import cn.lgs.queryweaver.run.ExecutionSnapshot.SemanticSnapshot;
 import cn.lgs.queryweaver.semantic.domain.SemanticAssetStatus;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.service.aimodelconfig.ModelConfigDataService;
 import cn.lgs.queryweaver.service.datasource.DatasourceService;
 import java.io.InputStream;
@@ -75,7 +75,7 @@ public class ExecutionSnapshotService {
 
 	private static final String SEMANTIC_RETRIEVER_IMPLEMENTATION = "cn/lgs/queryweaver/workflow/node/SchemaRecallNode.class";
 
-	private static final String SEMANTIC_PLANNER_IMPLEMENTATION = "cn/lgs/queryweaver/workflow/node/SemanticPlanNode.class";
+	private static final String SEMANTIC_PLANNER_IMPLEMENTATION = "cn/lgs/queryweaver/workflow/node/SemanticBlueprintNode.class";
 
 	private static final String PLANNER_IMPLEMENTATION = "cn/lgs/queryweaver/workflow/node/PlannerNode.class";
 
@@ -116,7 +116,7 @@ public class ExecutionSnapshotService {
 	}
 
 	public String capture(ProjectRuntimeContext context, ProjectRuntimeProfile runtimeProfile,
-			SemanticQueryPlan semanticPlan, boolean humanReviewEnabled) {
+			SemanticBlueprint semanticPlan, boolean humanReviewEnabled) {
 		Objects.requireNonNull(context, "project runtime context is required");
 		ProjectRuntimeProfile resolvedProfile = runtimeProfile == null
 				? runtimeProfileService.require(context.projectId()) : runtimeProfile;
@@ -142,7 +142,7 @@ public class ExecutionSnapshotService {
 		return write(snapshot);
 	}
 
-	public String captureForProject(Long projectId, Long projectVersionId, SemanticQueryPlan semanticPlan,
+	public String captureForProject(Long projectId, Long projectVersionId, SemanticBlueprint semanticPlan,
 			boolean humanReviewEnabled) {
 		ProjectRuntimeContext context = projectRuntimeGate.requireReadyByProject(projectId);
 		if (!Objects.equals(projectVersionId, context.projectVersionId())) {

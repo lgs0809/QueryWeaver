@@ -18,7 +18,7 @@ package cn.lgs.queryweaver.semantic.compiler;
 import cn.lgs.queryweaver.semantic.compiler.CompiledSemanticQuery.CompiledSourceQuery;
 import cn.lgs.queryweaver.semantic.domain.SemanticAssetStatus;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.JsonUtil;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -74,16 +74,16 @@ public class SemanticSqlCompiler {
 			"retention", "rolling", "weekly", "week", "quarter", "按周", "每周", "季度", "同比", "环比", "留存",
 			"复购", "窗口", "移动平均", "同期");
 
-	public CompiledSemanticQuery compile(SemanticQueryPlan plan, SemanticCatalogSnapshot catalog,
+	public CompiledSemanticQuery compile(SemanticBlueprint plan, SemanticCatalogSnapshot catalog,
 			Map<Integer, SqlDialect> dialects, Clock clock, ZoneId defaultZone) {
-		Objects.requireNonNull(plan, "semantic query plan is required");
+		Objects.requireNonNull(plan, "semantic blueprint is required");
 		Objects.requireNonNull(catalog, "semantic catalog is required");
 		if (!plan.isExecutable()) {
 			throw new IllegalArgumentException(
-					"Semantic Query Plan is not executable: " + String.join("; ", plan.getValidationErrors()));
+					"Semantic Blueprint is not executable: " + String.join("; ", plan.getValidationErrors()));
 		}
 		if (!"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())) {
-			throw new ConstrainedGenerationRequiredException("Semantic Query Plan requires constrained generation mode");
+			throw new ConstrainedGenerationRequiredException("Semantic Blueprint requires constrained generation mode");
 		}
 		assertDeterministicCapability(plan);
 		if (plan.getProjections() == null || plan.getProjections().isEmpty()) {
@@ -91,12 +91,12 @@ public class SemanticSqlCompiler {
 					"No governed projection is available for deterministic SQL");
 		}
 		CompileContext context = context(plan, catalog);
-		List<SemanticQueryPlan.SourceSubPlan> sources = sourcePlans(plan, context);
+		List<SemanticBlueprint.SourceSubPlan> sources = sourcePlans(plan, context);
 		if (sources.isEmpty()) {
-			throw new IllegalArgumentException("Semantic Query Plan has no source plan");
+			throw new IllegalArgumentException("Semantic Blueprint has no source plan");
 		}
 		List<CompiledSourceQuery> compiled = new ArrayList<>();
-		for (SemanticQueryPlan.SourceSubPlan source : sources) {
+		for (SemanticBlueprint.SourceSubPlan source : sources) {
 			SqlDialect dialect = resolveDialect(plan, source, dialects);
 			compiled.add(compileSource(plan, source, dialect, context, clock == null ? Clock.systemUTC() : clock,
 					defaultZone == null ? ZoneId.systemDefault() : defaultZone));
@@ -105,37 +105,37 @@ public class SemanticSqlCompiler {
 				COMPILER_VERSION);
 	}
 
-	public CompiledSemanticQuery compile(SemanticQueryPlan plan, SemanticCatalogSnapshot catalog, SqlDialect dialect) {
+	public CompiledSemanticQuery compile(SemanticBlueprint plan, SemanticCatalogSnapshot catalog, SqlDialect dialect) {
 		Map<Integer, SqlDialect> dialects = plan.getSourceSubPlans()
 			.stream()
 			.filter(source -> source.getDatasourceId() != null)
-			.collect(Collectors.toMap(SemanticQueryPlan.SourceSubPlan::getDatasourceId, source -> dialect,
+			.collect(Collectors.toMap(SemanticBlueprint.SourceSubPlan::getDatasourceId, source -> dialect,
 					(left, right) -> left));
 		return compile(plan, catalog, dialects, Clock.systemUTC(), ZoneId.of("UTC"));
 	}
 
-	public CompiledSourceQuery compileForDatasource(SemanticQueryPlan plan, SemanticCatalogSnapshot catalog,
+	public CompiledSourceQuery compileForDatasource(SemanticBlueprint plan, SemanticCatalogSnapshot catalog,
 			Integer datasourceId, SqlDialect dialect, Clock clock, ZoneId defaultZone) {
 		Objects.requireNonNull(datasourceId, "datasourceId is required");
 		if (!plan.isExecutable()) {
 			throw new IllegalArgumentException(
-					"Semantic Query Plan is not executable: " + String.join("; ", plan.getValidationErrors()));
+					"Semantic Blueprint is not executable: " + String.join("; ", plan.getValidationErrors()));
 		}
 		if (!"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())) {
-			throw new ConstrainedGenerationRequiredException("Semantic Query Plan requires constrained generation mode");
+			throw new ConstrainedGenerationRequiredException("Semantic Blueprint requires constrained generation mode");
 		}
 		assertDeterministicCapability(plan);
 		CompileContext context = context(plan, catalog);
-		SemanticQueryPlan.SourceSubPlan source = sourcePlans(plan, context).stream()
+		SemanticBlueprint.SourceSubPlan source = sourcePlans(plan, context).stream()
 			.filter(candidate -> Objects.equals(candidate.getDatasourceId(), datasourceId))
 			.findFirst()
 			.orElseThrow(
-					() -> new IllegalArgumentException("Semantic Query Plan has no source plan for datasource " + datasourceId));
+					() -> new IllegalArgumentException("Semantic Blueprint has no source plan for datasource " + datasourceId));
 		return compileSource(plan, source, dialect, context, clock == null ? Clock.systemUTC() : clock,
 				defaultZone == null ? ZoneId.systemDefault() : defaultZone);
 	}
 
-	private void assertDeterministicCapability(SemanticQueryPlan plan) {
+	private void assertDeterministicCapability(SemanticBlueprint plan) {
 		String query = Objects.toString(plan.getCanonicalQuery(), "").toLowerCase(Locale.ROOT);
 		String unsupported = PLANNER_REQUIRED_QUERY_TERMS.stream().filter(query::contains).findFirst().orElse(null);
 		if (unsupported != null) {
@@ -144,7 +144,7 @@ public class SemanticSqlCompiler {
 		}
 	}
 
-	private CompiledSourceQuery compileSource(SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source,
+	private CompiledSourceQuery compileSource(SemanticBlueprint plan, SemanticBlueprint.SourceSubPlan source,
 			SqlDialect dialect, CompileContext context, Clock clock, ZoneId defaultZone) {
 		Set<String> sourceModels = new LinkedHashSet<>(source.getModelCodes());
 		if (sourceModels.isEmpty()) {
@@ -165,7 +165,7 @@ public class SemanticSqlCompiler {
 					"Source plan contains no published semantic model: " + source.getDatasourceId());
 		}
 		Map<String, String> aliases = aliases(models);
-		List<SemanticQueryPlan.ProjectionSelection> projections = plan.getProjections()
+		List<SemanticBlueprint.ProjectionSelection> projections = plan.getProjections()
 			.stream()
 			.filter(projection -> sourceModels.contains(projection.getModelCode()))
 			.toList();
@@ -173,7 +173,7 @@ public class SemanticSqlCompiler {
 			throw new ConstrainedGenerationRequiredException(
 					"Source " + source.getDatasourceId() + " has no governed deterministic projection");
 		}
-		List<SemanticQueryPlan.MetricSelection> sourceMetrics = plan.getMetrics()
+		List<SemanticBlueprint.MetricSelection> sourceMetrics = plan.getMetrics()
 			.stream()
 			.filter(metric -> sourceModels.contains(metric.getModelCode()))
 			.toList();
@@ -195,7 +195,7 @@ public class SemanticSqlCompiler {
 		appendJoins(fromAndJoins, models, joined, sourceModels, dialect, aliases, context, plan.getRelationships());
 
 		List<String> conditions = new ArrayList<>();
-		for (SemanticQueryPlan.FilterSelection filter : plan.getFilters()) {
+		for (SemanticBlueprint.FilterSelection filter : plan.getFilters()) {
 			if (sourceModels.contains(filter.getModelCode())) {
 				conditions.add(compileFilter(filter, dialect, aliases, context, parameters));
 			}
@@ -205,7 +205,7 @@ public class SemanticSqlCompiler {
 					compileTimeRange(plan.getTimeRange(), dialect, aliases, context, parameters, clock, defaultZone));
 		}
 		Set<String> appliedMetricFilters = new LinkedHashSet<>();
-		for (SemanticQueryPlan.MetricSelection metric : sourceMetrics) {
+		for (SemanticBlueprint.MetricSelection metric : sourceMetrics) {
 			String filterKey = metric.getModelCode() + "\n" + metric.getFilterExpression();
 			if (!conditionalMetricFilters && StringUtils.hasText(metric.getFilterExpression())
 					&& appliedMetricFilters.add(filterKey)) {
@@ -226,7 +226,7 @@ public class SemanticSqlCompiler {
 			}
 		}
 		List<String> projectionAliases = projections.stream()
-			.map(SemanticQueryPlan.ProjectionSelection::getAlias)
+			.map(SemanticBlueprint.ProjectionSelection::getAlias)
 			.filter(StringUtils::hasText)
 			.toList();
 		List<String> orderBy = plan.getOrderBy()
@@ -248,8 +248,8 @@ public class SemanticSqlCompiler {
 				resultShapeHash);
 	}
 
-	private String compileProjection(SemanticQueryPlan.ProjectionSelection projection, SqlDialect dialect,
-			Map<String, String> aliases, CompileContext context, List<SemanticQueryPlan.MetricSelection> sourceMetrics,
+	private String compileProjection(SemanticBlueprint.ProjectionSelection projection, SqlDialect dialect,
+			Map<String, String> aliases, CompileContext context, List<SemanticBlueprint.MetricSelection> sourceMetrics,
 			boolean conditionalMetricFilters, List<Object> parameters) {
 		if (!aliases.containsKey(projection.getModelCode())) {
 			throw new IllegalArgumentException(
@@ -270,7 +270,7 @@ public class SemanticSqlCompiler {
 				: renderExpression(firstText(projection.getExpression(), projection.getColumnName()),
 					projection.getModelCode(), dialect, aliases, context, aggregation, !aggregation);
 		if (aggregation && conditionalMetricFilters) {
-			SemanticQueryPlan.MetricSelection metric = sourceMetrics.stream()
+			SemanticBlueprint.MetricSelection metric = sourceMetrics.stream()
 				.filter(candidate -> Objects.equals(candidate.getModelCode(), projection.getModelCode()))
 				.filter(candidate -> Objects.equals(candidate.getMetricCode(), projection.getAlias()))
 				.findFirst()
@@ -285,7 +285,7 @@ public class SemanticSqlCompiler {
 		return expression + " AS " + dialect.quote(alias);
 	}
 
-	private String compileGroup(SemanticQueryPlan.GroupSelection group, SqlDialect dialect, Map<String, String> aliases,
+	private String compileGroup(SemanticBlueprint.GroupSelection group, SqlDialect dialect, Map<String, String> aliases,
 			CompileContext context) {
 		if (StringUtils.hasText(group.getTimeBucketGranularity())) {
 			return compileTimeBucket(group.getModelCode(), group.getColumnName(), group.getTimeBucketGranularity(), dialect,
@@ -295,7 +295,7 @@ public class SemanticSqlCompiler {
 				aliases, context, false, true);
 	}
 
-	private InternalMergeKey internalMergeKey(SemanticQueryPlan plan, Set<String> sourceModels, CompileContext context) {
+	private InternalMergeKey internalMergeKey(SemanticBlueprint plan, Set<String> sourceModels, CompileContext context) {
 		if (plan.getMergePlan() == null || plan.getSourceSubPlans() == null || plan.getSourceSubPlans().size() < 2) {
 			return null;
 		}
@@ -343,7 +343,7 @@ public class SemanticSqlCompiler {
 		return dialect.timeBucket(alias + "." + dialect.quote(columnName), granularity);
 	}
 
-	private boolean requiresConditionalMetricFilters(List<SemanticQueryPlan.MetricSelection> metrics) {
+	private boolean requiresConditionalMetricFilters(List<SemanticBlueprint.MetricSelection> metrics) {
 		return metrics.stream()
 			.map(metric -> Objects.toString(metric.getFilterExpression(), "").trim())
 			.distinct()
@@ -369,13 +369,13 @@ public class SemanticSqlCompiler {
 
 	private void appendJoins(StringBuilder sql, List<SemanticCatalogSnapshot.Model> models, Set<String> joined,
 			Set<String> sourceModels, SqlDialect dialect, Map<String, String> aliases, CompileContext context,
-			List<SemanticQueryPlan.RelationshipSelection> relationships) {
-		List<SemanticQueryPlan.RelationshipSelection> pending = new ArrayList<>(relationships.stream()
+			List<SemanticBlueprint.RelationshipSelection> relationships) {
+		List<SemanticBlueprint.RelationshipSelection> pending = new ArrayList<>(relationships.stream()
 			.filter(relationship -> sourceModels.contains(relationship.getSourceModelCode())
 					&& sourceModels.contains(relationship.getTargetModelCode()))
 			.toList());
 		while (joined.size() < models.size()) {
-			SemanticQueryPlan.RelationshipSelection selected = pending.stream()
+			SemanticBlueprint.RelationshipSelection selected = pending.stream()
 				.filter(relationship -> joined.contains(relationship.getSourceModelCode())
 						^ joined.contains(relationship.getTargetModelCode()))
 				.findFirst()
@@ -398,7 +398,7 @@ public class SemanticSqlCompiler {
 		}
 	}
 
-	private String compileFilter(SemanticQueryPlan.FilterSelection filter, SqlDialect dialect,
+	private String compileFilter(SemanticBlueprint.FilterSelection filter, SqlDialect dialect,
 			Map<String, String> aliases, CompileContext context, List<Object> parameters) {
 		SemanticCatalogSnapshot.Column column = requireColumn(context, filter.getModelCode(), filter.getColumnName());
 		if (!Boolean.TRUE.equals(column.getAllowFilter())) {
@@ -420,11 +420,11 @@ public class SemanticSqlCompiler {
 			case "IS_NOT_NULL" -> left + " IS NOT NULL";
 			case "IN", "NOT_IN" -> compileIn(left, operator, filter.getValue(), parameters);
 			case "BETWEEN" -> compileBetween(left, filter.getValue(), parameters);
-			default -> throw new IllegalArgumentException("Unsupported Semantic Query Plan filter operator: " + operator);
+			default -> throw new IllegalArgumentException("Unsupported Semantic Blueprint filter operator: " + operator);
 		};
 	}
 
-	private List<String> compileTimeRange(SemanticQueryPlan.TimeRangeSelection range, SqlDialect dialect,
+	private List<String> compileTimeRange(SemanticBlueprint.TimeRangeSelection range, SqlDialect dialect,
 			Map<String, String> aliases, CompileContext context, List<Object> parameters, Clock clock,
 			ZoneId defaultZone) {
 		SemanticCatalogSnapshot.Column column = requireColumn(context, range.getModelCode(), range.getTimeColumn());
@@ -490,7 +490,7 @@ public class SemanticSqlCompiler {
 		return new TimeBounds(start.atStartOfDay(), end.atStartOfDay());
 	}
 
-	private String compileOrder(SemanticQueryPlan.OrderSelection order, SqlDialect dialect,
+	private String compileOrder(SemanticBlueprint.OrderSelection order, SqlDialect dialect,
 			Collection<String> projectionAliases) {
 		if (!projectionAliases.contains(order.getExpression())) {
 			throw new IllegalArgumentException(
@@ -718,7 +718,7 @@ public class SemanticSqlCompiler {
 		return column;
 	}
 
-	private CompileContext context(SemanticQueryPlan plan, SemanticCatalogSnapshot catalog) {
+	private CompileContext context(SemanticBlueprint plan, SemanticCatalogSnapshot catalog) {
 		Map<String, SemanticCatalogSnapshot.Model> models = catalog.getModels()
 			.stream()
 			.filter(model -> model.getStatus() == SemanticAssetStatus.ENABLED)
@@ -738,26 +738,26 @@ public class SemanticSqlCompiler {
 			.filter(dimension -> StringUtils.hasText(dimension.getDimensionCode()))
 			.collect(Collectors.toMap(SemanticCatalogSnapshot.Dimension::getDimensionCode, Function.identity(),
 					(left, right) -> left));
-		for (SemanticQueryPlan.ModelSelection model : plan.getModels()) {
+		for (SemanticBlueprint.ModelSelection model : plan.getModels()) {
 			if (!models.containsKey(model.getModelCode())) {
 				throw new IllegalArgumentException(
-						"Semantic Query Plan references a non-published model: " + model.getModelCode());
+						"Semantic Blueprint references a non-published model: " + model.getModelCode());
 			}
 		}
 		return new CompileContext(Map.copyOf(models), Map.copyOf(modelByTable), Map.copyOf(columns), Map.copyOf(dimensions));
 	}
 
-	private List<SemanticQueryPlan.SourceSubPlan> sourcePlans(SemanticQueryPlan plan, CompileContext context) {
+	private List<SemanticBlueprint.SourceSubPlan> sourcePlans(SemanticBlueprint plan, CompileContext context) {
 		if (plan.getSourceSubPlans() != null && !plan.getSourceSubPlans().isEmpty()) {
 			return plan.getSourceSubPlans();
 		}
 		Map<Integer, List<String>> byDatasource = plan.getModels()
 			.stream()
-			.collect(Collectors.groupingBy(SemanticQueryPlan.ModelSelection::getDatasourceId, LinkedHashMap::new,
-					Collectors.mapping(SemanticQueryPlan.ModelSelection::getModelCode, Collectors.toList())));
+			.collect(Collectors.groupingBy(SemanticBlueprint.ModelSelection::getDatasourceId, LinkedHashMap::new,
+					Collectors.mapping(SemanticBlueprint.ModelSelection::getModelCode, Collectors.toList())));
 		return byDatasource.entrySet()
 			.stream()
-			.map(entry -> SemanticQueryPlan.SourceSubPlan.builder()
+			.map(entry -> SemanticBlueprint.SourceSubPlan.builder()
 				.datasourceId(entry.getKey())
 				.modelCodes(entry.getValue())
 				.physicalTables(entry.getValue()
@@ -770,7 +770,7 @@ public class SemanticSqlCompiler {
 			.toList();
 	}
 
-	private SqlDialect resolveDialect(SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source,
+	private SqlDialect resolveDialect(SemanticBlueprint plan, SemanticBlueprint.SourceSubPlan source,
 			Map<Integer, SqlDialect> dialects) {
 		if (dialects != null && source.getDatasourceId() != null && dialects.containsKey(source.getDatasourceId())) {
 			return dialects.get(source.getDatasourceId());

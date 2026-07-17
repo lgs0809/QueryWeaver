@@ -28,13 +28,13 @@ import cn.lgs.queryweaver.review.QueryRepairPolicy;
 import cn.lgs.queryweaver.review.QueryRepairPolicy.BudgetDecision;
 import cn.lgs.queryweaver.review.QueryRepairPolicy.RepairBudget;
 import cn.lgs.queryweaver.run.QueryRunService;
-import cn.lgs.queryweaver.semantic.compiler.SemanticSqlDryPlanException;
-import cn.lgs.queryweaver.semantic.compiler.SemanticSqlDryPlanner;
-import cn.lgs.queryweaver.semantic.compiler.SemanticSqlDryPlanner.DryPlanResult;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.compiler.QueryPreflightException;
+import cn.lgs.queryweaver.semantic.compiler.QueryPreflightService;
+import cn.lgs.queryweaver.semantic.compiler.QueryPreflightService.PreflightResult;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.service.nl2sql.Nl2SqlService;
-import cn.lgs.queryweaver.sql.application.TypedPlanSqlConstraintValidator;
-import cn.lgs.queryweaver.sql.application.TypedPlanSqlConstraintValidator.ValidationResult;
+import cn.lgs.queryweaver.sql.application.BlueprintSqlConstraintValidator;
+import cn.lgs.queryweaver.sql.application.BlueprintSqlConstraintValidator.ValidationResult;
 import cn.lgs.queryweaver.util.ChatResponseUtil;
 import cn.lgs.queryweaver.util.FluxUtil;
 import cn.lgs.queryweaver.util.JsonUtil;
@@ -54,7 +54,7 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 /**
- * Semantic consistency validation node. LLM-generated Semantic SQL is dry-planned here before any
+ * Semantic consistency validation node. LLM-generated Semantic SQL passes Query Preflight here before any
  * database call so model/field mistakes are repaired locally and only physical SQL can reach the
  * execution node.
  */
@@ -65,11 +65,11 @@ public class SemanticConsistencyNode implements NodeAction {
 
 	private final Nl2SqlService nl2SqlService;
 
-	private final TypedPlanSqlConstraintValidator constraintValidator;
+	private final BlueprintSqlConstraintValidator constraintValidator;
 
 	private final SemanticCatalogCache semanticCatalogCache;
 
-	private final SemanticSqlDryPlanner semanticSqlDryPlanner;
+	private final QueryPreflightService queryPreflightService;
 
 	private final QueryRepairPolicy repairPolicy;
 
@@ -83,42 +83,42 @@ public class SemanticConsistencyNode implements NodeAction {
 		String semanticSql = StateUtil.getStringValue(state, SQL_GENERATE_OUTPUT);
 		String userQuery = StateUtil.getCanonicalQuery(state);
 		String semanticModel = StateUtil.getStringValue(state, GENEGRATED_SEMANTIC_MODEL_PROMPT, "");
-		SemanticQueryPlan semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		List<Object> compiledParameters = StateUtil.getObjectValue(state, SQL_COMPILED_PARAMETERS, List.class,
 				List.of());
 		String compilerMode = StateUtil.getStringValue(state, SQL_COMPILER_MODE, "CONSTRAINED_GENERATION");
 
 		String physicalSql = semanticSql;
-		Map<String, Object> dryPlanSummary = Map.of("status", "NOT_REQUIRED", "compilerMode", compilerMode);
-		String dryPlanFailure = null;
+		Map<String, Object> preflightSummary = Map.of("status", "NOT_REQUIRED", "compilerMode", compilerMode);
+		String preflightFailure = null;
 		if ("SEMANTIC_SQL".equalsIgnoreCase(compilerMode)) {
 			try {
 				Long projectId = StateUtil.getObjectValue(state, PROJECT_ID, Long.class);
 				Long projectVersionId = StateUtil.getObjectValue(state, PROJECT_VERSION_ID, Long.class);
 				Integer datasourceId = StateUtil.getObjectValue(state, DATASOURCE_ID, Integer.class);
-				DryPlanResult dryPlan = semanticSqlDryPlanner.plan(semanticSql,
+				PreflightResult preflight = queryPreflightService.preflight(semanticSql,
 						semanticCatalogCache.get(projectId, projectVersionId), semanticPlan, datasourceId, dialect);
-				physicalSql = dryPlan.physicalSql();
+				physicalSql = preflight.physicalSql();
 				Map<String, Object> summary = new LinkedHashMap<>();
 				summary.put("status", "PASS");
-				summary.put("semanticModels", dryPlan.semanticModelCodes());
-				summary.put("physicalTables", dryPlan.physicalTables());
-				summary.put("legacyPhysicalPassthrough", dryPlan.legacyPhysicalPassthrough());
-				summary.put("warnings", dryPlan.warnings());
-				dryPlanSummary = Map.copyOf(summary);
-				log.info("Semantic SQL dry-plan passed, models={}, physicalTables={}, passthrough={}",
-						dryPlan.semanticModelCodes(), dryPlan.physicalTables(), dryPlan.legacyPhysicalPassthrough());
+				summary.put("semanticModels", preflight.semanticModelCodes());
+				summary.put("physicalTables", preflight.physicalTables());
+				summary.put("legacyPhysicalPassthrough", preflight.legacyPhysicalPassthrough());
+				summary.put("warnings", preflight.warnings());
+				preflightSummary = Map.copyOf(summary);
+				log.info("Query Preflight passed, models={}, physicalTables={}, passthrough={}",
+						preflight.semanticModelCodes(), preflight.physicalTables(), preflight.legacyPhysicalPassthrough());
 			}
-			catch (SemanticSqlDryPlanException ex) {
-				dryPlanFailure = "不通过。Semantic SQL dry-plan失败 [" + ex.code() + "]: " + ex.getMessage();
-				dryPlanSummary = Map.of("status", "FAIL", "code", ex.code(), "message", ex.getMessage());
+			catch (QueryPreflightException ex) {
+				preflightFailure = "不通过。Query Preflight失败 [" + ex.code() + "]: " + ex.getMessage();
+				preflightSummary = Map.of("status", "FAIL", "code", ex.code(), "message", ex.getMessage());
 				physicalSql = "";
-				log.warn("Semantic SQL dry-plan rejected: {} - {}", ex.code(), ex.getMessage());
+				log.warn("Query Preflight rejected: {} - {}", ex.code(), ex.getMessage());
 			}
 		}
 
-		persistDryPlanEvidence(state, compilerMode, semanticSql, physicalSql, dryPlanSummary);
+		persistPreflightEvidence(state, compilerMode, semanticSql, physicalSql, preflightSummary);
 
 		boolean advancedExecution = state.value(ADVANCED_EXECUTION_FALLBACK, false)
 				|| "SEMANTIC_SQL".equalsIgnoreCase(compilerMode);
@@ -136,8 +136,8 @@ public class SemanticConsistencyNode implements NodeAction {
 		log.info("Starting semantic consistency validation - Semantic SQL: {}", semanticSql);
 
 		Flux<ChatResponse> validationResultFlux;
-		if (dryPlanFailure != null) {
-			validationResultFlux = Flux.just(ChatResponseUtil.createPureResponse(dryPlanFailure));
+		if (preflightFailure != null) {
+			validationResultFlux = Flux.just(ChatResponseUtil.createPureResponse(preflightFailure));
 		}
 		else {
 			ValidationResult deterministicResult = constraintValidator.validate(physicalSql, compiledParameters, semanticPlan);
@@ -164,12 +164,12 @@ public class SemanticConsistencyNode implements NodeAction {
 		}
 
 		String resolvedPhysicalSql = physicalSql;
-		Map<String, Object> resolvedDryPlanSummary = dryPlanSummary;
+		Map<String, Object> resolvedPreflightSummary = preflightSummary;
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, "开始语义一致性校验", "语义一致性校验完成", validationResult -> {
 					boolean isPassed = !validationResult.startsWith("不通过");
 					Map<String, Object> result = buildValidationResult(state, isPassed, validationResult, resolvedPhysicalSql,
-							resolvedDryPlanSummary);
+							resolvedPreflightSummary);
 					log.info("[{}] Semantic consistency validation result: {}, passed: {}",
 							this.getClass().getSimpleName(), validationResult, isPassed);
 					return result;
@@ -196,8 +196,8 @@ public class SemanticConsistencyNode implements NodeAction {
 		return List.copyOf(errors);
 	}
 
-	private void persistDryPlanEvidence(OverAllState state, String compilerMode, String semanticSql, String physicalSql,
-			Map<String, Object> dryPlanSummary) {
+	private void persistPreflightEvidence(OverAllState state, String compilerMode, String semanticSql, String physicalSql,
+			Map<String, Object> preflightSummary) {
 		if (!"SEMANTIC_SQL".equalsIgnoreCase(compilerMode)) {
 			return;
 		}
@@ -210,25 +210,25 @@ public class SemanticConsistencyNode implements NodeAction {
 			payload.put("compilerMode", compilerMode);
 			payload.put("semanticSql", Objects.toString(semanticSql, ""));
 			payload.put("physicalSql", Objects.toString(physicalSql, ""));
-			payload.put("dryPlan", dryPlanSummary == null ? Map.of() : dryPlanSummary);
+			payload.put("dryPlan", preflightSummary == null ? Map.of() : preflightSummary);
 			String payloadJson = JsonUtil.getObjectMapper().writeValueAsString(payload);
-			String evidenceKey = Integer.toUnsignedString(Objects.hash(semanticSql, physicalSql, dryPlanSummary), 16);
+			String evidenceKey = Integer.toUnsignedString(Objects.hash(semanticSql, physicalSql, preflightSummary), 16);
 			runService.appendEvent(runId, "SEMANTIC_SQL_DRY_PLAN", "semantic-consistency", payloadJson,
-					"Semantic SQL dry-plan evidence persisted", "semantic-sql-dry-plan:" + runId + ":" + evidenceKey);
+					"Query Preflight evidence persisted", "semantic-sql-dry-plan:" + runId + ":" + evidenceKey);
 		}
 		catch (RuntimeException ex) {
-			log.warn("Unable to persist Semantic SQL dry-plan evidence for run {}: {}", runId, ex.getMessage());
+			log.warn("Unable to persist Query Preflight evidence for run {}: {}", runId, ex.getMessage());
 		}
 		catch (Exception ex) {
-			log.warn("Unable to serialize Semantic SQL dry-plan evidence for run {}: {}", runId, ex.getMessage());
+			log.warn("Unable to serialize Query Preflight evidence for run {}: {}", runId, ex.getMessage());
 		}
 	}
 
 	private Map<String, Object> buildValidationResult(OverAllState state, boolean passed, String validationResult,
-			String physicalSql, Map<String, Object> dryPlanSummary) {
+			String physicalSql, Map<String, Object> preflightSummary) {
 		Map<String, Object> result = new LinkedHashMap<>();
 		result.put(SEMANTIC_CONSISTENCY_NODE_OUTPUT, passed);
-		result.put(SQL_DRY_PLAN_OUTPUT, dryPlanSummary == null ? Map.of() : dryPlanSummary);
+		result.put(SQL_DRY_PLAN_OUTPUT, preflightSummary == null ? Map.of() : preflightSummary);
 		result.put(SQL_PHYSICAL_OUTPUT, passed ? physicalSql : "");
 		if (passed) {
 			return result;
@@ -258,7 +258,7 @@ public class SemanticConsistencyNode implements NodeAction {
 				+ replanDecision.reason());
 	}
 
-	static String serializeSemanticPlan(SemanticQueryPlan semanticPlan, boolean advancedExecution) {
+	static String serializeSemanticPlan(SemanticBlueprint semanticPlan, boolean advancedExecution) {
 		if (semanticPlan == null) {
 			return "{}";
 		}
@@ -273,7 +273,7 @@ public class SemanticConsistencyNode implements NodeAction {
 			return JsonUtil.getObjectMapper().writeValueAsString(node);
 		}
 		catch (Exception ex) {
-			throw new IllegalStateException("Failed to serialize Semantic Query Plan", ex);
+			throw new IllegalStateException("Failed to serialize Semantic Blueprint", ex);
 		}
 	}
 

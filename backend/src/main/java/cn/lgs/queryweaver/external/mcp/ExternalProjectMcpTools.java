@@ -59,16 +59,16 @@ public class ExternalProjectMcpTools {
     }
 
     @Tool(name = "validate_query_plan",
-            description = "Validate a caller-authored governed semantic query plan against the deployed catalog. Never accepts SQL and does not call QueryWeaver's chat model.")
-    public PlanValidationResult validateQueryPlan(@ToolParam(description = "Caller-authored semantic query plan") ExternalQueryPlan plan,
+            description = "Validate a caller-authored governed semantic blueprint against the deployed catalog. Never accepts SQL and does not call QueryWeaver's chat model.")
+    public PlanValidationResult validateQueryPlan(@ToolParam(description = "Caller-authored semantic blueprint") ExternalQueryPlan plan,
             ToolContext toolContext) {
         return semanticFacade.validate(deployment(toolContext), plan);
     }
 
     @Tool(name = "execute_query_plan",
-            description = "Execute a governed semantic query plan via deterministic compiler, SQL guard and read-only datasource access. Never accepts SQL and does not call QueryWeaver's chat model.")
+            description = "Execute a governed semantic blueprint via deterministic compiler, SQL guard and read-only datasource access. Never accepts SQL and does not call QueryWeaver's chat model.")
     public QueryExecutionResult executeQueryPlan(
-            @ToolParam(description = "Caller-authored governed semantic query plan") ExternalQueryPlan plan,
+            @ToolParam(description = "Caller-authored governed semantic blueprint") ExternalQueryPlan plan,
             ToolContext toolContext) {
         return semanticFacade.execute(deployment(toolContext), plan);
     }

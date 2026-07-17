@@ -37,7 +37,7 @@ import cn.lgs.queryweaver.run.RunInProgressException;
 import cn.lgs.queryweaver.run.RunLeaseUnavailableException;
 import cn.lgs.queryweaver.run.ThreadExecutionGuardService;
 import cn.lgs.queryweaver.run.ThreadExecutionGuardService.ThreadExecutionConflictException;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.task.QueryTaskRepository;
 import cn.lgs.queryweaver.util.JsonUtil;
 import cn.lgs.queryweaver.enums.TextType;
@@ -362,7 +362,7 @@ public class GraphServiceImpl implements GraphService {
 		}
 		assertRunRequestScope(run, graphRequest);
 		if (graphRequest.isDurableRecoveryTakeover()) {
-			SemanticQueryPlan recoverablePlan = recoverableSemanticPlan(run);
+			SemanticBlueprint recoverablePlan = recoverableSemanticPlan(run);
 			if (recoverablePlan != null) {
 				graphRequest.setRecoveredSemanticPlan(recoverablePlan);
 			}
@@ -756,13 +756,13 @@ public class GraphServiceImpl implements GraphService {
 		return List.copyOf(visiblePasses);
 	}
 
-	private SemanticQueryPlan recoverableSemanticPlan(QueryRun run) {
+	private SemanticBlueprint recoverableSemanticPlan(QueryRun run) {
 		if (queryTaskRepository.enabled(run.runId())) {
 			var activeTask = queryTaskRepository.active(run.runId()).orElse(null);
 			if (activeTask == null) {
 				return null;
 			}
-			SemanticQueryPlan plan = queryTaskRepository.plan(run.runId(), activeTask.taskId());
+			SemanticBlueprint plan = queryTaskRepository.plan(run.runId(), activeTask.taskId());
 			return validRecoverablePlan(run, plan) ? plan : null;
 		}
 		RunEvent snapshot;
@@ -777,21 +777,21 @@ public class GraphServiceImpl implements GraphService {
 			return null;
 		}
 		try {
-			SemanticQueryPlan plan = JsonUtil.getObjectMapper().readValue(snapshot.payload(), SemanticQueryPlan.class);
+			SemanticBlueprint plan = JsonUtil.getObjectMapper().readValue(snapshot.payload(), SemanticBlueprint.class);
 			return validRecoverablePlan(run, plan) ? plan : null;
 		}
 		catch (Exception invalid) {
-			log.warn("Unable to reuse persisted Semantic Query Plan for durable run {}: {}", run.runId(), invalid.getMessage());
+			log.warn("Unable to reuse persisted Semantic Blueprint for durable run {}: {}", run.runId(), invalid.getMessage());
 			return null;
 		}
 	}
 
-	private boolean validRecoverablePlan(QueryRun run, SemanticQueryPlan plan) {
+	private boolean validRecoverablePlan(QueryRun run, SemanticBlueprint plan) {
 		return plan != null && plan.isExecutable() && Objects.equals(run.projectId(), plan.getProjectId())
 				&& Objects.equals(run.projectVersionId(), plan.getProjectVersionId());
 	}
 
-	private String recoverablePlannerOutput(QueryRun run, SemanticQueryPlan recoverablePlan) {
+	private String recoverablePlannerOutput(QueryRun run, SemanticBlueprint recoverablePlan) {
 		if (recoverablePlan == null) {
 			return null;
 		}
@@ -1093,7 +1093,7 @@ public class GraphServiceImpl implements GraphService {
 		boolean rejected = feedbackRequest.isRejectedPlan();
 		String recoveryQuery = rejected ? originalQuery + "\n[用户对上一版执行计划的驳回意见]\n" + feedbackContent.trim()
 				: originalQuery;
-		SemanticQueryPlan recoveredSemanticPlan = rejected ? null : requireApprovedSemanticPlan(run.runId());
+		SemanticBlueprint recoveredSemanticPlan = rejected ? null : requireApprovedSemanticPlan(run.runId());
 		return GraphRequest.builder()
 			.projectId(feedbackRequest.getProjectId())
 			.agentId(feedbackRequest.getAgentId())
@@ -1112,16 +1112,16 @@ public class GraphServiceImpl implements GraphService {
 			.build();
 	}
 
-	private SemanticQueryPlan requireApprovedSemanticPlan(String runId) {
+	private SemanticBlueprint requireApprovedSemanticPlan(String runId) {
 		RunEvent snapshot = runService.latestEvent(runId, "APPROVAL_PLAN_SNAPSHOT");
 		if (snapshot == null || !StringUtils.hasText(snapshot.payload())) {
-			throw new IllegalStateException("Approved Semantic Query Plan snapshot is unavailable for run: " + runId);
+			throw new IllegalStateException("Approved Semantic Blueprint snapshot is unavailable for run: " + runId);
 		}
 		try {
-			return JsonUtil.getObjectMapper().readValue(snapshot.payload(), SemanticQueryPlan.class);
+			return JsonUtil.getObjectMapper().readValue(snapshot.payload(), SemanticBlueprint.class);
 		}
 		catch (Exception ex) {
-			throw new IllegalStateException("Unable to deserialize approved Semantic Query Plan for run: " + runId, ex);
+			throw new IllegalStateException("Unable to deserialize approved Semantic Blueprint for run: " + runId, ex);
 		}
 	}
 
@@ -1171,7 +1171,7 @@ public class GraphServiceImpl implements GraphService {
 		}
 		boolean rejected = REPLAN_AFTER_REJECTION.equals(recoveryRequest.getRecoveryMode());
 		if (!rejected && recoveryRequest.getRecoveredSemanticPlan() == null) {
-			throw new IllegalStateException("Approved-plan recovery requires the exact persisted Semantic Query Plan");
+			throw new IllegalStateException("Approved-plan recovery requires the exact persisted Semantic Blueprint");
 		}
 		productionService.completeAttempt(run.episodeId(), run.attemptId(), rejected ? "REJECTED" : "FAILED",
 				"GRAPH_CHECKPOINT_UNAVAILABLE");

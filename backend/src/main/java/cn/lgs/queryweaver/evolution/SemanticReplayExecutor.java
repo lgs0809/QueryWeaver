@@ -23,7 +23,7 @@ import cn.lgs.queryweaver.multisource.MultiSourceMergeEngine;
 import cn.lgs.queryweaver.multisource.MultiSourcePolicySnapshot.MergePolicy;
 import cn.lgs.queryweaver.semantic.compiler.CompiledSemanticQuery.CompiledSourceQuery;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.sql.application.SensitiveResultSanitizer;
 import cn.lgs.queryweaver.sql.application.SqlCostGuard;
 import cn.lgs.queryweaver.sql.application.SqlExecutionAdmissionControl;
@@ -69,17 +69,17 @@ public class SemanticReplayExecutor {
 
 	private final QueryWeaverProperties properties;
 
-	public List<Map<String, Object>> execute(Long projectId, SemanticCatalogSnapshot catalog, SemanticQueryPlan plan,
+	public List<Map<String, Object>> execute(Long projectId, SemanticCatalogSnapshot catalog, SemanticBlueprint plan,
 			List<CompiledSourceQuery> sources) {
 		return execute(projectId, catalog, plan, sources, "semantic-replay:" + java.util.UUID.randomUUID());
 	}
 
-	public List<Map<String, Object>> execute(Long projectId, SemanticCatalogSnapshot catalog, SemanticQueryPlan plan,
+	public List<Map<String, Object>> execute(Long projectId, SemanticCatalogSnapshot catalog, SemanticBlueprint plan,
 			List<CompiledSourceQuery> sources, String cancellationKey) {
 		return executeDetailed(projectId, catalog, plan, sources, cancellationKey).proof();
 	}
 
-	public ReplayExecution executeDetailed(Long projectId, SemanticCatalogSnapshot catalog, SemanticQueryPlan plan,
+	public ReplayExecution executeDetailed(Long projectId, SemanticCatalogSnapshot catalog, SemanticBlueprint plan,
 			List<CompiledSourceQuery> sources, String cancellationKey) {
 		long started = System.nanoTime();
 		List<Map<String, Object>> proof = new ArrayList<>();
@@ -197,16 +197,16 @@ public class SemanticReplayExecutor {
 		}
 	}
 
-	private Set<String> semanticTimeColumns(SemanticQueryPlan plan) {
+	private Set<String> semanticTimeColumns(SemanticBlueprint plan) {
 		java.util.LinkedHashSet<String> columns = new java.util.LinkedHashSet<>();
 		plan.getMetrics()
 			.stream()
-			.map(SemanticQueryPlan.MetricSelection::getTimeColumn)
+			.map(SemanticBlueprint.MetricSelection::getTimeColumn)
 			.filter(value -> value != null && !value.isBlank())
 			.forEach(columns::add);
 		plan.getGrains()
 			.stream()
-			.map(SemanticQueryPlan.GrainSelection::getTimeColumn)
+			.map(SemanticBlueprint.GrainSelection::getTimeColumn)
 			.filter(value -> value != null && !value.isBlank())
 			.forEach(columns::add);
 		return Set.copyOf(columns);
@@ -226,16 +226,16 @@ public class SemanticReplayExecutor {
 			.build();
 	}
 
-	private boolean allowsPartial(SemanticQueryPlan plan) {
+	private boolean allowsPartial(SemanticBlueprint plan) {
 		return plan.getMergePlan() != null
 				&& "ALLOW_PARTIAL".equalsIgnoreCase(plan.getMergePlan().getPartialFailurePolicy());
 	}
 
-	private MergePolicy mergePolicy(SemanticQueryPlan plan) {
+	private MergePolicy mergePolicy(SemanticBlueprint plan) {
 		if (plan.getMergePlan() == null) {
 			throw new IllegalStateException("Multi-source Replay requires a Merge Plan");
 		}
-		SemanticQueryPlan.MergePlan value = plan.getMergePlan();
+		SemanticBlueprint.MergePlan value = plan.getMergePlan();
 		return MergePolicy.builder()
 			.policyCode(value.getPolicyCode())
 			.mergeType(value.getMergeType())
@@ -252,16 +252,16 @@ public class SemanticReplayExecutor {
 			.build();
 	}
 
-	private Integer authorityRank(SemanticQueryPlan plan, Integer datasourceId) {
+	private Integer authorityRank(SemanticBlueprint plan, Integer datasourceId) {
 		return plan.getSourceSubPlans()
 			.stream()
 			.filter(value -> Objects.equals(value.getDatasourceId(), datasourceId))
-			.map(SemanticQueryPlan.SourceSubPlan::getAuthorityRank)
+			.map(SemanticBlueprint.SourceSubPlan::getAuthorityRank)
 			.findFirst()
 			.orElse(null);
 	}
 
-	private Map<String, Object> freshness(SemanticQueryPlan plan, Integer datasourceId) {
+	private Map<String, Object> freshness(SemanticBlueprint plan, Integer datasourceId) {
 		return plan.getFreshnessNotices()
 			.stream()
 			.filter(value -> Objects.equals(value.getDatasourceId(), datasourceId))

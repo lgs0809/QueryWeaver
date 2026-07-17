@@ -18,7 +18,7 @@ package cn.lgs.queryweaver.task;
 import cn.lgs.queryweaver.learning.QueryCaseHints;
 import cn.lgs.queryweaver.learning.QueryCaseHints.TimeBindingHint;
 import cn.lgs.queryweaver.review.PostExecutionReview;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -86,7 +86,7 @@ public final class RequestExecutionContext {
 		Set<String> rules = new LinkedHashSet<>();
 		TimeBindingHint time = null;
 		for (TaskExecutionResult completed : completedTasks) {
-			SemanticQueryPlan plan = completed.plan();
+			SemanticBlueprint plan = completed.plan();
 			if (plan == null) {
 				continue;
 			}
@@ -137,7 +137,7 @@ public final class RequestExecutionContext {
 	public record AcceptedEvidence(String taskId, String evidenceType, String summary) {
 	}
 
-	public record TaskExecutionResult(String taskId, SemanticQueryPlan plan, Object resultSummary,
+	public record TaskExecutionResult(String taskId, SemanticBlueprint plan, Object resultSummary,
 			PostExecutionReview review, List<AcceptedEvidence> evidence) {
 		public TaskExecutionResult {
 			evidence = List.copyOf(evidence == null ? List.of() : evidence);

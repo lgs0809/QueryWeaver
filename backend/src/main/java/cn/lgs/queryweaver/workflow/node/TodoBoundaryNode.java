@@ -42,7 +42,7 @@ import static cn.lgs.queryweaver.constant.Constant.TYPED_SEMANTIC_PLAN;
 import cn.lgs.queryweaver.review.PostExecutionReview;
 import cn.lgs.queryweaver.review.QueryRepairPolicy.RepairBudget;
 import cn.lgs.queryweaver.run.QueryRunService;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.task.QueryTask;
 import cn.lgs.queryweaver.task.QueryTaskRepository;
 import cn.lgs.queryweaver.task.QueryTaskRepository.AcceptedFactSource;
@@ -84,18 +84,18 @@ public class TodoBoundaryNode implements NodeAction {
 		String runId = StateUtil.getStringValue(state, RUN_ID, "");
 		QueryTask active = taskRepository.active(runId)
 			.orElseThrow(() -> new IllegalStateException("Todo mode has no ACTIVE task for run " + runId));
-		SemanticQueryPlan plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		PostExecutionReview review = StateUtil.getObjectValue(state, POST_EXECUTION_REVIEW_OUTPUT, PostExecutionReview.class,
 				(PostExecutionReview) null);
 		if (review == null || review.decision() != PostExecutionReview.Decision.PASS) {
 			throw new IllegalStateException("Todo may advance only after Post-Execution Review PASS");
 		}
 		if (plan == null) {
-			throw new IllegalStateException("Todo completion requires its Semantic Query Plan");
+			throw new IllegalStateException("Todo completion requires its Semantic Blueprint");
 		}
 
-		// Saving here is idempotent with the SemanticPlanNode persistence and guarantees synthesis has the final plan.
+		// Saving here is idempotent with the SemanticBlueprintNode persistence and guarantees synthesis has the final plan.
 		taskRepository.savePlan(runId, active.taskId(), plan);
 		Map<String, Object> accepted = new HashMap<>();
 		accepted.put("report", "");
@@ -147,7 +147,7 @@ public class TodoBoundaryNode implements NodeAction {
 		return update;
 	}
 
-	private void persistAcceptedPlanFacts(String runId, String taskId, SemanticQueryPlan plan) {
+	private void persistAcceptedPlanFacts(String runId, String taskId, SemanticBlueprint plan) {
 		plan.getMetrics().forEach(metric -> taskRepository.addAcceptedFact(runId, taskId, "METRIC", metric.getMetricCode(),
 				metric, AcceptedFactSource.REVIEW_PASS));
 		plan.getDimensions().forEach(dimension -> taskRepository.addAcceptedFact(runId, taskId, "DIMENSION",

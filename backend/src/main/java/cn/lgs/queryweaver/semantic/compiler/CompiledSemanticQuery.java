@@ -15,11 +15,11 @@
  */
 package cn.lgs.queryweaver.semantic.compiler;
 
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import java.util.List;
 
-public record CompiledSemanticQuery(List<CompiledSourceQuery> sources, SemanticQueryPlan.MergePlan mergePlan,
-		SemanticQueryPlan.ExpectedResultShape expectedResult, String compilerVersion) {
+public record CompiledSemanticQuery(List<CompiledSourceQuery> sources, SemanticBlueprint.MergePlan mergePlan,
+		SemanticBlueprint.ExpectedResultShape expectedResult, String compilerVersion) {
 
 	public record CompiledSourceQuery(Integer datasourceId, SqlDialect dialect, String sql, List<Object> parameters,
 			List<String> physicalTables, String resultShapeHash) {

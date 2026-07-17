@@ -22,7 +22,7 @@ import cn.lgs.queryweaver.review.PostExecutionReview.Decision;
 import cn.lgs.queryweaver.review.PostExecutionReview.IssueType;
 import cn.lgs.queryweaver.review.PostExecutionReview.ModelEvidence;
 import cn.lgs.queryweaver.semantic.application.SemanticDocumentExtractionClient;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
@@ -43,12 +43,12 @@ public class SemanticResultReviewer {
 	private static final String SYSTEM_PROMPT = """
 			You are QueryWeaver's governed post-execution semantic reviewer.
 			You validate whether the executed result is semantically compatible with the user's question and the supplied
-			governed Semantic Query Plan. The Semantic Catalog facts embedded in the plan are authoritative.
+			governed Semantic Blueprint. The Semantic Catalog facts embedded in the plan are authoritative.
 
 			STRICT RULES:
 			1. Never generate, rewrite or suggest SQL. Never propose a Semantic Catalog, alias or prompt change.
 			2. Never introduce a metric, dimension, rule, relationship, grain, filter, enum value or definition that is not
-			   already present in the supplied Semantic Query Plan.
+			   already present in the supplied Semantic Blueprint.
 			3. Treat deterministicErrors as authoritative: if they are non-empty you MUST NOT return PASS.
 			4. RETRY_SQL means the governed semantic binding and current execution strategy still appear correct, but the
 			   current SQL implementation is repairable in-place.
@@ -75,7 +75,7 @@ public class SemanticResultReviewer {
 			   The semanticPlan payload intentionally omits planner-owned orderBy/limit/expectedResult. Do not reconstruct or enforce
 			   those omitted fields from historical expectations; validate governed metrics/dimensions/relationships/rules instead.
 			   Planner-owned derived output columns such as LAG/LEAD values, period deltas, ranks, bucket aliases or comparison columns
-			   are allowed even when they are not direct Semantic Query Plan projections. If deterministicErrors is empty and those
+			   are allowed even when they are not direct Semantic Blueprint projections. If deterministicErrors is empty and those
 			   derived columns implement an explicit executionPlan/user requirement using governed inputs, do NOT reject them as extra
 			   semantic structure or RESULT_SHAPE_MISMATCH.
 			13. Result transport may serialize a SQL NULL cell as an empty string. Do not reject a result solely because an empty
@@ -95,17 +95,17 @@ public class SemanticResultReviewer {
 
 	private final PostExecutionReviewProperties properties;
 
-	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			List<String> deterministicErrors, List<String> deterministicWarnings) {
 		return review(question, plan, sql, resultSet, "", deterministicErrors, deterministicWarnings, false);
 	}
 
-	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			String executionPlan, List<String> deterministicErrors, List<String> deterministicWarnings) {
 		return review(question, plan, sql, resultSet, executionPlan, deterministicErrors, deterministicWarnings, false);
 	}
 
-	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			String executionPlan, List<String> deterministicErrors, List<String> deterministicWarnings,
 			boolean advancedExecution) {
 		Set<String> allowedAssetKeys = allowedAssetKeys(plan);
@@ -133,7 +133,7 @@ public class SemanticResultReviewer {
 				deterministicWarnings, true, modelEvidence);
 	}
 
-	private String prompt(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet, String executionPlan,
+	private String prompt(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet, String executionPlan,
 			List<String> deterministicErrors, List<String> deterministicWarnings, Set<String> allowedAssetKeys,
 			boolean advancedExecution) {
 		Map<String, Object> payload = new LinkedHashMap<>();
@@ -154,7 +154,7 @@ public class SemanticResultReviewer {
 		}
 	}
 
-	static Object reviewerPlan(SemanticQueryPlan plan, boolean advancedExecution) {
+	static Object reviewerPlan(SemanticBlueprint plan, boolean advancedExecution) {
 		if (plan == null || !advancedExecution) {
 			return plan;
 		}
@@ -190,7 +190,7 @@ public class SemanticResultReviewer {
 				resultSet.getData() == null ? 0 : resultSet.getData().size());
 	}
 
-	private Set<String> allowedAssetKeys(SemanticQueryPlan plan) {
+	private Set<String> allowedAssetKeys(SemanticBlueprint plan) {
 		Set<String> keys = new LinkedHashSet<>();
 		if (plan == null) {
 			return keys;

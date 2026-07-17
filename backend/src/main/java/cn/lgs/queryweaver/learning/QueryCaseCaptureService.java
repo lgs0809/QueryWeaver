@@ -22,7 +22,7 @@ import cn.lgs.queryweaver.semantic.application.SemanticCatalogPatchAnalyzer;
 import cn.lgs.queryweaver.semantic.domain.SemanticAssetProvenance.AssetType;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogRepository;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.service.graph.Context.ConversationContextDependencyFingerprintService;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -126,11 +126,11 @@ public class QueryCaseCaptureService {
 		Integer datasourceId = source.get("datasource_id") == null ? null
 				: ((Number) source.get("datasource_id")).intValue();
 		String runId = Objects.toString(source.get("run_id"), "");
-		Optional<SemanticQueryPlan> plan = readPlan(Objects.toString(source.get("execution_snapshot"), ""), runId);
+		Optional<SemanticBlueprint> plan = readPlan(Objects.toString(source.get("execution_snapshot"), ""), runId);
 		String typedIrJson = plan.map(value -> versionedJson.write(JsonPayloadRegistry.SEMANTIC_QUERY_PLAN, value))
 			.orElse(null);
 		String intentType = plan.map(this::intentType).orElse(null);
-		String timeRangeJson = plan.map(SemanticQueryPlan::getTimeRange).map(this::json).orElse(null);
+		String timeRangeJson = plan.map(SemanticBlueprint::getTimeRange).map(this::json).orElse(null);
 		String shapeHash = plan.map(this::shapeHash).orElse(null);
 		List<Map<String, Object>> resolutions = contextFingerprintService.resolutions(runId);
 		boolean conversationIndependent = contextFingerprintService.conversationIndependent(question, resolutions);
@@ -195,7 +195,7 @@ public class QueryCaseCaptureService {
 			jdbc.update("""
 					UPDATE qw_query_example
 					SET status = 'APPROVED', reviewed_by = 'queryweaver-system',
-					    review_comment = 'Automatically reusable deterministic Semantic Query Plan',
+					    review_comment = 'Automatically reusable deterministic Semantic Blueprint',
 					    reviewed_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP
 					WHERE id = ? AND status = 'CANDIDATE'
 					""", id);
@@ -206,7 +206,7 @@ public class QueryCaseCaptureService {
 		return Optional.of(repository.get(projectId, id));
 	}
 
-	private boolean autoApprovable(Long projectVersionId, SemanticQueryPlan plan, List<Map<String, Object>> resolutions,
+	private boolean autoApprovable(Long projectVersionId, SemanticBlueprint plan, List<Map<String, Object>> resolutions,
 			Map<String, Object> source, String runId) {
 		if (plan == null || !plan.isExecutable() || !"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())
 				|| plan.getSourceSubPlans().size() != 1 || (resolutions != null && !resolutions.isEmpty())
@@ -268,13 +268,13 @@ public class QueryCaseCaptureService {
 		}
 	}
 
-	private Optional<SemanticQueryPlan> readPlan(String executionSnapshotJson, String runId) {
+	private Optional<SemanticBlueprint> readPlan(String executionSnapshotJson, String runId) {
 		if (StringUtils.hasText(executionSnapshotJson)) {
 			try {
 				JsonNode root = versionedJson.payload(executionSnapshotJson, JsonPayloadRegistry.EXECUTION_SNAPSHOT);
 				JsonNode plan = root.get("semanticPlan");
 				if (plan != null && !plan.isNull()) {
-					return Optional.of(mapper.treeToValue(plan, SemanticQueryPlan.class));
+					return Optional.of(mapper.treeToValue(plan, SemanticBlueprint.class));
 				}
 			}
 			catch (Exception ignored) {
@@ -293,14 +293,14 @@ public class QueryCaseCaptureService {
 			return Optional.empty();
 		}
 		try {
-			return Optional.of(mapper.readValue(snapshots.get(0), SemanticQueryPlan.class));
+			return Optional.of(mapper.readValue(snapshots.get(0), SemanticBlueprint.class));
 		}
 		catch (Exception invalid) {
 			return Optional.empty();
 		}
 	}
 
-	private Map<String, Object> qualityProof(Map<String, Object> source, String runId, SemanticQueryPlan plan) {
+	private Map<String, Object> qualityProof(Map<String, Object> source, String runId, SemanticBlueprint plan) {
 		Map<String, Object> proof = new LinkedHashMap<>();
 		proof.put("episodeSucceeded", true);
 		proof.put("attemptSucceeded", true);
@@ -327,7 +327,7 @@ public class QueryCaseCaptureService {
 		return Map.copyOf(proof);
 	}
 
-	private void persistAssetReferences(String queryCaseId, String catalogHash, SemanticQueryPlan plan) {
+	private void persistAssetReferences(String queryCaseId, String catalogHash, SemanticBlueprint plan) {
 		List<QueryCaseAssetReferenceRepository.ReferenceValue> references = new ArrayList<>();
 		plan.getModels().forEach(value -> references.add(reference("MODEL", value.getModelCode(), value)));
 		plan.getMetrics().forEach(value -> references.add(reference("METRIC", value.getMetricCode(), value)));
@@ -386,7 +386,7 @@ public class QueryCaseCaptureService {
 		return Map.copyOf(values);
 	}
 
-	private String intentType(SemanticQueryPlan plan) {
+	private String intentType(SemanticBlueprint plan) {
 		if (plan.getSourceSubPlans().size() > 1) {
 			return "MULTI_SOURCE_ANALYTICS";
 		}
@@ -399,22 +399,22 @@ public class QueryCaseCaptureService {
 		return "ENTITY_LOOKUP";
 	}
 
-	private String shapeHash(SemanticQueryPlan plan) {
+	private String shapeHash(SemanticBlueprint plan) {
 		Map<String, Object> shape = new TreeMap<>();
 		shape.put("models",
-				sorted(plan.getModels().stream().map(SemanticQueryPlan.ModelSelection::getModelCode).toList()));
+				sorted(plan.getModels().stream().map(SemanticBlueprint.ModelSelection::getModelCode).toList()));
 		shape.put("metrics",
-				sorted(plan.getMetrics().stream().map(SemanticQueryPlan.MetricSelection::getMetricCode).toList()));
+				sorted(plan.getMetrics().stream().map(SemanticBlueprint.MetricSelection::getMetricCode).toList()));
 		shape.put("dimensions", sorted(
-				plan.getDimensions().stream().map(SemanticQueryPlan.DimensionSelection::getDimensionCode).toList()));
+				plan.getDimensions().stream().map(SemanticBlueprint.DimensionSelection::getDimensionCode).toList()));
 		shape.put("grains",
-				sorted(plan.getGrains().stream().map(SemanticQueryPlan.GrainSelection::getGrainCode).toList()));
+				sorted(plan.getGrains().stream().map(SemanticBlueprint.GrainSelection::getGrainCode).toList()));
 		shape.put("relationships",
 				sorted(plan.getRelationships()
 					.stream()
-					.map(SemanticQueryPlan.RelationshipSelection::getRelationshipCode)
+					.map(SemanticBlueprint.RelationshipSelection::getRelationshipCode)
 					.toList()));
-		shape.put("rules", sorted(plan.getRules().stream().map(SemanticQueryPlan.RuleSelection::getRuleCode).toList()));
+		shape.put("rules", sorted(plan.getRules().stream().map(SemanticBlueprint.RuleSelection::getRuleCode).toList()));
 		shape.put("intent", intentType(plan));
 		shape.put("hasTime", plan.getTimeRange() != null);
 		return canonicalJson.hash(shape);

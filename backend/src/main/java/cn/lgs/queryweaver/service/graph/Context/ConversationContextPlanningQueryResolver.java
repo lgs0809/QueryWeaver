@@ -32,7 +32,7 @@ import org.springframework.stereotype.Component;
 /**
  * Resolves a deterministic, context-complete semantic planning query before a durable Run
  * is created. The original user question remains the execution input; this expanded query
- * is used only for governed Catalog recall and Semantic Query Plan construction.
+ * is used only for governed Catalog recall and Semantic Blueprint construction.
  */
 @Component
 public class ConversationContextPlanningQueryResolver {

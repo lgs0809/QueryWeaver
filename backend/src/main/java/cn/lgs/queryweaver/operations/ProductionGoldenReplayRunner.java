@@ -26,15 +26,15 @@ import cn.lgs.queryweaver.evolution.SemanticReplayExecutor;
 import cn.lgs.queryweaver.learning.QueryCaseHints;
 import cn.lgs.queryweaver.semantic.application.SemanticCatalogFingerprint;
 import cn.lgs.queryweaver.semantic.application.SemanticPlanningClarificationRequiredException;
-import cn.lgs.queryweaver.semantic.application.SemanticPlanningPipeline;
-import cn.lgs.queryweaver.semantic.application.SemanticPlanningPipeline.PlanningRequest;
-import cn.lgs.queryweaver.semantic.application.SemanticPlanningPipeline.PlanningResult;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintPipeline;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintPipeline.PlanningRequest;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintPipeline.PlanningResult;
 import cn.lgs.queryweaver.semantic.compiler.CompiledSemanticQuery;
 import cn.lgs.queryweaver.semantic.compiler.SemanticSqlCompiler;
 import cn.lgs.queryweaver.semantic.compiler.SqlDialect;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogRepository;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.DatabaseUtil;
 import java.time.Clock;
 import java.time.ZoneId;
@@ -68,7 +68,7 @@ public class ProductionGoldenReplayRunner {
 
 	private final SemanticCatalogRepository catalogRepository;
 
-	private final SemanticPlanningPipeline planningPipeline;
+	private final SemanticBlueprintPipeline planningPipeline;
 
 	private final SemanticSqlCompiler sqlCompiler;
 
@@ -103,7 +103,7 @@ public class ProductionGoldenReplayRunner {
 				}
 				PlanningResult planning = planningPipeline.plan(new PlanningRequest(projectId, versionId, catalogHash, question,
 						List.of(), QueryCaseHints.empty(), RECALL_LIMIT, EXAMPLE_LIMIT));
-				SemanticQueryPlan plan = planning.plan();
+				SemanticBlueprint plan = planning.plan();
 				List<String> errors = new ArrayList<>(planErrors(expected, plan));
 				CompiledSemanticQuery compiled = null;
 				SemanticReplayExecutor.ReplayExecution execution = null;
@@ -177,9 +177,9 @@ public class ProductionGoldenReplayRunner {
 		return java.util.Collections.unmodifiableMap(result);
 	}
 
-	private Map<Integer, SqlDialect> dialects(SemanticQueryPlan plan) {
+	private Map<Integer, SqlDialect> dialects(SemanticBlueprint plan) {
 		Map<Integer, SqlDialect> dialects = new LinkedHashMap<>();
-		for (SemanticQueryPlan.SourceSubPlan source : plan.getSourceSubPlans()) {
+		for (SemanticBlueprint.SourceSubPlan source : plan.getSourceSubPlans()) {
 			Integer datasourceId = source.getDatasourceId();
 			if (datasourceId == null || dialects.containsKey(datasourceId)) {
 				continue;
@@ -190,19 +190,19 @@ public class ProductionGoldenReplayRunner {
 		return Map.copyOf(dialects);
 	}
 
-	private List<String> planErrors(Map<String, Object> expected, SemanticQueryPlan plan) {
+	private List<String> planErrors(Map<String, Object> expected, SemanticBlueprint plan) {
 		List<String> errors = new ArrayList<>(plan.getValidationErrors() == null ? List.of() : plan.getValidationErrors());
 		if (!plan.isExecutable()) {
 			errors.add("Golden semantic plan is not executable");
 		}
 		assertIncludes("model", strings(expected.get("modelCodes")),
-				plan.getModels().stream().map(SemanticQueryPlan.ModelSelection::getModelCode).collect(java.util.stream.Collectors.toSet()),
+				plan.getModels().stream().map(SemanticBlueprint.ModelSelection::getModelCode).collect(java.util.stream.Collectors.toSet()),
 				errors);
 		assertIncludes("metric", strings(expected.get("metricCodes")),
-				plan.getMetrics().stream().map(SemanticQueryPlan.MetricSelection::getMetricCode).collect(java.util.stream.Collectors.toSet()),
+				plan.getMetrics().stream().map(SemanticBlueprint.MetricSelection::getMetricCode).collect(java.util.stream.Collectors.toSet()),
 				errors);
 		assertIncludes("dimension", strings(expected.get("dimensionCodes")),
-				plan.getDimensions().stream().map(SemanticQueryPlan.DimensionSelection::getDimensionCode)
+				plan.getDimensions().stream().map(SemanticBlueprint.DimensionSelection::getDimensionCode)
 					.collect(java.util.stream.Collectors.toSet()), errors);
 		String expectedTimeColumn = text(expected.get("timeColumn"));
 		if (StringUtils.hasText(expectedTimeColumn)) {
@@ -228,7 +228,7 @@ public class ProductionGoldenReplayRunner {
 		String expectedOrderExpression = text(expected.get("orderExpression"));
 		String expectedOrderDirection = text(expected.get("orderDirection"));
 		if (StringUtils.hasText(expectedOrderExpression) || StringUtils.hasText(expectedOrderDirection)) {
-			SemanticQueryPlan.OrderSelection actual = plan.getOrderBy().isEmpty() ? null : plan.getOrderBy().get(0);
+			SemanticBlueprint.OrderSelection actual = plan.getOrderBy().isEmpty() ? null : plan.getOrderBy().get(0);
 			if (actual == null) {
 				errors.add("Expected ordered result but plan has no orderBy");
 			}

@@ -18,7 +18,7 @@ package cn.lgs.queryweaver.semantic.compiler;
 import java.util.List;
 
 /**
- * Structural SQL SELECT AST used between typed semantic IR and dialect rendering.
+ * Structural SQL SELECT AST used between Semantic Blueprint and dialect rendering.
  *
  * <p>Expressions are already governance-validated before entering this object; the AST owns SQL
  * clause ordering and prevents the compiler from interleaving ad-hoc StringBuilder mutations.

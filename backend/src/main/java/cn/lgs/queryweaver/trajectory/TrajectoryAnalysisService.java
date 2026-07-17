@@ -36,7 +36,7 @@ import cn.lgs.queryweaver.semantic.domain.SemanticAssetProvenance.AssetType;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogRepository;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
 import cn.lgs.queryweaver.semantic.domain.SemanticIssueType;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -134,7 +134,7 @@ public class TrajectoryAnalysisService {
 	}
 
 	public Optional<Map<String, Object>> findPatternForPlan(Long projectId, Long projectVersionId,
-			String executionCompatibilityHash, SemanticQueryPlan plan) {
+			String executionCompatibilityHash, SemanticBlueprint plan) {
 		if (projectId == null || projectVersionId == null || !StringUtils.hasText(executionCompatibilityHash)
 				|| plan == null) {
 			return Optional.empty();
@@ -330,30 +330,30 @@ public class TrajectoryAnalysisService {
 		}
 	}
 
-	private PatternShape patternShape(Map<String, Object> episode, SemanticQueryPlan plan,
+	private PatternShape patternShape(Map<String, Object> episode, SemanticBlueprint plan,
 			List<Map<String, Object>> sources, List<Map<String, Object>> clarifications,
 			List<Map<String, Object>> sqlTraces) {
 		Map<String, Object> shape = new TreeMap<>();
 		String normalized = normalize(text(episode.get("normalized_question")), text(episode.get("original_question")));
 		if (plan != null) {
 			shape.put("models",
-					sorted(plan.getModels().stream().map(SemanticQueryPlan.ModelSelection::getModelCode).toList()));
+					sorted(plan.getModels().stream().map(SemanticBlueprint.ModelSelection::getModelCode).toList()));
 			shape.put("metrics",
-					sorted(plan.getMetrics().stream().map(SemanticQueryPlan.MetricSelection::getMetricCode).toList()));
+					sorted(plan.getMetrics().stream().map(SemanticBlueprint.MetricSelection::getMetricCode).toList()));
 			shape.put("dimensions",
 					sorted(plan.getDimensions()
 						.stream()
-						.map(SemanticQueryPlan.DimensionSelection::getDimensionCode)
+						.map(SemanticBlueprint.DimensionSelection::getDimensionCode)
 						.toList()));
 			shape.put("grains",
-					sorted(plan.getGrains().stream().map(SemanticQueryPlan.GrainSelection::getGrainCode).toList()));
+					sorted(plan.getGrains().stream().map(SemanticBlueprint.GrainSelection::getGrainCode).toList()));
 			shape.put("relationships",
 					sorted(plan.getRelationships()
 						.stream()
-						.map(SemanticQueryPlan.RelationshipSelection::getRelationshipCode)
+						.map(SemanticBlueprint.RelationshipSelection::getRelationshipCode)
 						.toList()));
 			shape.put("rules",
-					sorted(plan.getRules().stream().map(SemanticQueryPlan.RuleSelection::getRuleCode).toList()));
+					sorted(plan.getRules().stream().map(SemanticBlueprint.RuleSelection::getRuleCode).toList()));
 			shape.put("groupBy", plan.getGroupBy().stream()
 				.map(group -> Map.of("modelCode", Objects.toString(group.getModelCode(), ""), "columnName",
 						Objects.toString(group.getColumnName(), ""), "alias", Objects.toString(group.getAlias(), ""),
@@ -362,7 +362,7 @@ public class TrajectoryAnalysisService {
 			shape.put("expectedResultGrain",
 					plan.getExpectedResult() == null ? "" : Objects.toString(plan.getExpectedResult().getGrain(), ""));
 			shape.put("projectionTypes", sorted(plan.getProjections().stream()
-				.map(SemanticQueryPlan.ProjectionSelection::getProjectionType).toList()));
+				.map(SemanticBlueprint.ProjectionSelection::getProjectionType).toList()));
 			shape.put("sourceShape",
 					plan.getSourceSubPlans()
 						.stream()
@@ -1428,7 +1428,7 @@ public class TrajectoryAnalysisService {
 		return Map.of();
 	}
 
-	private String intent(SemanticQueryPlan plan, List<Map<String, Object>> sources) {
+	private String intent(SemanticBlueprint plan, List<Map<String, Object>> sources) {
 		if (sources.size() > 1 || plan != null && plan.getSourceSubPlans().size() > 1) {
 			return "MULTI_SOURCE_ANALYTICS";
 		}
@@ -1594,7 +1594,7 @@ public class TrajectoryAnalysisService {
 		return StringUtils.hasText(value) ? value : null;
 	}
 
-	private record SnapshotView(String compatibilityHash, SemanticQueryPlan plan) {
+	private record SnapshotView(String compatibilityHash, SemanticBlueprint plan) {
 	}
 
 	private record PatternShape(String intentType, String shapeHash, String instanceHash, String ambiguity, String risk,

@@ -31,7 +31,7 @@ import cn.lgs.queryweaver.semantic.compiler.CompiledSemanticQuery.CompiledSource
 import cn.lgs.queryweaver.semantic.compiler.SemanticSqlCompiler;
 import cn.lgs.queryweaver.semantic.compiler.SemanticSqlCompiler.ConstrainedGenerationRequiredException;
 import cn.lgs.queryweaver.semantic.compiler.SqlDialect;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.dto.datasource.SqlRetryDto;
 import cn.lgs.queryweaver.dto.prompt.SqlGenerationDTO;
 import cn.lgs.queryweaver.dto.schema.SchemaDTO;
@@ -124,7 +124,7 @@ public class SqlGenerateNode implements NodeAction {
 			sqlFlux = Flux.just(reusableTemplate.sql());
 		}
 		else if (compiled != null) {
-			displayMessage = "Semantic Query Plan 已通过确定性编译...";
+			displayMessage = "Semantic Blueprint 已通过确定性编译...";
 			sqlFlux = Flux.just(compiled.sql());
 		}
 		else {
@@ -176,8 +176,8 @@ public class SqlGenerateNode implements NodeAction {
 				userQuery, 3);
 		String dialect = StateUtil.getStringValue(state, DB_DIALECT_TYPE);
 		String semanticModel = StateUtil.getStringValue(state, GENEGRATED_SEMANTIC_MODEL_PROMPT, "");
-		SemanticQueryPlan semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 
 		SqlGenerationDTO sqlGenerationDTO = SqlGenerationDTO.builder()
 			.evidence(evidence)
@@ -200,8 +200,8 @@ public class SqlGenerateNode implements NodeAction {
 	}
 
 	private CompiledSourceQuery compileDeterministic(OverAllState state) {
-		SemanticQueryPlan plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		if (plan == null) {
 			return null;
 		}
@@ -220,8 +220,8 @@ public class SqlGenerateNode implements NodeAction {
 	}
 
 	private ReusableTemplate reusableTemplate(OverAllState state, CompiledSourceQuery compiled) {
-		SemanticQueryPlan plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		if (plan == null) {
 			return null;
 		}
@@ -232,7 +232,7 @@ public class SqlGenerateNode implements NodeAction {
 			.orElse(null);
 	}
 
-	private String serializeSemanticPlan(SemanticQueryPlan semanticPlan) {
+	private String serializeSemanticPlan(SemanticBlueprint semanticPlan) {
 		if (semanticPlan == null) {
 			return "{}";
 		}
@@ -240,7 +240,7 @@ public class SqlGenerateNode implements NodeAction {
 			return JsonUtil.getObjectMapper().writeValueAsString(semanticPlan);
 		}
 		catch (Exception ex) {
-			throw new IllegalStateException("Failed to serialize Semantic Query Plan", ex);
+			throw new IllegalStateException("Failed to serialize Semantic Blueprint", ex);
 		}
 	}
 

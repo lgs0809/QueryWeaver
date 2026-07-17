@@ -64,11 +64,11 @@
               <span class="section-index">02</span>
               <h3>执行证据链</h3>
             </div>
-            <small>Semantic Binding → Planner → Semantic SQL → Dry Plan → Physical SQL → Guard / Cost → Review</small>
+            <small>Semantic Binding → Blueprint → Semantic SQL → Query Preflight → Physical SQL → Guard / Cost → Review</small>
           </div>
 
           <div class="pipeline-facts">
-            <el-tag effect="plain">Dry Plan {{ String(diagnosis.pipeline.dryPlan?.status || 'N/A') }}</el-tag>
+            <el-tag effect="plain">Query Preflight {{ String(diagnosis.pipeline.dryPlan?.status || 'N/A') }}</el-tag>
             <el-tag effect="plain">SQL Trace {{ diagnosis.pipeline.sqlTraces?.length || 0 }}</el-tag>
             <el-tag
               v-if="diagnosis.pipeline.reviewDecision"
@@ -80,7 +80,7 @@
           </div>
 
           <el-collapse class="pipeline-collapse">
-            <el-collapse-item v-if="diagnosis.pipeline.semanticPlanJson" title="Semantic Query Plan" name="semantic-plan">
+            <el-collapse-item v-if="diagnosis.pipeline.semanticPlanJson" title="Semantic Blueprint" name="semantic-plan">
               <pre class="evidence-code">{{ prettyJson(diagnosis.pipeline.semanticPlanJson) }}</pre>
             </el-collapse-item>
             <el-collapse-item v-if="diagnosis.pipeline.executionPlanJson" title="Planner Execution Plan" name="execution-plan">
@@ -89,7 +89,7 @@
             <el-collapse-item v-if="diagnosis.pipeline.semanticSql" title="Semantic SQL" name="semantic-sql">
               <pre class="evidence-code">{{ diagnosis.pipeline.semanticSql }}</pre>
             </el-collapse-item>
-            <el-collapse-item title="Dry Plan" name="dry-plan">
+            <el-collapse-item title="Query Preflight" name="dry-plan">
               <pre class="evidence-code">{{ prettyJson(diagnosis.pipeline.dryPlan) }}</pre>
             </el-collapse-item>
             <el-collapse-item v-if="diagnosis.pipeline.physicalSql" title="Physical SQL" name="physical-sql">
@@ -687,7 +687,7 @@
       PLANNER_REJECTED: 'Planner 输出被治理拒绝',
       CLARIFICATION_REQUIRED: '需要业务澄清',
       SEMANTIC_DEFINITION_GAP: '业务定义缺口',
-      PLAN_RESOLUTION_ERROR: 'Semantic Query Plan 解析失败',
+      PLAN_RESOLUTION_ERROR: 'Semantic Blueprint 解析失败',
       SQL_COMPILATION_ERROR: 'SQL 编译失败',
       SQL_GUARD_ERROR: 'SQL 安全/准入拒绝',
       SQL_EXECUTION_ERROR: 'SQL / 数据源执行失败',

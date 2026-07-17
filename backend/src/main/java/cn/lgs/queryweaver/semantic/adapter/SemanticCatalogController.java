@@ -19,10 +19,10 @@ import cn.lgs.queryweaver.project.domain.ProjectVersionCatalogReadiness.CatalogR
 import cn.lgs.queryweaver.semantic.application.DatabaseSemanticCatalogAnalyzer;
 import cn.lgs.queryweaver.semantic.application.DatabaseSemanticCatalogAnalyzer.AnalysisResult;
 import cn.lgs.queryweaver.learning.QueryCaseHints;
-import cn.lgs.queryweaver.semantic.application.LlmSemanticPlanningService;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintGenerationService;
 import cn.lgs.queryweaver.semantic.application.SemanticCatalogApplicationService;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import java.util.List;
@@ -44,7 +44,7 @@ public class SemanticCatalogController {
 
 	private final SemanticCatalogApplicationService catalogService;
 
-	private final LlmSemanticPlanningService llmSemanticPlanningService;
+	private final SemanticBlueprintGenerationService semanticBlueprintGenerationService;
 
 	private final DatabaseSemanticCatalogAnalyzer databaseAnalyzer;
 
@@ -70,22 +70,22 @@ public class SemanticCatalogController {
 		return catalogService.assess(projectId, versionId);
 	}
 
-	@PostMapping("/query-plan")
-	public Mono<SemanticQueryPlan> queryPlan(@PathVariable Long projectId, @PathVariable Long versionId,
-			@RequestBody QueryPlanRequest request) {
+	@PostMapping({ "/blueprint", "/query-plan" })
+	public Mono<SemanticBlueprint> blueprint(@PathVariable Long projectId, @PathVariable Long versionId,
+			@RequestBody BlueprintRequest request) {
 		return Mono.fromCallable(() -> {
 			List<String> selectedTables = request.selectedPhysicalTables() == null ? List.of()
 					: List.copyOf(request.selectedPhysicalTables());
-			QueryCaseHints bindings = llmSemanticPlanningService.plan(projectId, versionId, request.canonicalQuery(),
+			QueryCaseHints bindings = semanticBlueprintGenerationService.plan(projectId, versionId, request.canonicalQuery(),
 					selectedTables, List.of());
-			return catalogService.buildQueryPlan(projectId, versionId, request.canonicalQuery(), selectedTables, bindings);
+			return catalogService.buildBlueprint(projectId, versionId, request.canonicalQuery(), selectedTables, bindings);
 		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	public record ScanDatabaseRequest(@NotNull Integer datasourceId, List<String> tables) {
 	}
 
-	public record QueryPlanRequest(String canonicalQuery, List<String> selectedPhysicalTables) {
+	public record BlueprintRequest(String canonicalQuery, List<String> selectedPhysicalTables) {
 	}
 
 }

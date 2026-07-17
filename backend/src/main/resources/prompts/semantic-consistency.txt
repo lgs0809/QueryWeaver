@@ -12,7 +12,7 @@
 ```sql
 {sql}
 ```
-*这里审计的是 dry-plan 后的 Physical SQL。Semantic SQL 中的 `METRIC(...)` / `RELATIONSHIP(...)` 已由系统确定性展开；不要要求 Physical SQL 保留这些编译原语。*
+*这里审计的是 Query Preflight 后的 Physical SQL。Semantic SQL 中的 `METRIC(...)` / `RELATIONSHIP(...)` 已由系统确定性展开；不要要求 Physical SQL 保留这些编译原语。*
 
 ## 3. 数据库 Schema (事实标准)
 {schema_info}
@@ -20,9 +20,9 @@
 ## 4. 正式语义模型 (业务事实)
 {semantic_model}
 
-## 5. Semantic Query Plan（受治理业务语义依据）
+## 5. Semantic Blueprint（受治理业务语义依据）
 {semantic_plan}
-*Semantic Query Plan 负责冻结指标、维度、关系、强制过滤、业务规则和粒度语义；当前执行步骤由 Planner 负责物理执行形态。若当前步骤要求窗口函数、日期升序、多行结果等，不得用旧计划中的排序、limit 或 expected result shape 推翻当前步骤。Advanced execution 下这些物理 shape 字段可能已被系统主动移除。*
+*Semantic Blueprint 负责冻结指标、维度、关系、强制过滤、业务规则和粒度语义；当前执行步骤由 Planner 负责物理执行形态。若当前步骤要求窗口函数、日期升序、多行结果等，不得用旧计划中的排序、limit 或 expected result shape 推翻当前步骤。Advanced execution 下这些物理 shape 字段可能已被系统主动移除。*
 
 ## 6. 全局业务背景与外部证据 (仅作参考)
 全局用户问题: {user_query}
@@ -35,7 +35,7 @@
 目标对齐：SQL 是否查询了 上面提到的【当前执行指令】 中要求的表和字段？
 过滤准确：是否遗漏了 上面提到的【当前执行指令】 中明确要求的 WHERE 条件（如时间、状态）？
 聚合正确：GROUP BY 和聚合函数（SUM/COUNT）是否符合 上面提到的【当前执行指令】 意图？
-指标口径：SQL 是否严格使用 Semantic Query Plan 中已解析的指标表达式和过滤条件？不得自行替换或发明公式。
+指标口径：SQL 是否严格使用 Semantic Blueprint 中已解析的指标表达式和过滤条件？不得自行替换或发明公式。
 粒度与 Join：SQL 是否遵守模型 Grain、发布关系和 Cardinality？若 `preAggregationModelCodes` 非空，是否先聚合后 JOIN，避免 Fan-out？
 业务规则：SQL 是否应用了计划中的强制规则，且没有使用外部证据覆盖正式定义？
 NULL 语义：Catalog 中 `nullable=true` 只是事实，不是自动过滤规则。不要要求所有 nullable 字段都 `IS NOT NULL`。若当前步骤明确要求连续/有序时间序列、LAG/LEAD、同比环比等，应结合具体时间字段判断 NULL bucket 是否会破坏当前步骤；若用户明确查询未支付、缺失时间或 NULL 分布，则保留 NULL 是正确的。多时间字段分别判断，不得套用一个全局时间规则。

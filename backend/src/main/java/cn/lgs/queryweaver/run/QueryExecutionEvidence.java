@@ -16,8 +16,8 @@
 package cn.lgs.queryweaver.run;
 
 import cn.lgs.queryweaver.learning.QueryCaseHints;
-import cn.lgs.queryweaver.semantic.application.SemanticPlanningPipeline.PlanningResult;
-import cn.lgs.queryweaver.semantic.application.SemanticPlanningPipeline.PlanningTrace;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintPipeline.PlanningResult;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintPipeline.PlanningTrace;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;

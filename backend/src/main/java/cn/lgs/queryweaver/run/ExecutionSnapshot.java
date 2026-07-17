@@ -15,7 +15,7 @@
  */
 package cn.lgs.queryweaver.run;
 
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.Map;
 
@@ -27,7 +27,7 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ExecutionSnapshot(int schemaVersion, ProjectSnapshot project, ModelSnapshot model, PromptSnapshot prompts,
 		SemanticSnapshot semantic, RuntimeSnapshot runtime, EnvironmentSnapshot environment,
-		SemanticQueryPlan semanticPlan, String semanticPlanHash, boolean humanReviewEnabled, boolean strictComparable,
+		SemanticBlueprint semanticPlan, String semanticPlanHash, boolean humanReviewEnabled, boolean strictComparable,
 		String compatibilityHash) {
 
 	public static final int CURRENT_SCHEMA_VERSION = 1;

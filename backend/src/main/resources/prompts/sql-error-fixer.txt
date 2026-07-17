@@ -12,7 +12,7 @@
 {schema_info}
 *警告：修复后的字段必须严格存在于 Schema 中，严禁臆造字段。*
 
-## 3. 正式语义模型与 Semantic Query Plan (不可破坏)
+## 3. 正式语义模型与 Semantic Blueprint (不可破坏)
 {semantic_model}
 
 {semantic_plan}
@@ -32,12 +32,12 @@
 
 ## 7. 已审核 Query Example (仅用于最小化修复的结构参考)
 {query_examples}
-*不得用历史示例覆盖当前 Schema、Semantic Query Plan、方言或安全约束。*
+*不得用历史示例覆盖当前 Schema、Semantic Blueprint、方言或安全约束。*
 
 # 修复策略
-## 路径识别：如果报错码以 `SEMANTIC_` 开头，或原始 SQL 含 `METRIC(` / `RELATIONSHIP(`，你修复的是 Semantic SQL，而不是底层 Physical SQL。此时 FROM/JOIN 必须继续使用 Semantic Query Plan 中的 Model code；指标只能使用 `METRIC('model_or_alias.metric_code')`；模型间 Join 只能使用 `ON RELATIONSHIP('relationship_code')`，不得自行展开已发布指标公式或猜测 Join 条件。否则按普通物理 SQL 修复。
+## 路径识别：如果报错码以 `SEMANTIC_` 开头，或原始 SQL 含 `METRIC(` / `RELATIONSHIP(`，你修复的是 Semantic SQL，而不是底层 Physical SQL。此时 FROM/JOIN 必须继续使用 Semantic Blueprint 中的 Model code；指标只能使用 `METRIC('model_or_alias.metric_code')`；模型间 Join 只能使用 `ON RELATIONSHIP('relationship_code')`，不得自行展开已发布指标公式或猜测 Join 条件。否则按普通物理 SQL 修复。
 ## 方言纠正：严格检查是否使用了不符合 {dialect} 的函数或语法（例如引号用法、日期处理、分页）。
-## Schema/语义对齐：普通 SQL 的 Column not found 根据 Schema 修复；`SEMANTIC_COLUMN_*` / `SEMANTIC_METRIC_*` / `SEMANTIC_RELATIONSHIP_*` 必须仅使用正式语义模型与 Semantic Query Plan 中已经发布、冻结的名称，不得用物理 Schema 猜一个替代业务定义。
+## Schema/语义对齐：普通 SQL 的 Column not found 根据 Schema 修复；`SEMANTIC_COLUMN_*` / `SEMANTIC_METRIC_*` / `SEMANTIC_RELATIONSHIP_*` 必须仅使用正式语义模型与 Semantic Blueprint 中已经发布、冻结的名称，不得用物理 Schema 猜一个替代业务定义。
 ## NULL 修复：`NULLABLE_COLUMN_REFERENCED` 只是事实提示，不是全局过滤规则。若错误明确指出当前时间序列/窗口/比较被 NULL bucket 破坏，只修当前相关字段的 NULL 处理；若用户明确查询缺失值、未支付或 NULL 分布，必须保留 NULL。多个时间字段分别判断，禁止一刀切给所有 nullable 字段加 `IS NOT NULL`。
 ## 成本门禁：如果报错含 `QUERY_COST_EXCEEDED`，只能在保持用户时间范围、指标定义、过滤条件和结果粒度不变的前提下，通过过滤下推、聚合下推、减少重复 Join/相关子查询、优化执行结构降低 scan/join/sort/aggregate 中间规模；不得通过缩短用户时间范围、删除过滤或改指标口径绕过门禁。
 ## 最小化修改：只修复错误，不要过度优化或重写原本正确的逻辑。

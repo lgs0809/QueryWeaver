@@ -128,7 +128,7 @@ public class QueryWeaverConfiguration {
 			// Intent recognition
 			// QUERY_ENHANCE_NODE节点输出
 			keyStrategyHashMap.put(QUERY_ENHANCE_NODE_OUTPUT, KeyStrategy.REPLACE);
-			// Semantic model and deterministic Semantic Query Plan
+			// Semantic model and deterministic Semantic Blueprint
 			keyStrategyHashMap.put(GENEGRATED_SEMANTIC_MODEL_PROMPT, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(TYPED_SEMANTIC_PLAN, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(CATALOG_HASH, KeyStrategy.REPLACE);
@@ -206,7 +206,7 @@ public class QueryWeaverConfiguration {
 			.addNode(QUERY_ENHANCE_NODE, nodeBeanUtil.getNodeBeanAsync(QueryEnhanceNode.class))
 			.addNode(SCHEMA_RECALL_NODE, nodeBeanUtil.getNodeBeanAsync(SchemaRecallNode.class))
 			.addNode(TABLE_RELATION_NODE, nodeBeanUtil.getNodeBeanAsync(TableRelationNode.class))
-			.addNode(SEMANTIC_PLAN_NODE, nodeBeanUtil.getNodeBeanAsync(SemanticPlanNode.class))
+			.addNode(SEMANTIC_PLAN_NODE, nodeBeanUtil.getNodeBeanAsync(SemanticBlueprintNode.class))
 			.addNode(SEMANTIC_EXECUTION_NODE, nodeBeanUtil.getNodeBeanAsync(SemanticExecutionNode.class))
 			.addNode(SQL_GENERATE_NODE, nodeBeanUtil.getNodeBeanAsync(SqlGenerateNode.class))
 			.addNode(PLANNER_NODE, nodeBeanUtil.getNodeBeanAsync(PlannerNode.class))
@@ -233,7 +233,7 @@ public class QueryWeaverConfiguration {
 			.addConditionalEdges(TABLE_RELATION_NODE, edge_async(new TableRelationDispatcher()),
 					Map.of(SEMANTIC_PLAN_NODE, SEMANTIC_PLAN_NODE, PLANNER_NODE, PLANNER_NODE, END, END,
 							TABLE_RELATION_NODE, TABLE_RELATION_NODE)) // retry / advanced fallback
-			.addConditionalEdges(SEMANTIC_PLAN_NODE, edge_async(new SemanticPlanExecutionDispatcher()),
+			.addConditionalEdges(SEMANTIC_PLAN_NODE, edge_async(new SemanticBlueprintExecutionDispatcher()),
 					Map.of(HUMAN_FEEDBACK_NODE, HUMAN_FEEDBACK_NODE, SEMANTIC_EXECUTION_NODE, SEMANTIC_EXECUTION_NODE))
 			.addConditionalEdges(SEMANTIC_EXECUTION_NODE, edge_async(new SemanticExecutionDispatcher()),
 					Map.of(POST_EXECUTION_REVIEW_NODE, POST_EXECUTION_REVIEW_NODE, QUERY_ENHANCE_NODE,
@@ -260,9 +260,9 @@ public class QueryWeaverConfiguration {
 					END, END))
 			// Human feedback node routing
 			.addConditionalEdges(HUMAN_FEEDBACK_NODE, edge_async(new HumanFeedbackDispatcher()), Map.of(
-					// Natural-language rejection changes business semantics, so re-plan the Semantic Query Plan.
+					// Natural-language rejection changes business semantics, so re-plan the Semantic Blueprint.
 					SEMANTIC_PLAN_NODE, SEMANTIC_PLAN_NODE,
-					// Approval continues the same Semantic Query Plan through governed compiler-first execution.
+					// Approval continues the same Semantic Blueprint through governed compiler-first execution.
 					SEMANTIC_EXECUTION_NODE, SEMANTIC_EXECUTION_NODE,
 					// If max repair attempts are reached, end the process
 					END, END))

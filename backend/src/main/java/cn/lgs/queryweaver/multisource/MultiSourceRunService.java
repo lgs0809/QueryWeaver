@@ -18,7 +18,7 @@ package cn.lgs.queryweaver.multisource;
 import cn.lgs.queryweaver.bo.schema.ResultSetBO;
 import cn.lgs.queryweaver.multisource.MultiSourcePolicySnapshot.MergePolicy;
 import cn.lgs.queryweaver.run.QueryRunService;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import java.math.BigDecimal;
@@ -54,19 +54,19 @@ public class MultiSourceRunService {
 
 @Transactional
 	public MultiSourceRunView initialize(String runId, String executionKey, Long projectId, Long versionId,
-			SemanticQueryPlan plan) {
+			SemanticBlueprint plan) {
 		if (plan == null || !plan.isExecutable()) {
-			throw new IllegalArgumentException("An executable Semantic Query Plan is required");
+			throw new IllegalArgumentException("An executable Semantic Blueprint is required");
 		}
 		if (plan.getSourceSubPlans() == null || plan.getSourceSubPlans().isEmpty()) {
-			throw new IllegalArgumentException("Typed semantic plan has no source subplans");
+			throw new IllegalArgumentException("Semantic Blueprint has no source subplans");
 		}
 		String scope = requiredExecutionKey(executionKey);
 		MultiSourceRunView existing = find(runId, scope).orElse(null);
 		if (existing != null) {
 			return existing;
 		}
-		for (SemanticQueryPlan.SourceSubPlan source : plan.getSourceSubPlans()) {
+		for (SemanticBlueprint.SourceSubPlan source : plan.getSourceSubPlans()) {
 			String subRunId = UUID.randomUUID().toString();
 			jdbcTemplate.update("""
 					INSERT INTO qw_source_sub_run
@@ -187,7 +187,7 @@ public class MultiSourceRunService {
 	}
 
 	@Transactional
-	public ResultArtifact merge(String runId, String executionKey, SemanticQueryPlan plan) {
+	public ResultArtifact merge(String runId, String executionKey, SemanticBlueprint plan) {
 		String scope = requiredExecutionKey(executionKey);
 		MultiSourceRunView view = get(runId, scope);
 		if (view.mergeExecution().status() == MergeStatus.COMPLETED
@@ -247,7 +247,7 @@ public class MultiSourceRunService {
 		return requireArtifact(artifactId);
 	}
 
-	private ResultSetBO shapeMergedResult(ResultSetBO merged, SemanticQueryPlan plan) {
+	private ResultSetBO shapeMergedResult(ResultSetBO merged, SemanticBlueprint plan) {
 		if (merged == null || plan == null || plan.getExpectedResult() == null
 				|| plan.getExpectedResult().getColumns() == null || plan.getExpectedResult().getColumns().isEmpty()) {
 			return merged;
@@ -265,7 +265,7 @@ public class MultiSourceRunService {
 		}
 		Map<String, String> collapsed = new LinkedHashMap<>();
 		for (String column : expectedColumns) {
-			SemanticQueryPlan.MetricSelection metric = plan.getMetrics()
+			SemanticBlueprint.MetricSelection metric = plan.getMetrics()
 				.stream()
 				.filter(item -> Objects.equals(item.getMetricCode(), column))
 				.findFirst()
@@ -294,7 +294,7 @@ public class MultiSourceRunService {
 	}
 
 	private String aggregateMetric(List<Map<String, String>> rows, String column,
-			SemanticQueryPlan.MetricSelection metric, SemanticQueryPlan plan) {
+			SemanticBlueprint.MetricSelection metric, SemanticBlueprint plan) {
 		List<BigDecimal> values = rows.stream()
 			.map(row -> row == null ? null : row.get(column))
 			.filter(Objects::nonNull)
@@ -329,7 +329,7 @@ public class MultiSourceRunService {
 		return result.stripTrailingZeros().toPlainString();
 	}
 
-	static boolean canSafelyRecombineCountDistinct(SemanticQueryPlan plan, SemanticQueryPlan.MetricSelection metric) {
+	static boolean canSafelyRecombineCountDistinct(SemanticBlueprint plan, SemanticBlueprint.MetricSelection metric) {
 		if (plan == null || metric == null || metric.getExpression() == null || metric.getModelCode() == null) {
 			return false;
 		}
@@ -413,8 +413,8 @@ public Optional<MultiSourceRunView> find(String runId, String executionKey) {
 				.build();
 		}
 		try {
-			SemanticQueryPlan.MergePlan plan = JsonUtil.getObjectMapper()
-				.readValue(merge.policyJson(), SemanticQueryPlan.MergePlan.class);
+			SemanticBlueprint.MergePlan plan = JsonUtil.getObjectMapper()
+				.readValue(merge.policyJson(), SemanticBlueprint.MergePlan.class);
 			return MergePolicy.builder()
 				.policyCode(plan.getPolicyCode())
 				.mergeType(plan.getMergeType())

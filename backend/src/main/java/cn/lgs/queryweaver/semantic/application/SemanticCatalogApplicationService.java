@@ -28,7 +28,7 @@ import cn.lgs.queryweaver.semantic.domain.SemanticAssetStatus;
 import cn.lgs.queryweaver.semantic.domain.RelationshipCardinality;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogRepository;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.semantic.retrieval.SemanticHybridRetrievalService;
 import cn.lgs.queryweaver.semantic.retrieval.SemanticHybridRetrievalService.RetrievalHit;
 import cn.lgs.queryweaver.semantic.retrieval.SemanticRetrievalDocument.DocumentType;
@@ -84,7 +84,7 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 
 	private final SemanticHybridRetrievalService hybridRetrievalService;
 
-	private final SemanticQueryIrEnricher queryIrEnricher;
+	private final SemanticBlueprintEnricher queryIrEnricher;
 
 	@Transactional
 	public SemanticCatalogSnapshot replaceDraftCatalog(Long projectId, Long projectVersionId,
@@ -240,13 +240,13 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.toList(), fallbackHits);
 	}
 
-	public SemanticQueryPlan buildQueryPlan(Long projectId, Long projectVersionId, String canonicalQuery,
+	public SemanticBlueprint buildBlueprint(Long projectId, Long projectVersionId, String canonicalQuery,
 			Collection<String> selectedPhysicalTables) {
 		throw new IllegalArgumentException(
-				"Explicit governed semantic bindings are required; natural-language planning must use LlmSemanticPlanningService");
+				"Explicit governed semantic bindings are required; natural-language planning must use SemanticBlueprintGenerationService");
 	}
 
-	public SemanticQueryPlan buildQueryPlan(Long projectId, Long projectVersionId, String canonicalQuery,
+	public SemanticBlueprint buildBlueprint(Long projectId, Long projectVersionId, String canonicalQuery,
 			Collection<String> selectedPhysicalTables, QueryCaseHints caseHints) {
 		QueryCaseHints hints = Objects.requireNonNull(caseHints, "Governed semantic bindings are required");
 		SemanticCatalogSnapshot snapshot = catalogRepository.loadCatalog(projectId, projectVersionId);
@@ -261,8 +261,8 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.map(SemanticCatalogSnapshot.Model::getModelCode)
 			.collect(Collectors.toCollection(LinkedHashSet::new));
 
-		List<SemanticQueryPlan.ModelSelection> models = selectedModels.stream()
-			.map(model -> SemanticQueryPlan.ModelSelection.builder()
+		List<SemanticBlueprint.ModelSelection> models = selectedModels.stream()
+			.map(model -> SemanticBlueprint.ModelSelection.builder()
 				.modelCode(model.getModelCode())
 				.physicalTable(model.getPhysicalTable())
 				.businessName(model.getBusinessName())
@@ -271,9 +271,9 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.toList();
 		List<SemanticCatalogSnapshot.Metric> selectedMetricAssets = selectMetricAssets(snapshot.getMetrics(),
 				selectedModelCodes, hints);
-		List<SemanticQueryPlan.MetricSelection> metrics = queryIrEnricher.metricsForIntent(canonicalQuery,
+		List<SemanticBlueprint.MetricSelection> metrics = queryIrEnricher.metricsForIntent(canonicalQuery,
 				selectedMetricAssets.stream()
-					.map(metric -> SemanticQueryPlan.MetricSelection.builder()
+					.map(metric -> SemanticBlueprint.MetricSelection.builder()
 						.metricCode(metric.getMetricCode())
 						.modelCode(metric.getModelCode())
 						.businessName(metric.getBusinessName())
@@ -285,12 +285,12 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 						.additiveType(metric.getAdditiveType())
 						.build())
 					.toList());
-		List<SemanticQueryPlan.DimensionSelection> dimensions = snapshot.getDimensions()
+		List<SemanticBlueprint.DimensionSelection> dimensions = snapshot.getDimensions()
 			.stream()
 			.filter(dimension -> dimension.getStatus() == SemanticAssetStatus.ENABLED)
 			.filter(dimension -> selectedModelCodes.contains(dimension.getModelCode()))
 			.filter(dimension -> hints.dimensionCodes().contains(dimension.getDimensionCode()))
-			.map(dimension -> SemanticQueryPlan.DimensionSelection.builder()
+			.map(dimension -> SemanticBlueprint.DimensionSelection.builder()
 				.dimensionCode(dimension.getDimensionCode())
 				.modelCode(dimension.getModelCode())
 				.businessName(dimension.getBusinessName())
@@ -325,8 +325,8 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.filter(model -> model.getStatus() == SemanticAssetStatus.ENABLED)
 			.filter(model -> effectiveModelCodes.contains(model.getModelCode()))
 			.toList();
-		List<SemanticQueryPlan.ModelSelection> effectiveModels = effectiveSelectedModels.stream()
-			.map(model -> SemanticQueryPlan.ModelSelection.builder()
+		List<SemanticBlueprint.ModelSelection> effectiveModels = effectiveSelectedModels.stream()
+			.map(model -> SemanticBlueprint.ModelSelection.builder()
 				.modelCode(model.getModelCode())
 				.physicalTable(model.getPhysicalTable())
 				.businessName(model.getBusinessName())
@@ -337,12 +337,12 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.filter(modelCode -> !effectiveModelCodes.contains(modelCode))
 			.sorted()
 			.toList();
-		List<SemanticQueryPlan.GrainSelection> grains = snapshot.getGrains()
+		List<SemanticBlueprint.GrainSelection> grains = snapshot.getGrains()
 			.stream()
 			.filter(grain -> grain.getStatus() == SemanticAssetStatus.ENABLED)
 			.filter(grain -> effectiveModelCodes.contains(grain.getModelCode()))
 			.filter(grain -> hints.grainCodes().contains(grain.getGrainCode()))
-			.map(grain -> SemanticQueryPlan.GrainSelection.builder()
+			.map(grain -> SemanticBlueprint.GrainSelection.builder()
 				.grainCode(grain.getGrainCode())
 				.modelCode(grain.getModelCode())
 				.keyColumns(grain.getKeyColumns())
@@ -359,8 +359,8 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.toList();
 		List<SemanticCatalogSnapshot.Relationship> relationshipPath = resolveRelationshipPath(effectiveModelCodes,
 				selectedRelationships);
-		List<SemanticQueryPlan.RelationshipSelection> catalogRelationships = relationshipPath.stream()
-			.map(relationship -> SemanticQueryPlan.RelationshipSelection.builder()
+		List<SemanticBlueprint.RelationshipSelection> catalogRelationships = relationshipPath.stream()
+			.map(relationship -> SemanticBlueprint.RelationshipSelection.builder()
 				.relationshipCode(relationship.getRelationshipCode())
 				.sourceModelCode(relationship.getSourceModelCode())
 				.targetModelCode(relationship.getTargetModelCode())
@@ -369,12 +369,12 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 				.joinCondition(relationship.getJoinCondition())
 				.build())
 			.toList();
-		List<SemanticQueryPlan.RuleSelection> rules = snapshot.getRules()
+		List<SemanticBlueprint.RuleSelection> rules = snapshot.getRules()
 			.stream()
 			.filter(rule -> rule.getStatus() == SemanticAssetStatus.ENABLED)
 			.filter(rule -> !hasText(rule.getModelCode()) || effectiveModelCodes.contains(rule.getModelCode()))
 			.filter(rule -> ruleAppliesToPlan(rule, semanticHints))
-			.map(rule -> SemanticQueryPlan.RuleSelection.builder()
+			.map(rule -> SemanticBlueprint.RuleSelection.builder()
 				.ruleCode(rule.getRuleCode())
 				.modelCode(rule.getModelCode())
 				.ruleType(rule.getRuleType())
@@ -386,13 +386,13 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 
 		PlanningDecision multiSourceDecision = multiSourcePolicyService.plan(projectId, projectVersionId,
 				effectiveModelCodes);
-		List<SemanticQueryPlan.RelationshipSelection> relationshipSelections = new ArrayList<>(catalogRelationships);
+		List<SemanticBlueprint.RelationshipSelection> relationshipSelections = new ArrayList<>(catalogRelationships);
 		multiSourceDecision.relationships()
 			.stream()
 			.filter(relationship -> hints.relationshipCodes().contains(relationship.getRelationshipCode()))
 			.filter(relationship -> effectiveModelCodes.contains(relationship.getLeftModelCode())
 					&& effectiveModelCodes.contains(relationship.getRightModelCode()))
-			.map(relationship -> SemanticQueryPlan.RelationshipSelection.builder()
+			.map(relationship -> SemanticBlueprint.RelationshipSelection.builder()
 				.relationshipCode(relationship.getRelationshipCode())
 				.sourceModelCode(relationship.getLeftModelCode())
 				.targetModelCode(relationship.getRightModelCode())
@@ -402,13 +402,13 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 						+ relationship.getRightModelCode() + "." + relationship.getRightKey())
 				.build())
 			.forEach(relationshipSelections::add);
-		List<SemanticQueryPlan.RelationshipSelection> relationships = List.copyOf(relationshipSelections);
+		List<SemanticBlueprint.RelationshipSelection> relationships = List.copyOf(relationshipSelections);
 		Map<String, String> physicalTableByModelCode = effectiveSelectedModels.stream()
 			.collect(Collectors.toMap(SemanticCatalogSnapshot.Model::getModelCode,
 					SemanticCatalogSnapshot.Model::getPhysicalTable));
-		List<SemanticQueryPlan.SourceSubPlan> sourceSubPlans = multiSourceDecision.sources()
+		List<SemanticBlueprint.SourceSubPlan> sourceSubPlans = multiSourceDecision.sources()
 			.stream()
-			.map(source -> SemanticQueryPlan.SourceSubPlan.builder()
+			.map(source -> SemanticBlueprint.SourceSubPlan.builder()
 				.datasourceId(source.datasourceId())
 				.domainCode(source.domainCode())
 				.responsibility(source.responsibility())
@@ -422,10 +422,10 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 					.toList())
 				.build())
 			.toList();
-		List<SemanticQueryPlan.FreshnessNotice> freshnessNotices = multiSourceDecision.sources()
+		List<SemanticBlueprint.FreshnessNotice> freshnessNotices = multiSourceDecision.sources()
 			.stream()
 			.filter(source -> source.freshnessPolicy() != null)
-			.map(source -> SemanticQueryPlan.FreshnessNotice.builder()
+			.map(source -> SemanticBlueprint.FreshnessNotice.builder()
 				.datasourceId(source.datasourceId())
 				.businessDateField(source.freshnessPolicy().getBusinessDateField())
 				.timeZone(source.freshnessPolicy().getTimeZone())
@@ -434,8 +434,8 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 				.availableUntilRule(source.freshnessPolicy().getAvailableUntilRule())
 				.build())
 			.toList();
-		SemanticQueryPlan.MergePlan mergePlan = multiSourceDecision.mergePolicy() == null ? null
-				: SemanticQueryPlan.MergePlan.builder()
+		SemanticBlueprint.MergePlan mergePlan = multiSourceDecision.mergePolicy() == null ? null
+				: SemanticBlueprint.MergePlan.builder()
 					.policyCode(multiSourceDecision.mergePolicy().getPolicyCode())
 					.mergeType(multiSourceDecision.mergePolicy().getMergeType())
 					.relationshipCode(multiSourceDecision.mergePolicy().getRelationshipCode())
@@ -449,7 +449,7 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 					.partialFailurePolicy(multiSourceDecision.mergePolicy().getPartialFailurePolicy())
 					.calculationExpression(multiSourceDecision.mergePolicy().getCalculationExpression())
 					.build();
-		SemanticQueryIrEnricher.IrDetails ir = queryIrEnricher.enrich(snapshot, canonicalQuery, effectiveModels,
+		SemanticBlueprintEnricher.IrDetails ir = queryIrEnricher.enrich(snapshot, canonicalQuery, effectiveModels,
 				metrics, dimensions, grains, semanticHints);
 		BusinessRuleFilterResult businessRuleFilters = businessRuleFilters(snapshot, rules);
 
@@ -496,7 +496,7 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			warnings.add("No published metric was explicitly matched; SQL generation must not invent a metric formula");
 		}
 
-		return SemanticQueryPlan.builder()
+		return SemanticBlueprint.builder()
 			.projectId(projectId)
 			.projectVersionId(projectVersionId)
 			.canonicalQuery(canonicalQuery)
@@ -819,10 +819,10 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 	}
 
 	private BusinessRuleFilterResult businessRuleFilters(SemanticCatalogSnapshot snapshot,
-			List<SemanticQueryPlan.RuleSelection> rules) {
-		List<SemanticQueryPlan.FilterSelection> filters = new ArrayList<>();
+			List<SemanticBlueprint.RuleSelection> rules) {
+		List<SemanticBlueprint.FilterSelection> filters = new ArrayList<>();
 		List<String> errors = new ArrayList<>();
-		for (SemanticQueryPlan.RuleSelection rule : safe(rules)) {
+		for (SemanticBlueprint.RuleSelection rule : safe(rules)) {
 			String ruleType = normalizeRuleType(rule.getRuleType());
 			if (!QUERY_SELECTABLE_RULE_TYPES.contains(ruleType) && !MANDATORY_GOVERNANCE_RULE_TYPES.contains(ruleType)) {
 				continue;
@@ -874,7 +874,7 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 				errors.add("Selected governed rule references enum values outside the published Catalog: " + rule.getRuleCode());
 				continue;
 			}
-			filters.add(SemanticQueryPlan.FilterSelection.builder()
+			filters.add(SemanticBlueprint.FilterSelection.builder()
 				.modelCode(modelCode)
 				.columnName(columnName)
 				.expression(columnName)
@@ -905,19 +905,19 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 		return position == body.length() ? List.copyOf(values) : List.of();
 	}
 
-	private List<SemanticQueryPlan.FilterSelection> mergeFilters(List<SemanticQueryPlan.FilterSelection> left,
-			List<SemanticQueryPlan.FilterSelection> right) {
-		Map<String, SemanticQueryPlan.FilterSelection> merged = new LinkedHashMap<>();
-		for (SemanticQueryPlan.FilterSelection filter : safe(left)) {
+	private List<SemanticBlueprint.FilterSelection> mergeFilters(List<SemanticBlueprint.FilterSelection> left,
+			List<SemanticBlueprint.FilterSelection> right) {
+		Map<String, SemanticBlueprint.FilterSelection> merged = new LinkedHashMap<>();
+		for (SemanticBlueprint.FilterSelection filter : safe(left)) {
 			merged.put(filterKey(filter), filter);
 		}
-		for (SemanticQueryPlan.FilterSelection filter : safe(right)) {
+		for (SemanticBlueprint.FilterSelection filter : safe(right)) {
 			merged.putIfAbsent(filterKey(filter), filter);
 		}
 		return List.copyOf(merged.values());
 	}
 
-	private String filterKey(SemanticQueryPlan.FilterSelection filter) {
+	private String filterKey(SemanticBlueprint.FilterSelection filter) {
 		String base = key(filter.getModelCode(), filter.getColumnName());
 		String operator = Objects.toString(filter.getOperator(), "").toUpperCase(Locale.ROOT);
 		if ("EQ".equals(operator)) {
@@ -933,7 +933,7 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 		return values.stream().map(value -> Objects.toString(value, "")).sorted().collect(Collectors.joining("\u001f"));
 	}
 
-	private record BusinessRuleFilterResult(List<SemanticQueryPlan.FilterSelection> filters, List<String> errors) {
+	private record BusinessRuleFilterResult(List<SemanticBlueprint.FilterSelection> filters, List<String> errors) {
 	}
 
 	private List<SemanticCatalogSnapshot.Dimension> withoutGeneratedDimensionDuplicates(
@@ -1031,16 +1031,16 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 	}
 
 	private Set<String> strictEffectiveModelCodes(Set<String> recalledModelCodes,
-			List<SemanticQueryPlan.MetricSelection> metrics, List<SemanticQueryPlan.DimensionSelection> dimensions,
+			List<SemanticBlueprint.MetricSelection> metrics, List<SemanticBlueprint.DimensionSelection> dimensions,
 			Set<String> enumFilterModelCodes, QueryCaseHints hints,
 			List<SemanticCatalogSnapshot.Relationship> relationships) {
 		Set<String> required = new LinkedHashSet<>();
 		metrics.stream()
-			.map(SemanticQueryPlan.MetricSelection::getModelCode)
+			.map(SemanticBlueprint.MetricSelection::getModelCode)
 			.filter(this::hasText)
 			.forEach(required::add);
 		dimensions.stream()
-			.map(SemanticQueryPlan.DimensionSelection::getModelCode)
+			.map(SemanticBlueprint.DimensionSelection::getModelCode)
 			.filter(this::hasText)
 			.forEach(required::add);
 		required.addAll(enumFilterModelCodes == null ? Set.of() : enumFilterModelCodes);

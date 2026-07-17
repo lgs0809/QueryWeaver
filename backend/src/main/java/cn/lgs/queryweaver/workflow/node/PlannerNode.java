@@ -18,7 +18,7 @@ package cn.lgs.queryweaver.workflow.node;
 import cn.lgs.queryweaver.common.json.CanonicalJson;
 import cn.lgs.queryweaver.dto.schema.SchemaDTO;
 import cn.lgs.queryweaver.enums.TextType;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.dto.planner.Plan;
 import com.alibaba.cloud.ai.graph.GraphResponse;
 import com.alibaba.cloud.ai.graph.OverAllState;
@@ -91,8 +91,8 @@ public class PlannerNode implements NodeAction {
 		}
 		String activeTodoId = StateUtil.getStringValue(state, ACTIVE_TODO_ID, "");
 		String scope = StringUtils.hasText(activeTodoId) ? activeTodoId : "simple";
-		SemanticQueryPlan semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		String semanticHash = semanticPlan == null ? "none" : canonicalJson.hash(semanticPlan);
 		queryRunService.appendEvent(runId, "PLANNER_PLAN_SNAPSHOT", "planner", plannerOutput,
 				"Exact execution Planner output persisted for diagnosis and durable recovery",
@@ -116,15 +116,15 @@ public class PlannerNode implements NodeAction {
 
 		// 构建提示参数
 		String semanticModel = (String) state.value(GENEGRATED_SEMANTIC_MODEL_PROMPT).orElse("");
-		SemanticQueryPlan semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
-		semanticModel = semanticModel + "\n\n# Semantic Query Plan\n" + serializeSemanticPlan(semanticPlan);
+		SemanticBlueprint semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
+		semanticModel = semanticModel + "\n\n# Semantic Blueprint\n" + serializeSemanticPlan(semanticPlan);
 		Map<String, Object> preferredPlan = StateUtil.getObjectValue(state, PREFERRED_EXECUTION_PLAN, Map.class,
 				Map.of());
 		if (!preferredPlan.isEmpty()) {
 			semanticModel = semanticModel + "\n\n# Preferred Execution Start Hint (NON-AUTHORITATIVE)\n"
 					+ preferredPlanHint(preferredPlan)
-					+ "\nThis is only a starting hint. Revalidate applicability, Semantic Query Plan, Catalog, SQL Guard, "
+					+ "\nThis is only a starting hint. Revalidate applicability, Semantic Blueprint, Catalog, SQL Guard, "
 					+ "cost policy and human review. Ignore it whenever any condition differs.";
 		}
 		SchemaDTO schemaDTO = StateUtil.getObjectValue(state, TABLE_RELATION_OUTPUT, SchemaDTO.class);
@@ -169,7 +169,7 @@ public class PlannerNode implements NodeAction {
 			.format("**REPLAN FEEDBACK (CRITICAL)**: %s\n\n**Must incorporate this feedback.**", validationError) : "";
 	}
 
-	private String serializeSemanticPlan(SemanticQueryPlan semanticPlan) {
+	private String serializeSemanticPlan(SemanticBlueprint semanticPlan) {
 		if (semanticPlan == null) {
 			return "{}";
 		}
@@ -177,7 +177,7 @@ public class PlannerNode implements NodeAction {
 			return JsonUtil.getObjectMapper().writeValueAsString(semanticPlan);
 		}
 		catch (Exception ex) {
-			throw new IllegalStateException("Failed to serialize Semantic Query Plan", ex);
+			throw new IllegalStateException("Failed to serialize Semantic Blueprint", ex);
 		}
 	}
 

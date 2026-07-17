@@ -28,7 +28,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class SemanticQueryPlan {
+public class SemanticBlueprint {
 
 	private Long projectId;
 

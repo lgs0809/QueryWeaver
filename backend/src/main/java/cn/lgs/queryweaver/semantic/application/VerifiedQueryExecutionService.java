@@ -28,7 +28,7 @@ import cn.lgs.queryweaver.semantic.compiler.CompiledSemanticQuery.CompiledSource
 import cn.lgs.queryweaver.semantic.compiler.SemanticSqlCompiler;
 import cn.lgs.queryweaver.semantic.compiler.SqlDialect;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
@@ -49,7 +49,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 @RequiredArgsConstructor
-public class GovernedQueryExecutionService {
+public class VerifiedQueryExecutionService {
 
 	private final SemanticCatalogCache semanticCatalogCache;
 	private final SemanticSqlCompiler semanticSqlCompiler;
@@ -59,13 +59,13 @@ public class GovernedQueryExecutionService {
 	private final QueryRunService queryRunService;
 
 	public ExecutionResult execute(String runId, String executionKey, Long projectId, Long versionId, String principalId,
-			SemanticQueryPlan plan) throws Exception {
+			SemanticBlueprint plan) throws Exception {
 		if (plan == null || !plan.isExecutable()) {
-			throw new IllegalArgumentException("An executable Semantic Query Plan is required");
+			throw new IllegalArgumentException("An executable Semantic Blueprint is required");
 		}
 		Map<Integer, SqlDialect> dialects = plan.getSourceSubPlans().stream()
 			.filter(source -> source.getDatasourceId() != null)
-			.collect(Collectors.toMap(SemanticQueryPlan.SourceSubPlan::getDatasourceId,
+			.collect(Collectors.toMap(SemanticBlueprint.SourceSubPlan::getDatasourceId,
 					source -> sqlExecutionService.dialect(source.getDatasourceId()), (left, right) -> left,
 					LinkedHashMap::new));
 		CompiledSemanticQuery compiled = semanticSqlCompiler.compile(plan, semanticCatalogCache.get(projectId, versionId),
@@ -76,7 +76,7 @@ public class GovernedQueryExecutionService {
 			.collect(Collectors.toMap(CompiledSourceQuery::datasourceId, source -> source, (left, right) -> left,
 					LinkedHashMap::new));
 
-		for (SemanticQueryPlan.SourceSubPlan sourcePlan : plan.getSourceSubPlans()) {
+		for (SemanticBlueprint.SourceSubPlan sourcePlan : plan.getSourceSubPlans()) {
 			CompiledSourceQuery sourceQuery = compiledByDatasource.get(sourcePlan.getDatasourceId());
 			if (sourceQuery == null) {
 				throw new IllegalStateException("Compiled query missing datasource " + sourcePlan.getDatasourceId());
@@ -93,7 +93,7 @@ public class GovernedQueryExecutionService {
 				throw new IllegalStateException("Source sub-run is terminal and cannot execute: " + sourceRun.subRunId());
 			}
 			multiSourceRunService.startSource(runId, sourceRun.subRunId(), sourceQuery.sql());
-			SemanticQueryPlan sourceSemanticPlan = sourceSemanticPlan(plan, sourcePlan);
+			SemanticBlueprint sourceSemanticPlan = sourceSemanticPlan(plan, sourcePlan);
 			try {
 				String executionOwner = runId + ":source:" + sourceRun.subRunId();
 				ResultSetBO result = sqlExecutionService.execute(projectId, versionId, principalId, executionOwner,
@@ -121,7 +121,7 @@ public class GovernedQueryExecutionService {
 		return new ExecutionResult(artifact, merged, allSql);
 	}
 
-	private String freshness(SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source, String executionOwner,
+	private String freshness(SemanticBlueprint plan, SemanticBlueprint.SourceSubPlan source, String executionOwner,
 			Long projectId) throws Exception {
 		var notice = plan.getFreshnessNotices().stream()
 			.filter(candidate -> Objects.equals(candidate.getDatasourceId(), source.getDatasourceId()))
@@ -133,23 +133,23 @@ public class GovernedQueryExecutionService {
 				notice);
 	}
 
-	private SemanticQueryPlan sourceSemanticPlan(SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source) {
+	private SemanticBlueprint sourceSemanticPlan(SemanticBlueprint plan, SemanticBlueprint.SourceSubPlan source) {
 		Set<String> modelCodes = Set.copyOf(source.getModelCodes());
-		List<SemanticQueryPlan.ProjectionSelection> sourceProjections = plan.getProjections()
+		List<SemanticBlueprint.ProjectionSelection> sourceProjections = plan.getProjections()
 			.stream()
 			.filter(item -> item.getModelCode() == null || modelCodes.contains(item.getModelCode()))
 			.toList();
 		Set<String> sourceAliases = sourceProjections.stream()
-			.map(SemanticQueryPlan.ProjectionSelection::getAlias)
+			.map(SemanticBlueprint.ProjectionSelection::getAlias)
 			.filter(alias -> alias != null && !alias.isBlank())
 			.collect(Collectors.toSet());
 		InternalMergeKey mergeKey = internalMergeKey(plan, source);
-		List<SemanticQueryPlan.GroupSelection> sourceGroups = new java.util.ArrayList<>(plan.getGroupBy()
+		List<SemanticBlueprint.GroupSelection> sourceGroups = new java.util.ArrayList<>(plan.getGroupBy()
 			.stream()
 			.filter(item -> modelCodes.contains(item.getModelCode()))
 			.toList());
 		if (mergeKey != null && plan.getMetrics().stream().anyMatch(item -> modelCodes.contains(item.getModelCode()))) {
-			sourceGroups.add(SemanticQueryPlan.GroupSelection.builder()
+			sourceGroups.add(SemanticBlueprint.GroupSelection.builder()
 				.modelCode(mergeKey.modelCode())
 				.columnName(mergeKey.columnName())
 				.alias(mergeKey.alias())
@@ -160,10 +160,10 @@ public class GovernedQueryExecutionService {
 		if (mergeKey != null && plan.getMergePlan() != null && plan.getMergePlan().getMaxRows() != null) {
 			sourceMaxRows = Math.max(sourceMaxRows, plan.getMergePlan().getMaxRows());
 		}
-		SemanticQueryPlan.ExpectedResultShape expectedResult = plan.getExpectedResult() == null ? null
-				: SemanticQueryPlan.ExpectedResultShape.builder()
+		SemanticBlueprint.ExpectedResultShape expectedResult = plan.getExpectedResult() == null ? null
+				: SemanticBlueprint.ExpectedResultShape.builder()
 					.columns(sourceProjections.stream()
-						.map(SemanticQueryPlan.ProjectionSelection::getAlias)
+						.map(SemanticBlueprint.ProjectionSelection::getAlias)
 						.filter(alias -> alias != null && !alias.isBlank())
 						.toList())
 					.grain(plan.getExpectedResult().getGrain())
@@ -171,7 +171,7 @@ public class GovernedQueryExecutionService {
 					.tabular(plan.getExpectedResult().getTabular())
 					.chartable(plan.getExpectedResult().getChartable())
 					.build();
-		return SemanticQueryPlan.builder()
+		return SemanticBlueprint.builder()
 			.projectId(plan.getProjectId())
 			.projectVersionId(plan.getProjectVersionId())
 			.canonicalQuery(plan.getCanonicalQuery())
@@ -203,7 +203,7 @@ public class GovernedQueryExecutionService {
 			.build();
 	}
 
-	private InternalMergeKey internalMergeKey(SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source) {
+	private InternalMergeKey internalMergeKey(SemanticBlueprint plan, SemanticBlueprint.SourceSubPlan source) {
 		if (plan.getMergePlan() == null || plan.getSourceSubPlans().size() < 2) {
 			return null;
 		}
@@ -227,7 +227,7 @@ public class GovernedQueryExecutionService {
 		return null;
 	}
 
-	private void protectInternalMergeKey(ResultSetBO result, SemanticQueryPlan plan, SemanticQueryPlan.SourceSubPlan source) {
+	private void protectInternalMergeKey(ResultSetBO result, SemanticBlueprint plan, SemanticBlueprint.SourceSubPlan source) {
 		InternalMergeKey key = internalMergeKey(plan, source);
 		if (key == null || result == null || result.getData() == null) {
 			return;

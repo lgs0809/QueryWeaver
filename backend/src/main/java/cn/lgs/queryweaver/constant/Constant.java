@@ -110,10 +110,10 @@ public final class Constant {
 
 	public static final String SQL_GENERATE_OUTPUT = "SQL_GENERATE_OUTPUT";
 
-	/** Physical SQL produced by Semantic SQL dry-plan; empty for deterministic compiler paths. */
+	/** Physical SQL produced by Query Preflight; empty for deterministic compiler paths. */
 	public static final String SQL_PHYSICAL_OUTPUT = "SQL_PHYSICAL_OUTPUT";
 
-	/** Structured, non-database Semantic SQL dry-plan diagnostics for traces and recovery. */
+	/** Structured, non-database Query Preflight diagnostics for traces and recovery. */
 	public static final String SQL_DRY_PLAN_OUTPUT = "SQL_DRY_PLAN_OUTPUT";
 
 	public static final String SQL_COMPILED_PARAMETERS = "SQL_COMPILED_PARAMETERS";

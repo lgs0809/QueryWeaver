@@ -63,7 +63,7 @@ import cn.lgs.queryweaver.review.QueryRepairPolicy;
 import cn.lgs.queryweaver.review.QueryRepairPolicy.BudgetDecision;
 import cn.lgs.queryweaver.review.QueryRepairPolicy.RepairBudget;
 import cn.lgs.queryweaver.run.RunNodeEffectService;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
 import cn.lgs.queryweaver.sql.application.SensitiveResultSanitizer;
 import cn.lgs.queryweaver.sql.application.SqlCostGuard;
@@ -173,15 +173,15 @@ public class SqlExecuteNode implements NodeAction {
 
 		Integer datasourceId = StateUtil.getObjectValue(state, DATASOURCE_ID, Integer.class);
 		DbConfigBO dbConfig = databaseUtil.getDatasourceDbConfig(datasourceId);
-		SemanticQueryPlan semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		Long projectId = StateUtil.getObjectValue(state, PROJECT_ID, Long.class);
 		Long projectVersionId = StateUtil.getObjectValue(state, PROJECT_VERSION_ID, Long.class);
 		SemanticCatalogSnapshot catalog = semanticCatalogCache.get(projectId, projectVersionId);
 		Set<String> allowedTables = semanticPlan == null ? Set.of()
 				: semanticPlan.getModels()
 					.stream()
-					.map(SemanticQueryPlan.ModelSelection::getPhysicalTable)
+					.map(SemanticBlueprint.ModelSelection::getPhysicalTable)
 					.collect(Collectors.toUnmodifiableSet());
 		String runId = state.value(RUN_ID, "");
 		Map<String, String> existingResults = StateUtil.getObjectValue(state, SQL_EXECUTE_NODE_OUTPUT, Map.class,
@@ -225,14 +225,14 @@ public class SqlExecuteNode implements NodeAction {
 	 * @param sqlQuery The SQL query to execute
 	 * @param dbConfig The database configuration to use for execution
 	 * @param datasourceId The pinned QueryWeaver datasource ID
-	 * @param allowedTables Tables exposed by the pinned Semantic Query Plan
-	 * @param semanticPlan Pinned Semantic Query Plan used for result validation
+	 * @param allowedTables Tables exposed by the pinned Semantic Blueprint
+	 * @param semanticPlan Pinned Semantic Blueprint used for result validation
 	 * @return Map containing the generator for streaming output
 	 */
 	@SuppressWarnings("unchecked")
 	private Map<String, Object> executeSqlQuery(OverAllState state, Integer currentStep, String sqlQuery,
 			List<Object> sqlParameters, DbConfigBO dbConfig, Integer datasourceId, Long projectId,
-			Set<String> allowedTables, SemanticQueryPlan semanticPlan, SemanticCatalogSnapshot catalog,
+			Set<String> allowedTables, SemanticBlueprint semanticPlan, SemanticCatalogSnapshot catalog,
 			Map<String, String> existingResults, Map<String, String> existingQueries, String runId, String effectKey,
 			String effectInputHash) {
 		final Map<String, Object> result = new HashMap<>();
@@ -574,18 +574,18 @@ public class SqlExecuteNode implements NodeAction {
 		return explainCost;
 	}
 
-	private Set<String> semanticTimeColumns(SemanticQueryPlan semanticPlan) {
+	private Set<String> semanticTimeColumns(SemanticBlueprint semanticPlan) {
 		if (semanticPlan == null) {
 			return Set.of();
 		}
 		Set<String> columns = semanticPlan.getMetrics()
 			.stream()
-			.map(SemanticQueryPlan.MetricSelection::getTimeColumn)
+			.map(SemanticBlueprint.MetricSelection::getTimeColumn)
 			.filter(value -> value != null && !value.isBlank())
 			.collect(Collectors.toSet());
 		semanticPlan.getGrains()
 			.stream()
-			.map(SemanticQueryPlan.GrainSelection::getTimeColumn)
+			.map(SemanticBlueprint.GrainSelection::getTimeColumn)
 			.filter(value -> value != null && !value.isBlank())
 			.forEach(columns::add);
 		return Set.copyOf(columns);

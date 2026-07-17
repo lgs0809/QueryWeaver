@@ -15,7 +15,7 @@
  */
 package cn.lgs.queryweaver.task;
 
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
@@ -28,7 +28,7 @@ import org.springframework.util.StringUtils;
 /**
  * Deterministic final synthesis for a multi-task request.
  *
- * <p>The service only renders facts that already exist in each executed Semantic Query Plan and durable accepted Todo
+ * <p>The service only renders facts that already exist in each executed Semantic Blueprint and durable accepted Todo
  * result. It does not invoke a model and therefore cannot add a new metric/filter/time definition during final
  * wording.</p>
  */
@@ -52,7 +52,7 @@ public class GroundedRequestSynthesisService {
 		}
 		for (int index = 0; index < tasks.size(); index++) {
 			QueryTask task = tasks.get(index);
-			SemanticQueryPlan plan = taskRepository.plan(runId, task.taskId());
+			SemanticBlueprint plan = taskRepository.plan(runId, task.taskId());
 			output.append(index + 1).append(". ").append(task.question()).append('\n');
 			String planFacts = renderPlanFacts(plan);
 			if (!planFacts.isBlank()) {
@@ -85,7 +85,7 @@ public class GroundedRequestSynthesisService {
 		}
 	}
 
-	private String renderPlanFacts(SemanticQueryPlan plan) {
+	private String renderPlanFacts(SemanticBlueprint plan) {
 		if (plan == null) {
 			return "";
 		}

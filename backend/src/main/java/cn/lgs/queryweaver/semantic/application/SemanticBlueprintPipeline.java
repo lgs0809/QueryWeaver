@@ -17,11 +17,11 @@ package cn.lgs.queryweaver.semantic.application;
 
 import cn.lgs.queryweaver.learning.QueryCaseHints;
 import cn.lgs.queryweaver.learning.ValidatedQueryExampleService;
-import cn.lgs.queryweaver.semantic.application.LlmSemanticPlanningService.PlanningDecision;
-import cn.lgs.queryweaver.semantic.application.LlmSemanticPlanningService.PlannerProfile;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintGenerationService.PlanningDecision;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintGenerationService.PlannerProfile;
 import cn.lgs.queryweaver.semantic.application.SemanticCatalogApplicationService.PlanningRecall;
 import cn.lgs.queryweaver.semantic.domain.SemanticCandidateSet;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,16 +39,16 @@ import org.springframework.util.StringUtils;
  * generic NL2SQL error.
  */
 @Service
-public class SemanticPlanningPipeline {
+public class SemanticBlueprintPipeline {
 
 	private final SemanticCatalogApplicationService catalogService;
 
-	private final LlmSemanticPlanningService llmPlanningService;
+	private final SemanticBlueprintGenerationService llmPlanningService;
 
 	private final ValidatedQueryExampleService queryExampleService;
 
-	public SemanticPlanningPipeline(SemanticCatalogApplicationService catalogService,
-			LlmSemanticPlanningService llmPlanningService, ValidatedQueryExampleService queryExampleService) {
+	public SemanticBlueprintPipeline(SemanticCatalogApplicationService catalogService,
+			SemanticBlueprintGenerationService llmPlanningService, ValidatedQueryExampleService queryExampleService) {
 		this.catalogService = catalogService;
 		this.llmPlanningService = llmPlanningService;
 		this.queryExampleService = queryExampleService;
@@ -109,7 +109,7 @@ public class SemanticPlanningPipeline {
 		long bindingMs = elapsedMillis(bindingStarted);
 
 		long resolutionStarted = System.nanoTime();
-		SemanticQueryPlan plan = catalogService.buildQueryPlan(request.projectId(), request.projectVersionId(), request.query(),
+		SemanticBlueprint plan = catalogService.buildBlueprint(request.projectId(), request.projectVersionId(), request.query(),
 				candidateTables, binding);
 		if (!plan.isExecutable()) {
 			throw new SemanticPlanningRejectedException("PLAN_RESOLUTION_ERROR",
@@ -162,7 +162,7 @@ public class SemanticPlanningPipeline {
 		}
 	}
 
-	public record PlanningResult(SemanticQueryPlan plan, SemanticCandidateSet candidateSet,
+	public record PlanningResult(SemanticBlueprint plan, SemanticCandidateSet candidateSet,
 			QueryCaseHints historicalHints, QueryCaseHints binding, PlanningTrace trace) {
 	}
 

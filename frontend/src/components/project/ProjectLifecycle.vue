@@ -11,11 +11,11 @@
         <p>{{ lifecycleDescription }}</p>
       </div>
       <el-button
-        v-if="showAction && primaryAction"
+        v-if="showAction && actionTarget"
         :type="health.queryReady ? 'primary' : 'default'"
-        @click="emit('action', primaryAction.target)"
+        @click="emit('action', actionTarget)"
       >
-        {{ health.queryReady ? '开始问数' : primaryAction.label }}
+        {{ health.queryReady ? '开始问数' : primaryAction?.label }}
       </el-button>
     </div>
 
@@ -57,6 +57,9 @@
 
   const stages = computed(() => projectLifecycleStages(props.health));
   const primaryAction = computed(() => projectPrimaryAction(props.health));
+  const actionTarget = computed<ProjectHealthAction['target'] | undefined>(() =>
+    props.health?.queryReady ? 'chat' : primaryAction.value?.target,
+  );
   const lifecycleTitle = computed(() => {
     if (props.health?.queryReady) return '项目已准备好，可以稳定进入问数';
     const current = stages.value.find(stage => stage.state === 'current');

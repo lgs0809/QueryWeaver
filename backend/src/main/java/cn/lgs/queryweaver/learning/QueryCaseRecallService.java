@@ -19,7 +19,7 @@ import cn.lgs.queryweaver.common.EmbeddingModelSupport;
 import cn.lgs.queryweaver.common.json.JsonPayloadRegistry;
 import cn.lgs.queryweaver.common.json.VersionedJson;
 import cn.lgs.queryweaver.learning.QueryCaseHints.EnumBindingHint;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -149,20 +149,20 @@ public class QueryCaseRecallService {
 		if (recordUsage) {
 			usageService.recordRecall(top.id());
 		}
-		SemanticQueryPlan plan = top.plan();
-		Set<String> models = plan.getModels().stream().map(SemanticQueryPlan.ModelSelection::getModelCode)
+		SemanticBlueprint plan = top.plan();
+		Set<String> models = plan.getModels().stream().map(SemanticBlueprint.ModelSelection::getModelCode)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-		Set<String> metrics = plan.getMetrics().stream().map(SemanticQueryPlan.MetricSelection::getMetricCode)
+		Set<String> metrics = plan.getMetrics().stream().map(SemanticBlueprint.MetricSelection::getMetricCode)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-		Set<String> dimensions = plan.getDimensions().stream().map(SemanticQueryPlan.DimensionSelection::getDimensionCode)
+		Set<String> dimensions = plan.getDimensions().stream().map(SemanticBlueprint.DimensionSelection::getDimensionCode)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-		Set<String> grains = plan.getGrains().stream().map(SemanticQueryPlan.GrainSelection::getGrainCode)
+		Set<String> grains = plan.getGrains().stream().map(SemanticBlueprint.GrainSelection::getGrainCode)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		Set<String> relationships = plan.getRelationships()
 			.stream()
-			.map(SemanticQueryPlan.RelationshipSelection::getRelationshipCode)
+			.map(SemanticBlueprint.RelationshipSelection::getRelationshipCode)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-		Set<String> rules = plan.getRules().stream().map(SemanticQueryPlan.RuleSelection::getRuleCode)
+		Set<String> rules = plan.getRules().stream().map(SemanticBlueprint.RuleSelection::getRuleCode)
 			.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		List<EnumBindingHint> enums = plan.getEnumResolutions()
 			.stream()
@@ -182,7 +182,7 @@ public class QueryCaseRecallService {
 	}
 
 	private ScoredCase scoredCase(Map<String, Object> row, double score, double relevance) {
-		SemanticQueryPlan plan = readPlanJson(Objects.toString(row.get("typed_ir_json"), "")).orElse(null);
+		SemanticBlueprint plan = readPlanJson(Objects.toString(row.get("typed_ir_json"), "")).orElse(null);
 		return new ScoredCase(Objects.toString(row.get("id")), Objects.toString(row.get("intent_type")), plan, score,
 				relevance);
 	}
@@ -280,15 +280,15 @@ public class QueryCaseRecallService {
 	private double relevanceScore(String question, Map<String, Object> row) {
 		double lexical = similarity(question, Objects.toString(row.get("normalized_question")));
 		double structure = 0;
-		Optional<SemanticQueryPlan> plan = readPlanJson(Objects.toString(row.get("typed_ir_json"), ""));
+		Optional<SemanticBlueprint> plan = readPlanJson(Objects.toString(row.get("typed_ir_json"), ""));
 		if (plan.isPresent()) {
 			String normalized = normalizeText(question);
 			structure += mentioned(normalized, plan.orElseThrow().getMetrics(),
-					SemanticQueryPlan.MetricSelection::getMetricCode,
-					SemanticQueryPlan.MetricSelection::getBusinessName) * 180;
+					SemanticBlueprint.MetricSelection::getMetricCode,
+					SemanticBlueprint.MetricSelection::getBusinessName) * 180;
 			structure += mentioned(normalized, plan.orElseThrow().getDimensions(),
-					SemanticQueryPlan.DimensionSelection::getDimensionCode,
-					SemanticQueryPlan.DimensionSelection::getBusinessName) * 120;
+					SemanticBlueprint.DimensionSelection::getDimensionCode,
+					SemanticBlueprint.DimensionSelection::getBusinessName) * 120;
 			structure += plan.orElseThrow()
 				.getEnumResolutions()
 				.stream()
@@ -321,13 +321,13 @@ public class QueryCaseRecallService {
 			.anyMatch(normalized::contains);
 	}
 
-	private Optional<SemanticQueryPlan> readPlanJson(String value) {
+	private Optional<SemanticBlueprint> readPlanJson(String value) {
 		if (!StringUtils.hasText(value)) {
 			return Optional.empty();
 		}
 		try {
 			return Optional
-				.of(versionedJson.read(value, JsonPayloadRegistry.SEMANTIC_QUERY_PLAN, SemanticQueryPlan.class));
+				.of(versionedJson.read(value, JsonPayloadRegistry.SEMANTIC_QUERY_PLAN, SemanticBlueprint.class));
 		}
 		catch (Exception ex) {
 			return Optional.empty();
@@ -378,7 +378,7 @@ public class QueryCaseRecallService {
 		return Objects.toString(value, "").trim().toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ");
 	}
 
-	private record ScoredCase(String id, String intentType, SemanticQueryPlan plan, double score, double relevance) {
+	private record ScoredCase(String id, String intentType, SemanticBlueprint plan, double score, double relevance) {
 	}
 
 	private record ScoredCandidate(Map<String, Object> row, double score, double relevance) {

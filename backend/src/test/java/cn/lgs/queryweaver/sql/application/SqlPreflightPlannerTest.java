@@ -13,25 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.lgs.queryweaver.semantic.compiler;
+package cn.lgs.queryweaver.sql.application;
 
-/** Raised when generated Semantic SQL cannot be resolved against the frozen semantic model. */
-public class SemanticSqlDryPlanException extends RuntimeException {
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-	private final String code;
+import org.junit.jupiter.api.Test;
 
-	public SemanticSqlDryPlanException(String code, String message) {
-		super(message);
-		this.code = code;
-	}
+class SqlPreflightPlannerTest {
 
-	public SemanticSqlDryPlanException(String code, String message, Throwable cause) {
-		super(message, cause);
-		this.code = code;
-	}
+	private final SqlPreflightPlanner planner = new SqlPreflightPlanner();
 
-	public String code() {
-		return code;
+	@Test
+	void usesNonExecutingJsonExplainForMysqlAndPostgresql() {
+		assertEquals("EXPLAIN FORMAT=JSON SELECT id FROM orders",
+				planner.explainSql("SELECT id FROM orders;", "mysql").orElseThrow());
+		assertEquals("EXPLAIN (FORMAT JSON, COSTS TRUE) SELECT id FROM orders",
+				planner.explainSql("SELECT id FROM orders;", "postgresql").orElseThrow());
 	}
 
 }

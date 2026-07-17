@@ -19,7 +19,7 @@ import cn.lgs.queryweaver.properties.ConversationContextProperties;
 import cn.lgs.queryweaver.run.ExecutionSnapshotService;
 import cn.lgs.queryweaver.run.QueryRun;
 import cn.lgs.queryweaver.run.QueryRunService;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.service.graph.Context.ConversationTurnSummary.AssetFact;
 import cn.lgs.queryweaver.service.graph.Context.ConversationTurnSummary.ClarificationFact;
 import cn.lgs.queryweaver.service.graph.Context.ConversationTurnSummary.FilterFact;
@@ -75,7 +75,7 @@ public class ConversationTurnSummarizer {
 	public CompletionContext summarize(String runId, String userQuestion, String plannerOutput) {
 		try {
 			QueryRun run = runService.get(runId);
-			SemanticQueryPlan plan = snapshotService.readTyped(run.executionSnapshot())
+			SemanticBlueprint plan = snapshotService.readTyped(run.executionSnapshot())
 				.map(snapshot -> snapshot.semanticPlan())
 				.orElse(null);
 			ResultFact result = result(runId).orElse(null);
@@ -101,7 +101,7 @@ public class ConversationTurnSummarizer {
 		}
 	}
 
-	private ConversationTurnSummary fromPlan(SemanticQueryPlan plan, List<ClarificationFact> clarifications,
+	private ConversationTurnSummary fromPlan(SemanticBlueprint plan, List<ClarificationFact> clarifications,
 			ResultFact result) {
 		return new ConversationTurnSummary(ConversationTurnSummary.CURRENT_SCHEMA_VERSION, plan.getCanonicalQuery(),
 				plan.getModels()
@@ -137,7 +137,7 @@ public class ConversationTurnSummarizer {
 				List.of(), List.of(), List.of(), null, List.of(), List.of(), result, retainedPlan);
 	}
 
-	private TimeRangeFact timeRange(SemanticQueryPlan.TimeRangeSelection value) {
+	private TimeRangeFact timeRange(SemanticBlueprint.TimeRangeSelection value) {
 		return value == null ? null
 				: new TimeRangeFact(value.getModelCode(), value.getTimeColumn(), value.getStartInclusive(),
 						value.getEndExclusive(), value.getRelativeExpression(), value.getTimeZone(),

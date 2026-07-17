@@ -29,7 +29,7 @@ import cn.lgs.queryweaver.semantic.application.SemanticCatalogPatchAnalyzer;
 import cn.lgs.queryweaver.semantic.domain.SemanticAssetProvenance.AssetType;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogRepository;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
@@ -87,7 +87,7 @@ public class SemanticCorrectionProposalService {
 					"Only governed semantic or planning corrections can create proposals: " + normalizedCategory);
 		}
 		String text = required(correctionText, "correctionText");
-		SemanticQueryPlan plan = snapshotService.readTyped(run.executionSnapshot())
+		SemanticBlueprint plan = snapshotService.readTyped(run.executionSnapshot())
 			.map(snapshot -> snapshot.semanticPlan())
 			.orElse(null);
 		String catalogHash = jdbc.queryForObject("SELECT catalog_hash FROM qw_project_version WHERE id = ?",
@@ -147,7 +147,7 @@ public class SemanticCorrectionProposalService {
 		return new ProposalResult(persistedId, candidateType, target.assetType(), target.assetKey(), "CANDIDATE");
 	}
 
-	private ProposalMaterial planningProposal(QueryRun run, SemanticQueryPlan rejectedPlan, String catalogHash,
+	private ProposalMaterial planningProposal(QueryRun run, SemanticBlueprint rejectedPlan, String catalogHash,
 			String correctionText) {
 		AssetTarget manualTarget = new AssetTarget("PLANNING_POLICY", "PLANNING:RUN:" + run.runId());
 		if (rejectedPlan == null) {
@@ -242,7 +242,7 @@ public class SemanticCorrectionProposalService {
 		return Map.copyOf(evidence);
 	}
 
-	private AssetTarget target(String category, SemanticQueryPlan plan, String runId) {
+	private AssetTarget target(String category, SemanticBlueprint plan, String runId) {
 		if (plan != null && "DEFINITION".equals(category) && plan.getMetrics().size() == 1) {
 			return new AssetTarget("METRIC", plan.getMetrics().get(0).getMetricCode());
 		}

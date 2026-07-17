@@ -52,10 +52,10 @@ import cn.lgs.queryweaver.run.QueryRun;
 import cn.lgs.queryweaver.run.QueryRunService;
 import cn.lgs.queryweaver.semantic.application.SemanticCatalogApplicationService;
 import cn.lgs.queryweaver.semantic.application.SemanticPlanningClarificationRequiredException;
-import cn.lgs.queryweaver.semantic.application.SemanticPlanningPipeline;
-import cn.lgs.queryweaver.semantic.application.SemanticPlanningPipeline.PlanningRequest;
-import cn.lgs.queryweaver.semantic.application.SemanticPlanningPipeline.PlanningResult;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintPipeline;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintPipeline.PlanningRequest;
+import cn.lgs.queryweaver.semantic.application.SemanticBlueprintPipeline.PlanningResult;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.task.QueryTask;
 import cn.lgs.queryweaver.task.QueryTaskRepository;
 import cn.lgs.queryweaver.task.RequestExecutionContext;
@@ -79,18 +79,18 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * Resolves a deterministic, Semantic Query Plan before generic tool planning and SQL
+ * Resolves a deterministic, Semantic Blueprint before generic tool planning and SQL
  * generation. The node rejects disconnected semantic models instead of allowing an LLM to
  * invent joins or metric definitions.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class SemanticPlanNode implements NodeAction {
+public class SemanticBlueprintNode implements NodeAction {
 
 	private final SemanticCatalogApplicationService semanticCatalogService;
 
-	private final SemanticPlanningPipeline semanticPlanningPipeline;
+	private final SemanticBlueprintPipeline semanticBlueprintPipeline;
 
 	private final ValidatedQueryExampleService queryExampleService;
 
@@ -118,13 +118,13 @@ public class SemanticPlanNode implements NodeAction {
 		Long projectVersionId = StateUtil.getObjectValue(state, PROJECT_VERSION_ID, Long.class);
 		String canonicalQuery = StateUtil.getCanonicalQuery(state);
 		if (state.value(APPROVED_PLAN_RECOVERY, false)) {
-			SemanticQueryPlan approved = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-					(SemanticQueryPlan) null);
+			SemanticBlueprint approved = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+					(SemanticBlueprint) null);
 			if (approved == null || !approved.isExecutable() || !Objects.equals(projectId, approved.getProjectId())
 					|| !Objects.equals(projectVersionId, approved.getProjectVersionId())) {
-				throw new IllegalStateException("Approved Semantic Query Plan recovery payload is missing or incompatible");
+				throw new IllegalStateException("Approved Semantic Blueprint recovery payload is missing or incompatible");
 			}
-			log.info("Reusing exact approved Semantic Query Plan for durable checkpoint-loss recovery");
+			log.info("Reusing exact approved Semantic Blueprint for durable checkpoint-loss recovery");
 			return Map.of(TYPED_SEMANTIC_PLAN, approved, APPROVED_PLAN_RECOVERY, false, FORCE_SEMANTIC_REPLAN, false);
 		}
 		String semanticReplanFeedback = StateUtil.getStringValue(state, SEMANTIC_REPLAN_FEEDBACK, "");
@@ -176,7 +176,7 @@ public class SemanticPlanNode implements NodeAction {
 					clarificationRequired.clarification());
 			throw new RuntimeClarificationRequiredException(runId, clarification.clarificationId());
 		}
-		SemanticQueryPlan plan = resolution.plan();
+		SemanticBlueprint plan = resolution.plan();
 		String activeTodoId = StateUtil.getStringValue(state, ACTIVE_TODO_ID, "");
 		if (state.value(TODO_ENABLED, false) && !activeTodoId.isBlank()) {
 			queryTaskRepository.savePlan(runId, activeTodoId, plan);
@@ -188,12 +188,12 @@ public class SemanticPlanNode implements NodeAction {
 		}
 		QueryCaseHints recalledHints = resolution.historicalHints();
 		QueryCaseHints caseHints = requiredHints.emptyHints() ? recalledHints : mergeHints(recalledHints, requiredHints);
-		log.info("Resolved Semantic Query Plan: models={}, metrics={}, dimensions={}, relationships={}, warnings={}",
+		log.info("Resolved Semantic Blueprint: models={}, metrics={}, dimensions={}, relationships={}, warnings={}",
 				plan.getModels().size(), plan.getMetrics().size(), plan.getDimensions().size(),
 				plan.getRelationships().size(), plan.getValidationWarnings());
 		if (!plan.isExecutable()) {
 			throw new IllegalStateException(
-					"Typed semantic plan is not executable: " + String.join("; ", plan.getValidationErrors()));
+					"Semantic Blueprint is not executable: " + String.join("; ", plan.getValidationErrors()));
 		}
 		Map<String, Object> result = new HashMap<>();
 		result.put(TYPED_SEMANTIC_PLAN, plan);
@@ -209,7 +209,7 @@ public class SemanticPlanNode implements NodeAction {
 			result.put(QUERY_PATTERN_ID, "");
 		}
 		String scopedSemanticPrompt = semanticCatalogService.renderRuntimePrompt(projectId, projectVersionId,
-				plan.getModels().stream().map(SemanticQueryPlan.ModelSelection::getPhysicalTable).toList());
+				plan.getModels().stream().map(SemanticBlueprint.ModelSelection::getPhysicalTable).toList());
 		if (scopedSemanticPrompt != null && !scopedSemanticPrompt.isBlank()) {
 			result.put(GENEGRATED_SEMANTIC_MODEL_PROMPT, scopedSemanticPrompt);
 		}
@@ -223,7 +223,7 @@ public class SemanticPlanNode implements NodeAction {
 		return result;
 	}
 
-	private void persistQueryUnderstanding(String runId, String activeTodoId, String query, SemanticQueryPlan plan) {
+	private void persistQueryUnderstanding(String runId, String activeTodoId, String query, SemanticBlueprint plan) {
 		if (runId == null || runId.isBlank() || plan == null) {
 			return;
 		}
@@ -246,25 +246,25 @@ public class SemanticPlanNode implements NodeAction {
 				"query-understanding:" + runId + ":" + scope + ":" + Integer.toHexString(understanding.hashCode()));
 	}
 
-	private void persistSemanticPlanSnapshot(String runId, String activeTodoId, SemanticQueryPlan plan) {
+	private void persistSemanticPlanSnapshot(String runId, String activeTodoId, SemanticBlueprint plan) {
 		if (runId == null || runId.isBlank() || plan == null) {
 			return;
 		}
 		String payload = canonicalJson.write(plan);
 		String scope = activeTodoId == null || activeTodoId.isBlank() ? "simple" : activeTodoId;
 		queryRunService.appendEvent(runId, "SEMANTIC_PLAN_SNAPSHOT", "semantic-plan", payload,
-				"Exact Semantic Query Plan snapshot persisted for diagnosis and recovery",
+				"Exact Semantic Blueprint snapshot persisted for diagnosis and recovery",
 				"semantic-plan-snapshot:" + runId + ":" + scope + ":" + Integer.toHexString(payload.hashCode()));
 	}
 
-	private void persistApprovalPlanSnapshot(String runId, String activeTodoId, SemanticQueryPlan plan) {
+	private void persistApprovalPlanSnapshot(String runId, String activeTodoId, SemanticBlueprint plan) {
 		if (runId == null || runId.isBlank() || plan == null) {
 			return;
 		}
 		String payload = canonicalJson.write(plan);
 		String scope = activeTodoId == null || activeTodoId.isBlank() ? "simple" : activeTodoId;
 		queryRunService.appendEvent(runId, "APPROVAL_PLAN_SNAPSHOT", "semantic-plan", payload,
-				"Exact Semantic Query Plan snapshot persisted for approval",
+				"Exact Semantic Blueprint snapshot persisted for approval",
 				"approval-plan:" + runId + ":" + scope + ":" + Integer.toHexString(payload.hashCode()));
 	}
 
@@ -303,7 +303,7 @@ public class SemanticPlanNode implements NodeAction {
 			if (task.status() != QueryTask.TaskStatus.DONE) {
 				continue;
 			}
-			SemanticQueryPlan acceptedPlan = queryTaskRepository.plan(runId, task.taskId());
+			SemanticBlueprint acceptedPlan = queryTaskRepository.plan(runId, task.taskId());
 			if (acceptedPlan == null) {
 				continue;
 			}
@@ -359,7 +359,7 @@ public class SemanticPlanNode implements NodeAction {
 	private PlanResolution resolvePlan(String runId, Long projectId, Long projectVersionId, String catalogHash,
 			String canonicalQuery, String contextHash, List<String> physicalTables, QueryCaseHints requiredHints,
 			boolean forceReplan, String retrievalRepairQuery) {
-		Optional<SemanticQueryPlan> pinned = !forceReplan && (requiredHints == null || requiredHints.emptyHints())
+		Optional<SemanticBlueprint> pinned = !forceReplan && (requiredHints == null || requiredHints.emptyHints())
 				? pinnedPlan(runId, projectId, projectVersionId, physicalTables) : Optional.empty();
 		if (pinned.isPresent()) {
 			QueryCaseHints historicalHints = queryExampleService.recallHints(projectId, projectVersionId, catalogHash,
@@ -367,7 +367,7 @@ public class SemanticPlanNode implements NodeAction {
 			queryExampleService.recordHintUsage(runId, historicalHints);
 			return new PlanResolution(pinned.orElseThrow(), historicalHints);
 		}
-		PlanningResult planning = semanticPlanningPipeline.plan(new PlanningRequest(projectId, projectVersionId,
+		PlanningResult planning = semanticBlueprintPipeline.plan(new PlanningRequest(projectId, projectVersionId,
 				catalogHash, canonicalQuery, contextHash, physicalTables, requiredHints, 20, 5, retrievalRepairQuery));
 		queryExampleService.recordHintUsage(runId, planning.historicalHints());
 		if (runId != null && !runId.isBlank()) {
@@ -378,10 +378,10 @@ public class SemanticPlanNode implements NodeAction {
 		return new PlanResolution(planning.plan(), planning.historicalHints());
 	}
 
-	private SchemaDTO scopeSchema(SchemaDTO schema, SemanticQueryPlan plan) {
+	private SchemaDTO scopeSchema(SchemaDTO schema, SemanticBlueprint plan) {
 		Set<String> selectedTables = plan.getModels()
 			.stream()
-			.map(SemanticQueryPlan.ModelSelection::getPhysicalTable)
+			.map(SemanticBlueprint.ModelSelection::getPhysicalTable)
 			.filter(value -> value != null && !value.isBlank())
 			.collect(java.util.stream.Collectors.toCollection(HashSet::new));
 		SchemaDTO scoped = new SchemaDTO();
@@ -393,14 +393,14 @@ public class SemanticPlanNode implements NodeAction {
 		scoped.setTableCount(tables.size());
 		scoped.setForeignKeys(plan.getRelationships()
 			.stream()
-			.map(SemanticQueryPlan.RelationshipSelection::getJoinCondition)
+			.map(SemanticBlueprint.RelationshipSelection::getJoinCondition)
 			.filter(value -> value != null && !value.isBlank())
 			.distinct()
 			.toList());
 		return scoped;
 	}
 
-	private Optional<SemanticQueryPlan> pinnedPlan(String runId, Long projectId, Long projectVersionId,
+	private Optional<SemanticBlueprint> pinnedPlan(String runId, Long projectId, Long projectVersionId,
 			List<String> selectedPhysicalTables) {
 		if (runId == null || runId.isBlank()) {
 			return Optional.empty();
@@ -412,7 +412,7 @@ public class SemanticPlanNode implements NodeAction {
 			.map(plan -> validatePinnedPlan(plan, projectId, projectVersionId, selectedPhysicalTables));
 	}
 
-	private SemanticQueryPlan validatePinnedPlan(SemanticQueryPlan plan, Long projectId, Long projectVersionId,
+	private SemanticBlueprint validatePinnedPlan(SemanticBlueprint plan, Long projectId, Long projectVersionId,
 			List<String> selectedPhysicalTables) {
 		if (!projectId.equals(plan.getProjectId()) || !projectVersionId.equals(plan.getProjectVersionId())) {
 			throw new IllegalStateException("Pinned semantic plan does not belong to the active project version");
@@ -422,7 +422,7 @@ public class SemanticPlanNode implements NodeAction {
 		}
 		Set<String> pinnedTables = plan.getModels()
 			.stream()
-			.map(SemanticQueryPlan.ModelSelection::getPhysicalTable)
+			.map(SemanticBlueprint.ModelSelection::getPhysicalTable)
 			.collect(java.util.stream.Collectors.toCollection(HashSet::new));
 		Set<String> selectedTables = new HashSet<>(selectedPhysicalTables);
 		if (!pinnedTables.containsAll(selectedTables)) {
@@ -432,7 +432,7 @@ public class SemanticPlanNode implements NodeAction {
 	}
 
 	private Optional<PreferredPlan> resolvePreferredExecutionPlan(OverAllState state, Long projectId,
-			Long projectVersionId, SemanticQueryPlan plan) {
+			Long projectVersionId, SemanticBlueprint plan) {
 		String runId = StateUtil.getStringValue(state, RUN_ID, null);
 		if (runId == null || runId.isBlank()) {
 			return Optional.empty();
@@ -461,7 +461,7 @@ public class SemanticPlanNode implements NodeAction {
 		}
 	}
 
-	private record PlanResolution(SemanticQueryPlan plan, QueryCaseHints historicalHints) {
+	private record PlanResolution(SemanticBlueprint plan, QueryCaseHints historicalHints) {
 	}
 
 	private record PreferredPlan(String patternId, Map<String, Object> plan) {

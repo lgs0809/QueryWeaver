@@ -15,7 +15,7 @@
  */
 package cn.lgs.queryweaver.sql.application;
 
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -29,7 +29,7 @@ import org.springframework.stereotype.Component;
  * semantic plan. Missing constraint types are ignored rather than inferred.
  */
 @Component
-public class TypedPlanSqlConstraintValidator {
+public class BlueprintSqlConstraintValidator {
 
 	private static final Pattern PRE_AGGREGATION_STRUCTURE = Pattern.compile("(?is)\\bwith\\b|\\bjoin\\s*\\(");
 
@@ -45,13 +45,13 @@ public class TypedPlanSqlConstraintValidator {
 	private static final Set<String> MANDATORY_RULE_TYPES = Set.of("mandatory_filter", "row_filter", "security_filter",
 			"data_scope", "required_predicate", "business_filter");
 
-	public ValidationResult validate(String sql, SemanticQueryPlan plan) {
+	public ValidationResult validate(String sql, SemanticBlueprint plan) {
 		return validate(sql, List.of(), plan);
 	}
 
-	public ValidationResult validate(String sql, List<?> parameters, SemanticQueryPlan plan) {
+	public ValidationResult validate(String sql, List<?> parameters, SemanticBlueprint plan) {
 		if (plan == null) {
-			return ValidationResult.rejected(List.of("Typed semantic plan is missing"), List.of());
+			return ValidationResult.rejected(List.of("Semantic Blueprint is missing"), List.of());
 		}
 		if (sql == null || sql.isBlank()) {
 			return ValidationResult.rejected(List.of("SQL is blank"), List.of());
@@ -125,9 +125,9 @@ public class TypedPlanSqlConstraintValidator {
 		return "'" + value.toString().replace("'", "''") + "'";
 	}
 
-	private void validateMetrics(String canonicalSql, List<SemanticQueryPlan.MetricSelection> metrics,
+	private void validateMetrics(String canonicalSql, List<SemanticBlueprint.MetricSelection> metrics,
 			List<String> errors) {
-		for (SemanticQueryPlan.MetricSelection metric : safe(metrics)) {
+		for (SemanticBlueprint.MetricSelection metric : safe(metrics)) {
 			boolean conditionalAggregate = containsConditionalMetricAggregate(canonicalSql, metric);
 			if (!containsExpression(canonicalSql, canonicalMetricExpression(metric)) && !conditionalAggregate) {
 				errors.add("SQL does not use the published metric expression: " + metric.getMetricCode());
@@ -139,7 +139,7 @@ public class TypedPlanSqlConstraintValidator {
 		}
 	}
 
-	private boolean containsConditionalMetricAggregate(String canonicalSql, SemanticQueryPlan.MetricSelection metric) {
+	private boolean containsConditionalMetricAggregate(String canonicalSql, SemanticBlueprint.MetricSelection metric) {
 		if (!hasText(metric.getExpression()) || !hasText(metric.getFilterExpression())) {
 			return false;
 		}
@@ -158,7 +158,7 @@ public class TypedPlanSqlConstraintValidator {
 		return canonicalSql.contains(prefix + "end)");
 	}
 
-	private String canonicalMetricExpression(SemanticQueryPlan.MetricSelection metric) {
+	private String canonicalMetricExpression(SemanticBlueprint.MetricSelection metric) {
 		String expression = canonicalExpression(metric.getExpression());
 		if (expression.isBlank() || AGGREGATE_EXPRESSION.matcher(expression).matches()) {
 			return expression;
@@ -172,8 +172,8 @@ public class TypedPlanSqlConstraintValidator {
 	}
 
 	private void validateDimensions(String sql, String canonicalSql,
-			List<SemanticQueryPlan.DimensionSelection> dimensions, List<String> errors) {
-		for (SemanticQueryPlan.DimensionSelection dimension : safe(dimensions)) {
+			List<SemanticBlueprint.DimensionSelection> dimensions, List<String> errors) {
+		for (SemanticBlueprint.DimensionSelection dimension : safe(dimensions)) {
 			if (hasText(dimension.getExpression())) {
 				if (!containsExpression(canonicalSql, dimension.getExpression())) {
 					errors.add("SQL omits the selected dimension expression: " + dimension.getDimensionCode());
@@ -185,18 +185,18 @@ public class TypedPlanSqlConstraintValidator {
 		}
 	}
 
-	private void validateRelationships(String canonicalSql, List<SemanticQueryPlan.RelationshipSelection> relationships,
+	private void validateRelationships(String canonicalSql, List<SemanticBlueprint.RelationshipSelection> relationships,
 			List<String> errors) {
-		for (SemanticQueryPlan.RelationshipSelection relationship : safe(relationships)) {
+		for (SemanticBlueprint.RelationshipSelection relationship : safe(relationships)) {
 			if (!containsExpression(canonicalSql, relationship.getJoinCondition())) {
 				errors.add("SQL does not use the published join condition: " + relationship.getRelationshipCode());
 			}
 		}
 	}
 
-	private void validateRules(String canonicalSql, List<SemanticQueryPlan.RuleSelection> rules, List<String> errors,
+	private void validateRules(String canonicalSql, List<SemanticBlueprint.RuleSelection> rules, List<String> errors,
 			List<String> warnings) {
-		for (SemanticQueryPlan.RuleSelection rule : safe(rules)) {
+		for (SemanticBlueprint.RuleSelection rule : safe(rules)) {
 			boolean mandatory = MANDATORY_RULE_TYPES.contains(normalizeValue(rule.getRuleType()));
 			if (!mandatory) {
 				continue;

@@ -16,7 +16,7 @@
 package cn.lgs.queryweaver.task;
 
 import cn.lgs.queryweaver.review.PostExecutionReview;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.task.QueryTask.TaskStatus;
 import cn.lgs.queryweaver.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -115,7 +115,7 @@ public class QueryTaskRepository {
 		return !tasks.isEmpty() && tasks.stream().allMatch(task -> task.status() == TaskStatus.DONE);
 	}
 
-	public SemanticQueryPlan plan(String runId, String taskId) {
+	public SemanticBlueprint plan(String runId, String taskId) {
 		String value = jdbcTemplate.queryForObject(
 				"SELECT semantic_plan_json::text FROM qw_query_task WHERE run_id = ? AND task_id = ?", String.class, runId,
 				taskId);
@@ -123,7 +123,7 @@ public class QueryTaskRepository {
 			return null;
 		}
 		try {
-			return JsonUtil.getObjectMapper().readValue(value, SemanticQueryPlan.class);
+			return JsonUtil.getObjectMapper().readValue(value, SemanticBlueprint.class);
 		}
 		catch (Exception ex) {
 			throw new IllegalStateException("Unable to read persisted QueryTask semantic plan", ex);
@@ -131,7 +131,7 @@ public class QueryTaskRepository {
 	}
 
 	@Transactional
-	public void savePlan(String runId, String taskId, SemanticQueryPlan plan) {
+	public void savePlan(String runId, String taskId, SemanticBlueprint plan) {
 		int updated = jdbcTemplate.update("""
 				UPDATE qw_query_task SET semantic_plan_json = CAST(? AS JSONB), revision = revision + 1,
 				update_time = CURRENT_TIMESTAMP WHERE run_id = ? AND task_id = ? AND status = 'ACTIVE'

@@ -17,7 +17,7 @@ package cn.lgs.queryweaver.semantic.compiler;
 
 import cn.lgs.queryweaver.semantic.domain.SemanticAssetStatus;
 import cn.lgs.queryweaver.semantic.domain.SemanticCatalogSnapshot;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import com.alibaba.druid.DbType;
 import com.alibaba.druid.sql.SQLUtils;
 import com.alibaba.druid.sql.ast.SQLStatement;
@@ -44,7 +44,7 @@ import org.springframework.stereotype.Component;
  * structure (CTEs, windows, subqueries, unions, etc.) remains intact.
  */
 @Component
-public class SemanticSqlDryPlanner {
+public class QueryPreflightService {
 
 	private static final Pattern CTE_PATTERN = Pattern
 		.compile("(?i)(?:\\bwith\\b|,)\\s*([`\"\\[]?[a-zA-Z_][a-zA-Z0-9_$]*[`\"\\]]?)\\s+as\\s*\\(");
@@ -83,23 +83,23 @@ public class SemanticSqlDryPlanner {
 			"on", "group", "order", "having", "limit", "union", "intersect", "except", "window", "qualify", "offset",
 			"fetch");
 
-	public DryPlanResult plan(String semanticSql, SemanticCatalogSnapshot catalog, SemanticQueryPlan semanticPlan,
+	public PreflightResult preflight(String semanticSql, SemanticCatalogSnapshot catalog, SemanticBlueprint semanticPlan,
 			Integer datasourceId, String dialect) {
 		if (semanticSql == null || semanticSql.isBlank()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_SQL_EMPTY", "Semantic SQL cannot be blank");
+			throw new QueryPreflightException("SEMANTIC_SQL_EMPTY", "Semantic SQL cannot be blank");
 		}
 		if (catalog == null) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_CATALOG_MISSING", "Frozen semantic catalog is unavailable");
+			throw new QueryPreflightException("SEMANTIC_CATALOG_MISSING", "Frozen semantic catalog is unavailable");
 		}
 		String normalizedSemanticSql = semanticSql.toLowerCase(Locale.ROOT);
 		if (normalizedSemanticSql.contains("__qw_internal_") || normalizedSemanticSql.contains("__qw_model_")) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_RESERVED_IDENTIFIER",
+			throw new QueryPreflightException("SEMANTIC_RESERVED_IDENTIFIER",
 					"Semantic SQL cannot reference QueryWeaver internal model/field identifiers");
 		}
 
 		String dbType = resolveDbType(dialect);
 		if (DOUBLE_AGGREGATED_METRIC.matcher(semanticSql).find()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_METRIC_DOUBLE_AGGREGATION",
+			throw new QueryPreflightException("SEMANTIC_METRIC_DOUBLE_AGGREGATION",
 					"METRIC(...) already represents the published aggregation and must not be wrapped in another aggregate");
 		}
 		SQLStatement statement = parseSingleSelect(semanticSql, dbType, dialect);
@@ -142,12 +142,12 @@ public class SemanticSqlDryPlanner {
 			unknownTables.add(referencedTable);
 		}
 		if (!unknownTables.isEmpty()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_MODEL_NOT_FOUND",
+			throw new QueryPreflightException("SEMANTIC_MODEL_NOT_FOUND",
 					"Semantic SQL references models outside the frozen semantic catalog: " + String.join(", ", unknownTables)
 							+ ". Available models: " + String.join(", ", modelsByCode.keySet()));
 		}
 		if (!passthroughPhysicalTables.isEmpty()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_PHYSICAL_BYPASS_FORBIDDEN",
+			throw new QueryPreflightException("SEMANTIC_PHYSICAL_BYPASS_FORBIDDEN",
 					"Semantic SQL must query governed model codes instead of physical tables: "
 							+ String.join(", ", passthroughPhysicalTables));
 		}
@@ -161,14 +161,14 @@ public class SemanticSqlDryPlanner {
 		List<String> warnings = nullableColumnWarnings(statement, dbType, semanticModelCodes, catalog, bindings, cteNames);
 		for (String modelCode : semanticModelCodes) {
 			if (cteNames.contains(normalizeIdentifier(modelCode))) {
-				throw new SemanticSqlDryPlanException("SEMANTIC_MODEL_SHADOWED",
+				throw new QueryPreflightException("SEMANTIC_MODEL_SHADOWED",
 						"User SQL defines a CTE that shadows governed semantic model: " + modelCode);
 			}
 		}
 
 		if (semanticModelCodes.isEmpty()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_MODEL_REQUIRED",
-					"Semantic SQL must reference at least one governed model from the pinned Semantic Query Plan");
+			throw new QueryPreflightException("SEMANTIC_MODEL_REQUIRED",
+					"Semantic SQL must reference at least one governed model from the pinned Semantic Blueprint");
 		}
 
 		List<String> cteDefinitions = semanticModelCodes.stream()
@@ -184,7 +184,7 @@ public class SemanticSqlDryPlanner {
 			.map(SemanticCatalogSnapshot.Model::getPhysicalTable)
 			.collect(Collectors.toCollection(LinkedHashSet::new));
 		physicalTables.addAll(passthroughPhysicalTables);
-		return new DryPlanResult(physicalSql, Set.copyOf(semanticModelCodes), Set.copyOf(physicalTables), false, warnings);
+		return new PreflightResult(physicalSql, Set.copyOf(semanticModelCodes), Set.copyOf(physicalTables), false, warnings);
 	}
 
 	private SQLStatement parseSingleSelect(String sql, String dbType, String dialect) {
@@ -193,12 +193,12 @@ public class SemanticSqlDryPlanner {
 			statements = SQLUtils.parseStatements(sql.trim(), dbType);
 		}
 		catch (RuntimeException ex) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_SQL_PARSE_ERROR",
+			throw new QueryPreflightException("SEMANTIC_SQL_PARSE_ERROR",
 					"Semantic SQL cannot be parsed for dialect " + dialect + ": " + ex.getMessage(), ex);
 		}
 		if (statements.size() != 1 || !(statements.get(0) instanceof SQLSelectStatement)) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_SQL_NOT_SELECT",
-					"Semantic SQL dry-plan accepts exactly one SELECT statement");
+			throw new QueryPreflightException("SEMANTIC_SQL_NOT_SELECT",
+					"Query Preflight accepts exactly one SELECT statement");
 		}
 		return statements.get(0);
 	}
@@ -231,7 +231,7 @@ public class SemanticSqlDryPlanner {
 			}
 			String previous = aliasToModel.putIfAbsent(alias, table);
 			if (previous != null && !previous.equals(table)) {
-				throw new SemanticSqlDryPlanException("SEMANTIC_ALIAS_AMBIGUOUS",
+				throw new QueryPreflightException("SEMANTIC_ALIAS_AMBIGUOUS",
 						"Semantic SQL alias '" + alias + "' refers to more than one governed model");
 			}
 			modelToAliases.computeIfAbsent(table, ignored -> new ArrayList<>());
@@ -251,7 +251,7 @@ public class SemanticSqlDryPlanner {
 		return new ModelBindings(Map.copyOf(aliasToModel), Map.copyOf(immutableAliases));
 	}
 
-	private String rewriteMetricCalls(String sql, SemanticCatalogSnapshot catalog, SemanticQueryPlan semanticPlan,
+	private String rewriteMetricCalls(String sql, SemanticCatalogSnapshot catalog, SemanticBlueprint semanticPlan,
 			ModelBindings bindings, String dialect) {
 		Matcher matcher = METRIC_CALL.matcher(sql);
 		StringBuffer output = new StringBuffer();
@@ -264,16 +264,16 @@ public class SemanticSqlDryPlanner {
 		return output.toString();
 	}
 
-	private ResolvedMetric resolveMetric(String reference, SemanticCatalogSnapshot catalog, SemanticQueryPlan semanticPlan,
+	private ResolvedMetric resolveMetric(String reference, SemanticCatalogSnapshot catalog, SemanticBlueprint semanticPlan,
 			ModelBindings bindings) {
 		if (semanticPlan == null || semanticPlan.getMetrics() == null || semanticPlan.getMetrics().isEmpty()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_METRIC_OUTSIDE_PLAN",
-					"Semantic SQL references METRIC(...) but the pinned Semantic Query Plan selected no metric");
+			throw new QueryPreflightException("SEMANTIC_METRIC_OUTSIDE_PLAN",
+					"Semantic SQL references METRIC(...) but the pinned Semantic Blueprint selected no metric");
 		}
 		String normalizedReference = normalizeQualifiedIdentifier(reference);
 		String qualifier = qualifier(normalizedReference);
 		String metricCode = unqualifiedName(normalizedReference);
-		List<SemanticQueryPlan.MetricSelection> candidates = semanticPlan.getMetrics()
+		List<SemanticBlueprint.MetricSelection> candidates = semanticPlan.getMetrics()
 			.stream()
 			.filter(metric -> metricCode.equals(normalizeIdentifier(metric.getMetricCode())))
 			.toList();
@@ -288,18 +288,18 @@ public class SemanticSqlDryPlanner {
 				.toList();
 		}
 		if (candidates.size() != 1) {
-			throw new SemanticSqlDryPlanException(candidates.isEmpty() ? "SEMANTIC_METRIC_NOT_FOUND" : "SEMANTIC_METRIC_AMBIGUOUS",
+			throw new QueryPreflightException(candidates.isEmpty() ? "SEMANTIC_METRIC_NOT_FOUND" : "SEMANTIC_METRIC_AMBIGUOUS",
 					"Metric reference '" + reference + "' resolved to " + candidates.size()
-							+ " metrics in the pinned Semantic Query Plan");
+							+ " metrics in the pinned Semantic Blueprint");
 		}
-		SemanticQueryPlan.MetricSelection metric = candidates.get(0);
+		SemanticBlueprint.MetricSelection metric = candidates.get(0);
 		modelCode = normalizeIdentifier(metric.getModelCode());
 		if (alias.isBlank()) {
 			alias = uniqueAlias(modelCode, bindings);
 		}
 		String resolvedAliasModel = bindings.aliasToModel().get(alias);
 		if (!modelCode.equals(resolvedAliasModel)) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_METRIC_MODEL_MISMATCH",
+			throw new QueryPreflightException("SEMANTIC_METRIC_MODEL_MISMATCH",
 					"Metric '" + metric.getMetricCode() + "' belongs to model " + metric.getModelCode()
 							+ " but was referenced through alias " + alias);
 		}
@@ -310,16 +310,16 @@ public class SemanticSqlDryPlanner {
 			.anyMatch(candidate -> publishedModelCode.equals(normalizeIdentifier(candidate.getModelCode()))
 					&& metricCode.equals(normalizeIdentifier(candidate.getMetricCode())));
 		if (!published) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_METRIC_NOT_PUBLISHED",
+			throw new QueryPreflightException("SEMANTIC_METRIC_NOT_PUBLISHED",
 					"Pinned metric is no longer enabled in the frozen semantic catalog: " + reference);
 		}
 		return new ResolvedMetric(metric, alias);
 	}
 
-	private String renderMetricExpression(SemanticQueryPlan.MetricSelection metric, String alias,
+	private String renderMetricExpression(SemanticBlueprint.MetricSelection metric, String alias,
 			SemanticCatalogSnapshot catalog, String dialect) {
 		if (!hasText(metric.getExpression())) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_METRIC_EXPRESSION_MISSING",
+			throw new QueryPreflightException("SEMANTIC_METRIC_EXPRESSION_MISSING",
 					"Published metric has no expression: " + metric.getMetricCode());
 		}
 		Matcher aggregate = SINGLE_AGGREGATE.matcher(metric.getExpression());
@@ -346,7 +346,7 @@ public class SemanticSqlDryPlanner {
 				: renderPublishedExpression(argument, metric.getModelCode(), alias, catalog, dialect, ExpressionUse.AGGREGATION);
 		if (function == null) {
 			if (hasText(metric.getFilterExpression())) {
-				throw new SemanticSqlDryPlanException("SEMANTIC_METRIC_FILTER_WITHOUT_AGGREGATION",
+				throw new QueryPreflightException("SEMANTIC_METRIC_FILTER_WITHOUT_AGGREGATION",
 						"Filtered metric requires an explicit published aggregation: " + metric.getMetricCode());
 			}
 			return renderedArgument;
@@ -364,13 +364,13 @@ public class SemanticSqlDryPlanner {
 				+ conditionalArgument + otherwise + " END)";
 	}
 
-	private String rewriteRelationshipCalls(String sql, SemanticCatalogSnapshot catalog, SemanticQueryPlan semanticPlan,
+	private String rewriteRelationshipCalls(String sql, SemanticCatalogSnapshot catalog, SemanticBlueprint semanticPlan,
 			ModelBindings bindings, String dialect) {
 		Matcher matcher = RELATIONSHIP_CALL.matcher(sql);
 		StringBuffer output = new StringBuffer();
 		int replacements = 0;
 		while (matcher.find()) {
-			SemanticQueryPlan.RelationshipSelection relationship = requirePinnedRelationship(matcher.group(1), catalog,
+			SemanticBlueprint.RelationshipSelection relationship = requirePinnedRelationship(matcher.group(1), catalog,
 					semanticPlan);
 			String sourceAlias = hasText(matcher.group(2)) ? normalizeIdentifier(matcher.group(2))
 					: uniqueAlias(normalizeIdentifier(relationship.getSourceModelCode()), bindings);
@@ -385,29 +385,29 @@ public class SemanticSqlDryPlanner {
 		}
 		matcher.appendTail(output);
 		if (replacements == 0 && hasSemanticModelJoin(sql, bindings)) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_RELATIONSHIP_REQUIRED",
+			throw new QueryPreflightException("SEMANTIC_RELATIONSHIP_REQUIRED",
 					"Direct joins between governed semantic models must use ON RELATIONSHIP('published_relationship_code')");
 		}
 		return output.toString();
 	}
 
-	private SemanticQueryPlan.RelationshipSelection requirePinnedRelationship(String relationshipCode,
-			SemanticCatalogSnapshot catalog, SemanticQueryPlan semanticPlan) {
+	private SemanticBlueprint.RelationshipSelection requirePinnedRelationship(String relationshipCode,
+			SemanticCatalogSnapshot catalog, SemanticBlueprint semanticPlan) {
 		String normalizedCode = normalizeIdentifier(relationshipCode);
 		if (semanticPlan == null || semanticPlan.getRelationships() == null) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_RELATIONSHIP_OUTSIDE_PLAN",
-					"No relationship is selected by the pinned Semantic Query Plan");
+			throw new QueryPreflightException("SEMANTIC_RELATIONSHIP_OUTSIDE_PLAN",
+					"No relationship is selected by the pinned Semantic Blueprint");
 		}
-		List<SemanticQueryPlan.RelationshipSelection> matches = semanticPlan.getRelationships()
+		List<SemanticBlueprint.RelationshipSelection> matches = semanticPlan.getRelationships()
 			.stream()
 			.filter(relationship -> normalizedCode.equals(normalizeIdentifier(relationship.getRelationshipCode())))
 			.toList();
 		if (matches.size() != 1) {
-			throw new SemanticSqlDryPlanException(matches.isEmpty() ? "SEMANTIC_RELATIONSHIP_NOT_FOUND"
+			throw new QueryPreflightException(matches.isEmpty() ? "SEMANTIC_RELATIONSHIP_NOT_FOUND"
 					: "SEMANTIC_RELATIONSHIP_AMBIGUOUS", "Relationship reference '" + relationshipCode + "' resolved to "
-							+ matches.size() + " relationships in the pinned Semantic Query Plan");
+							+ matches.size() + " relationships in the pinned Semantic Blueprint");
 		}
-		SemanticQueryPlan.RelationshipSelection relationship = matches.get(0);
+		SemanticBlueprint.RelationshipSelection relationship = matches.get(0);
 		boolean published = catalog.getRelationships()
 			.stream()
 			.filter(candidate -> candidate.getStatus() == SemanticAssetStatus.ENABLED)
@@ -415,17 +415,17 @@ public class SemanticSqlDryPlanner {
 					&& normalizeIdentifier(relationship.getSourceModelCode()).equals(normalizeIdentifier(candidate.getSourceModelCode()))
 					&& normalizeIdentifier(relationship.getTargetModelCode()).equals(normalizeIdentifier(candidate.getTargetModelCode())));
 		if (!published) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_RELATIONSHIP_NOT_PUBLISHED",
+			throw new QueryPreflightException("SEMANTIC_RELATIONSHIP_NOT_PUBLISHED",
 					"Pinned relationship is no longer enabled in the frozen semantic catalog: " + relationshipCode);
 		}
 		return relationship;
 	}
 
-	private String renderRelationshipCondition(SemanticQueryPlan.RelationshipSelection relationship, String sourceAlias,
+	private String renderRelationshipCondition(SemanticBlueprint.RelationshipSelection relationship, String sourceAlias,
 			String targetAlias, SemanticCatalogSnapshot catalog, String dialect) {
 		String condition = Objects.toString(relationship.getJoinCondition(), "").trim();
 		if (condition.isBlank()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_RELATIONSHIP_CONDITION_MISSING",
+			throw new QueryPreflightException("SEMANTIC_RELATIONSHIP_CONDITION_MISSING",
 					"Published relationship has no join condition: " + relationship.getRelationshipCode());
 		}
 		Matcher matcher = QUALIFIED_IDENTIFIER.matcher(condition);
@@ -442,7 +442,7 @@ public class SemanticSqlDryPlanner {
 				alias = targetAlias;
 			}
 			else {
-				throw new SemanticSqlDryPlanException("SEMANTIC_RELATIONSHIP_MODEL_MISMATCH",
+				throw new QueryPreflightException("SEMANTIC_RELATIONSHIP_MODEL_MISMATCH",
 						"Published relationship condition references an unexpected model: " + matcher.group(1));
 			}
 			SemanticCatalogSnapshot.Column governedColumn = requireGovernedColumn(model, column, catalog, ExpressionUse.FILTER);
@@ -452,7 +452,7 @@ public class SemanticSqlDryPlanner {
 		}
 		matcher.appendTail(output);
 		if (replacements == 0) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_RELATIONSHIP_CONDITION_UNSUPPORTED",
+			throw new QueryPreflightException("SEMANTIC_RELATIONSHIP_CONDITION_UNSUPPORTED",
 					"Relationship join condition must use governed model.column references: " + condition);
 		}
 		return output.toString();
@@ -470,7 +470,7 @@ public class SemanticSqlDryPlanner {
 			}
 			String qualifier = normalizeIdentifier(qualified.group(1));
 			if (!qualifier.equals(normalizeIdentifier(modelCode))) {
-				throw new SemanticSqlDryPlanException("SEMANTIC_EXPRESSION_CROSS_MODEL",
+				throw new QueryPreflightException("SEMANTIC_EXPRESSION_CROSS_MODEL",
 						"Published expression for model " + modelCode + " references model " + qualified.group(1));
 			}
 			SemanticCatalogSnapshot.Column column = requireGovernedColumn(modelCode, qualified.group(2), catalog, use);
@@ -493,7 +493,7 @@ public class SemanticSqlDryPlanner {
 			}
 			SemanticCatalogSnapshot.Column column = findGovernedColumn(modelCode, token, catalog);
 			if (column == null) {
-				throw new SemanticSqlDryPlanException("SEMANTIC_EXPRESSION_COLUMN_NOT_FOUND",
+				throw new QueryPreflightException("SEMANTIC_EXPRESSION_COLUMN_NOT_FOUND",
 						"Published expression references unknown governed column " + modelCode + "." + token);
 			}
 			assertColumnUse(column, use);
@@ -546,7 +546,7 @@ public class SemanticSqlDryPlanner {
 			Set<String> availableFields = fieldsByModel.get(model);
 			if (availableFields != null) {
 				if (!availableFields.contains(field)) {
-					throw new SemanticSqlDryPlanException("SEMANTIC_COLUMN_NOT_FOUND",
+					throw new QueryPreflightException("SEMANTIC_COLUMN_NOT_FOUND",
 							"Semantic model '" + model + "' has no governed field '" + column.getName()
 									+ "'. Available fields: " + String.join(", ", availableFields));
 				}
@@ -561,12 +561,12 @@ public class SemanticSqlDryPlanner {
 				.map(Map.Entry::getKey)
 				.toList();
 			if (candidates.size() > 1) {
-				throw new SemanticSqlDryPlanException("SEMANTIC_COLUMN_AMBIGUOUS",
+				throw new QueryPreflightException("SEMANTIC_COLUMN_AMBIGUOUS",
 						"Unqualified semantic field '" + column.getName() + "' exists in models " + candidates
 								+ "; qualify it with the model alias");
 			}
 			if (candidates.isEmpty()) {
-				throw new SemanticSqlDryPlanException("SEMANTIC_COLUMN_NOT_FOUND",
+				throw new QueryPreflightException("SEMANTIC_COLUMN_NOT_FOUND",
 						"Unqualified field is not present in the governed models: " + column.getName());
 			}
 		}
@@ -631,7 +631,7 @@ public class SemanticSqlDryPlanner {
 	private String uniqueAlias(String modelCode, ModelBindings bindings) {
 		List<String> aliases = bindings.modelToAliases().getOrDefault(normalizeIdentifier(modelCode), List.of());
 		if (aliases.size() != 1) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_MODEL_ALIAS_AMBIGUOUS",
+			throw new QueryPreflightException("SEMANTIC_MODEL_ALIAS_AMBIGUOUS",
 					"Model " + modelCode + " has " + aliases.size()
 							+ " SQL bindings; use METRIC('alias.metric') or RELATIONSHIP('code','sourceAlias','targetAlias')");
 		}
@@ -641,17 +641,17 @@ public class SemanticSqlDryPlanner {
 	private void assertAliasModel(String alias, String expectedModelCode, ModelBindings bindings) {
 		String actual = bindings.aliasToModel().get(normalizeIdentifier(alias));
 		if (!normalizeIdentifier(expectedModelCode).equals(actual)) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_RELATIONSHIP_ALIAS_MISMATCH",
+			throw new QueryPreflightException("SEMANTIC_RELATIONSHIP_ALIAS_MISMATCH",
 					"Alias " + alias + " does not refer to relationship model " + expectedModelCode);
 		}
 	}
 
 	private void validateJoinType(String sql, int relationshipCallStart,
-			SemanticQueryPlan.RelationshipSelection relationship) {
+			SemanticBlueprint.RelationshipSelection relationship) {
 		String prefix = sql.substring(Math.max(0, relationshipCallStart - 160), relationshipCallStart).toLowerCase(Locale.ROOT);
 		int joinIndex = prefix.lastIndexOf("join");
 		if (joinIndex < 0) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_RELATIONSHIP_NOT_IN_JOIN",
+			throw new QueryPreflightException("SEMANTIC_RELATIONSHIP_NOT_IN_JOIN",
 					"RELATIONSHIP(...) must be used in a JOIN ON clause");
 		}
 		String joinPrefix = prefix.substring(Math.max(0, joinIndex - 24), joinIndex).trim();
@@ -662,7 +662,7 @@ public class SemanticSqlDryPlanner {
 		String expected = Objects.toString(relationship.getJoinType(), "INNER").trim().toUpperCase(Locale.ROOT)
 			.replace(" OUTER", "");
 		if (!expected.isBlank() && !expected.equals(actual)) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_JOIN_TYPE_MISMATCH",
+			throw new QueryPreflightException("SEMANTIC_JOIN_TYPE_MISMATCH",
 					"Relationship " + relationship.getRelationshipCode() + " requires " + expected + " JOIN but Semantic SQL uses "
 							+ actual + " JOIN");
 		}
@@ -672,7 +672,7 @@ public class SemanticSqlDryPlanner {
 			SemanticCatalogSnapshot catalog, ExpressionUse use) {
 		SemanticCatalogSnapshot.Column column = findGovernedColumn(modelCode, columnName, catalog);
 		if (column == null) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_EXPRESSION_COLUMN_NOT_FOUND",
+			throw new QueryPreflightException("SEMANTIC_EXPRESSION_COLUMN_NOT_FOUND",
 					"Governed column does not exist: " + modelCode + "." + columnName);
 		}
 		assertColumnUse(column, use);
@@ -699,11 +699,11 @@ public class SemanticSqlDryPlanner {
 
 	private void assertColumnUse(SemanticCatalogSnapshot.Column column, ExpressionUse use) {
 		if (use == ExpressionUse.AGGREGATION && Boolean.FALSE.equals(column.getAllowAggregation())) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_COLUMN_AGGREGATION_DENIED",
+			throw new QueryPreflightException("SEMANTIC_COLUMN_AGGREGATION_DENIED",
 					"Column governance denies aggregation: " + column.getModelCode() + "." + column.getColumnName());
 		}
 		if (use == ExpressionUse.FILTER && Boolean.FALSE.equals(column.getAllowFilter())) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_COLUMN_FILTER_DENIED",
+			throw new QueryPreflightException("SEMANTIC_COLUMN_FILTER_DENIED",
 					"Column governance denies filtering/join use: " + column.getModelCode() + "." + column.getColumnName());
 		}
 	}
@@ -747,19 +747,19 @@ public class SemanticSqlDryPlanner {
 	}
 
 	private void validateAgainstPinnedPlan(Set<String> semanticModelCodes, Set<String> passthroughPhysicalTables,
-			SemanticQueryPlan semanticPlan, Map<String, SemanticCatalogSnapshot.Model> modelsByCode) {
+			SemanticBlueprint semanticPlan, Map<String, SemanticCatalogSnapshot.Model> modelsByCode) {
 		if (semanticPlan == null || semanticPlan.getModels() == null || semanticPlan.getModels().isEmpty()) {
 			return;
 		}
 		Set<String> allowedModelCodes = semanticPlan.getModels()
 			.stream()
-			.map(SemanticQueryPlan.ModelSelection::getModelCode)
+			.map(SemanticBlueprint.ModelSelection::getModelCode)
 			.filter(Objects::nonNull)
 			.map(this::normalizeIdentifier)
 			.collect(Collectors.toSet());
 		Set<String> allowedPhysicalTables = semanticPlan.getModels()
 			.stream()
-			.map(SemanticQueryPlan.ModelSelection::getPhysicalTable)
+			.map(SemanticBlueprint.ModelSelection::getPhysicalTable)
 			.filter(Objects::nonNull)
 			.map(this::normalizeQualifiedIdentifier)
 			.collect(Collectors.toSet());
@@ -767,21 +767,21 @@ public class SemanticSqlDryPlanner {
 			.filter(code -> !allowedModelCodes.contains(normalizeIdentifier(code)))
 			.toList();
 		if (!outsidePlan.isEmpty()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_MODEL_OUTSIDE_PLAN",
-					"Semantic SQL references models not selected by the pinned Semantic Query Plan: "
+			throw new QueryPreflightException("SEMANTIC_MODEL_OUTSIDE_PLAN",
+					"Semantic SQL references models not selected by the pinned Semantic Blueprint: "
 							+ String.join(", ", outsidePlan));
 		}
 		List<String> physicalOutsidePlan = passthroughPhysicalTables.stream()
 			.filter(table -> !allowedPhysicalTables.contains(normalizeQualifiedIdentifier(table)))
 			.toList();
 		if (!physicalOutsidePlan.isEmpty()) {
-			throw new SemanticSqlDryPlanException("PHYSICAL_TABLE_OUTSIDE_PLAN",
-					"Physical SQL passthrough references tables not selected by the pinned Semantic Query Plan: "
+			throw new QueryPreflightException("PHYSICAL_TABLE_OUTSIDE_PLAN",
+					"Physical SQL passthrough references tables not selected by the pinned Semantic Blueprint: "
 							+ String.join(", ", physicalOutsidePlan));
 		}
 		for (String modelCode : semanticModelCodes) {
 			if (!modelsByCode.containsKey(normalizeIdentifier(modelCode))) {
-				throw new SemanticSqlDryPlanException("SEMANTIC_MODEL_NOT_FOUND", "Unknown semantic model: " + modelCode);
+				throw new QueryPreflightException("SEMANTIC_MODEL_NOT_FOUND", "Unknown semantic model: " + modelCode);
 			}
 		}
 	}
@@ -840,7 +840,7 @@ public class SemanticSqlDryPlanner {
 			.forEach(dimension -> projections.putIfAbsent(dimension.getDimensionCode(), hasText(dimension.getExpression())
 					? dimension.getExpression() : quoteIdentifier(dimension.getColumnName(), dialect)));
 		if (projections.isEmpty()) {
-			throw new SemanticSqlDryPlanException("SEMANTIC_MODEL_HAS_NO_COLUMNS",
+			throw new QueryPreflightException("SEMANTIC_MODEL_HAS_NO_COLUMNS",
 					"Semantic model has no projectable governed columns: " + model.getModelCode());
 		}
 		String selectList = projections.entrySet()
@@ -896,8 +896,8 @@ public class SemanticSqlDryPlanner {
 			case "hive" -> "hive";
 			case "sqlite" -> "sqlite";
 			case "h2" -> "h2";
-			default -> throw new SemanticSqlDryPlanException("UNSUPPORTED_DIALECT",
-					"Unsupported SQL dialect for Semantic SQL dry-plan: " + dialect);
+			default -> throw new QueryPreflightException("UNSUPPORTED_DIALECT",
+					"Unsupported SQL dialect for Query Preflight: " + dialect);
 		};
 	}
 
@@ -966,14 +966,14 @@ public class SemanticSqlDryPlanner {
 	private record ModelBindings(Map<String, String> aliasToModel, Map<String, List<String>> modelToAliases) {
 	}
 
-	private record ResolvedMetric(SemanticQueryPlan.MetricSelection metric, String alias) {
+	private record ResolvedMetric(SemanticBlueprint.MetricSelection metric, String alias) {
 	}
 
 	private boolean hasText(String value) {
 		return value != null && !value.isBlank();
 	}
 
-	public record DryPlanResult(String physicalSql, Set<String> semanticModelCodes, Set<String> physicalTables,
+	public record PreflightResult(String physicalSql, Set<String> semanticModelCodes, Set<String> physicalTables,
 			boolean legacyPhysicalPassthrough, List<String> warnings) {
 	}
 

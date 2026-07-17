@@ -18,7 +18,7 @@ package cn.lgs.queryweaver.review;
 import cn.lgs.queryweaver.bo.schema.ResultSetBO;
 import cn.lgs.queryweaver.review.PostExecutionReview.Decision;
 import cn.lgs.queryweaver.review.PostExecutionReview.IssueType;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.sql.application.SqlResultValidator;
 import cn.lgs.queryweaver.sql.application.SqlResultValidator.ValidationMode;
 import cn.lgs.queryweaver.sql.application.SqlResultValidator.ValidationResult;
@@ -40,28 +40,28 @@ public class PostExecutionReviewService {
 
 	private final PostExecutionReviewProperties properties;
 
-	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			int configuredMaxRows) {
 		return review(question, plan, sql, resultSet, configuredMaxRows, "", ReviewMode.CONFIGURED);
 	}
 
-	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			int configuredMaxRows, ReviewMode mode) {
 		return review(question, plan, sql, resultSet, configuredMaxRows, "", mode);
 	}
 
-	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			int configuredMaxRows, String executionPlan, ReviewMode mode) {
 		return review(question, plan, sql, resultSet, configuredMaxRows, executionPlan, mode,
 				ValidationMode.STRICT_SEMANTIC_PLAN);
 	}
 
-	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			int configuredMaxRows, String executionPlan, ReviewMode mode, ValidationMode validationMode) {
 		return review(question, plan, sql, resultSet, configuredMaxRows, executionPlan, mode, validationMode, List.of());
 	}
 
-	public PostExecutionReview review(String question, SemanticQueryPlan plan, String sql, ResultSetBO resultSet,
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			int configuredMaxRows, String executionPlan, ReviewMode mode, ValidationMode validationMode,
 			List<String> contextualWarnings) {
 		ValidationResult deterministic = resultValidator.validate(resultSet, plan, configuredMaxRows, validationMode);
@@ -73,7 +73,7 @@ public class PostExecutionReviewService {
 		PostExecutionReview preliminary = deterministic.valid() ? PostExecutionReview.deterministicPass(warnings)
 				: PostExecutionReview.deterministicRetry(deterministic.errors(), warnings);
 		boolean contextualReviewRequired = contextualWarnings != null && !contextualWarnings.isEmpty();
-		// DETERMINISTIC_ONLY is the durable budget boundary, not merely a preference. Contextual dry-plan warnings may
+		// DETERMINISTIC_ONLY is the durable budget boundary, not merely a preference. Contextual Query Preflight warnings may
 		// request a semantic review while budget remains, but they must never bypass an already exhausted review budget.
 		if (mode == ReviewMode.DETERMINISTIC_ONLY) {
 			return preliminary;
@@ -99,7 +99,7 @@ public class PostExecutionReviewService {
 		}
 	}
 
-	public boolean shouldRunSemanticReviewer(ReviewMode mode, ValidationResult deterministic, SemanticQueryPlan plan) {
+	public boolean shouldRunSemanticReviewer(ReviewMode mode, ValidationResult deterministic, SemanticBlueprint plan) {
 		ReviewMode effective = mode == null ? ReviewMode.CONFIGURED : mode;
 		if (effective == ReviewMode.DETERMINISTIC_ONLY) {
 			return false;
@@ -116,7 +116,7 @@ public class PostExecutionReviewService {
 		return complexPlan(plan);
 	}
 
-	private boolean complexPlan(SemanticQueryPlan plan) {
+	private boolean complexPlan(SemanticBlueprint plan) {
 		if (plan == null) {
 			return false;
 		}
@@ -125,7 +125,7 @@ public class PostExecutionReviewService {
 	}
 
 	private PostExecutionReview normalizeGovernedEmptyMerge(PostExecutionReview reviewed, ValidationResult deterministic,
-			List<String> warnings, SemanticQueryPlan plan, ResultSetBO resultSet) {
+			List<String> warnings, SemanticBlueprint plan, ResultSetBO resultSet) {
 		boolean emptyResult = resultSet != null && (resultSet.getData() == null || resultSet.getData().isEmpty());
 		boolean governedMultiSourceMerge = plan != null && plan.getMergePlan() != null && plan.getSourceSubPlans() != null
 				&& plan.getSourceSubPlans().size() > 1;

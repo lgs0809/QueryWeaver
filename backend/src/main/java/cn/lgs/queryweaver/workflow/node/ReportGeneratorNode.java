@@ -18,7 +18,7 @@ package cn.lgs.queryweaver.workflow.node;
 import cn.lgs.queryweaver.dto.planner.ExecutionStep;
 import cn.lgs.queryweaver.dto.planner.Plan;
 import cn.lgs.queryweaver.prompt.PromptHelper;
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import cn.lgs.queryweaver.service.llm.LlmService;
 import cn.lgs.queryweaver.enums.TextType;
 import com.alibaba.cloud.ai.graph.GraphResponse;
@@ -74,13 +74,13 @@ public class ReportGeneratorNode implements NodeAction {
 		Map<String, String> executedQueries = StateUtil.getObjectValue(state, SQL_EXECUTED_QUERY_OUTPUT, Map.class,
 				new HashMap<>());
 
-		SemanticQueryPlan typedPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticQueryPlan.class,
-				(SemanticQueryPlan) null);
+		SemanticBlueprint typedPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
+				(SemanticBlueprint) null);
 		Plan plan = typedPlan == null ? PlanProcessUtil.getPlan(state) : null;
 		ExecutionStep executionStep = typedPlan == null ? getCurrentExecutionStep(plan, currentStep) : null;
 		String summaryAndRecommendations = typedPlan == null
 				? executionStep.getToolParameters().getSummaryAndRecommendations()
-				: "请只根据受治理 Semantic Query Plan、实际执行 SQL 与实际执行结果回答，不补充未实际执行的过滤条件或业务规则。";
+				: "请只根据受治理 Semantic Blueprint、实际执行 SQL 与实际执行结果回答，不补充未实际执行的过滤条件或业务规则。";
 
 		// Generate report streaming flux
 		Flux<ChatResponse> reportGenerationFlux = generateReport(userInput, plan, typedPlan, executionResults,
@@ -130,9 +130,9 @@ public class ReportGeneratorNode implements NodeAction {
 	/**
 	 * Generates the analysis report.
 	 */
-	private Flux<ChatResponse> generateReport(String userInput, Plan plan, SemanticQueryPlan typedPlan,
+	private Flux<ChatResponse> generateReport(String userInput, Plan plan, SemanticBlueprint typedPlan,
 			Map<String, String> executionResults, Map<String, String> executedQueries, String summaryAndRecommendations) {
-		// QueryWeaver reports must be grounded in the governed Semantic Query Plan and actual
+		// QueryWeaver reports must be grounded in the governed Semantic Blueprint and actual
 		// execution evidence. The advanced planner narrative is not an execution fact.
 		String userRequirementsAndPlan = buildUserRequirementsAndPlan(userInput, plan, typedPlan);
 
@@ -148,13 +148,13 @@ public class ReportGeneratorNode implements NodeAction {
 	/**
 	 * Builds user requirements and plan description.
 	 */
-	String buildUserRequirementsAndPlan(String userInput, Plan plan, SemanticQueryPlan typedPlan) {
+	String buildUserRequirementsAndPlan(String userInput, Plan plan, SemanticBlueprint typedPlan) {
 		StringBuilder sb = new StringBuilder();
 		sb.append("## 用户原始需求\n");
 		sb.append(userInput).append("\n\n");
 
 		if (typedPlan != null) {
-			sb.append("## 受治理的 Semantic Query Plan（事实约束）\n");
+			sb.append("## 受治理的 Semantic Blueprint（事实约束）\n");
 			sb.append("以下结构化计划是 QueryWeaver 对本次查询意图的正式约束；不得使用 advanced fallback planner 的思考过程或参数描述补充其中不存在的过滤条件。\n");
 			sb.append("```json\n").append(json(typedPlan)).append("\n```\n\n");
 			return sb.toString();

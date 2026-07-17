@@ -15,7 +15,7 @@
  */
 package cn.lgs.queryweaver.workflow.dispatcher;
 
-import cn.lgs.queryweaver.semantic.domain.SemanticQueryPlan;
+import cn.lgs.queryweaver.semantic.domain.SemanticBlueprint;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.EdgeAction;
 import lombok.extern.slf4j.Slf4j;
@@ -31,8 +31,8 @@ public class FeasibilityAssessmentDispatcher implements EdgeAction {
 	@Override
 	public String apply(OverAllState state) throws Exception {
 		Object typedPlan = state.value(TYPED_SEMANTIC_PLAN).orElse(null);
-		if (typedPlan instanceof SemanticQueryPlan plan && plan.isExecutable()) {
-			log.info("[FeasibilityAssessmentNodeDispatcher]可执行 Semantic Query Plan 已建立，进入PlannerNode节点");
+		if (typedPlan instanceof SemanticBlueprint plan && plan.isExecutable()) {
+			log.info("[FeasibilityAssessmentNodeDispatcher]可执行 Semantic Blueprint 已建立，进入PlannerNode节点");
 			return PLANNER_NODE;
 		}
 
