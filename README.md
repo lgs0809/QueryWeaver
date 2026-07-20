@@ -2,19 +2,23 @@
 
 # QueryWeaver
 
-**面向生产环境的自进化 NL2SQL 平台**
+**A self-evolving NL2SQL platform**
 
-自然语言 → 语义理解 → Typed Semantic Plan → 受治理 SQL → 可恢复执行 → 持续学习
+Natural Language → Semantic Blueprint → Verified SQL → Durable Execution → Continuous Learning
 
-![Java 17](https://img.shields.io/badge/Java-17-000000?logo=openjdk&logoColor=white)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4-000000?logo=springboot&logoColor=white)
-![Vue 3](https://img.shields.io/badge/Vue-3-000000?logo=vuedotjs&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-000000?logo=postgresql&logoColor=white)
-![License](https://img.shields.io/badge/License-Apache--2.0-000000)
+LLMs understand business semantics. QueryWeaver compiles them into verifiable SQL, preflights execution, and learns from successful query trajectories.
+
+[![GitHub Actions](https://img.shields.io/badge/-FFFFFF?style=flat-square&logo=githubactions&logoColor=2088FF)](https://github.com/lgs0809/QueryWeaver/actions/workflows/ci.yml)[![CI](https://img.shields.io/github/actions/workflow/status/lgs0809/QueryWeaver/ci.yml?branch=main&style=flat-square&label=CI&labelColor=2D333B)](https://github.com/lgs0809/QueryWeaver/actions/workflows/ci.yml)
+[![GitHub](https://img.shields.io/badge/-FFFFFF?style=flat-square&logo=github&logoColor=181717)](https://github.com/lgs0809/QueryWeaver/tags)[![Release](https://img.shields.io/github/v/tag/lgs0809/QueryWeaver?sort=semver&style=flat-square&label=release&color=181717&labelColor=2D333B)](https://github.com/lgs0809/QueryWeaver/tags)
+![OpenJDK](https://img.shields.io/badge/-FFFFFF?style=flat-square&logo=openjdk&logoColor=ED8B00)![Java 17](https://img.shields.io/badge/Java-17-ED8B00?style=flat-square&labelColor=2D333B)
+![Spring Boot](https://img.shields.io/badge/-FFFFFF?style=flat-square&logo=springboot&logoColor=6DB33F)![Spring Boot 3.4](https://img.shields.io/badge/Spring%20Boot-3.4-6DB33F?style=flat-square&labelColor=2D333B)
+![Vue](https://img.shields.io/badge/-FFFFFF?style=flat-square&logo=vuedotjs&logoColor=4FC08D)![Vue 3](https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&labelColor=2D333B)
+![PostgreSQL](https://img.shields.io/badge/-FFFFFF?style=flat-square&logo=postgresql&logoColor=4169E1)![PostgreSQL + pgvector](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=flat-square&labelColor=2D333B)
+[![Apache](https://img.shields.io/badge/-FFFFFF?style=flat-square&logo=apache&logoColor=D22128)![License](https://img.shields.io/badge/License-Apache--2.0-D22128?style=flat-square&labelColor=2D333B)](LICENSE)
 
 </div>
 
-QueryWeaver 不是“把问题直接丢给大模型生成 SQL”的薄封装。它以**受治理语义模型**为事实基础，让大模型负责语义规划，让编译器负责 SQL 落地，并在运行时提供澄清、审批、Review/Repair、持久化恢复和语义进化能力。
+QueryWeaver 不是“把问题直接丢给大模型生成 SQL”的薄封装。它以 **Semantic Catalog** 为事实基础，让大模型生成结构化 **Semantic Blueprint**，再由 **Semantic Compiler + Query Preflight** 产出并验证 **Verified SQL**；运行时继续提供澄清、审批、Review/Repair、持久化恢复和语义进化能力。
 
 它既可以作为完整的问数产品使用，也可以把某个项目的问数能力一键发布为 **Project MCP Server**，供外部 Agent 复用同一套语义、权限和执行治理。
 
@@ -22,7 +26,7 @@ QueryWeaver 不是“把问题直接丢给大模型生成 SQL”的薄封装。�
 
 | 能力 | 说明 |
 | --- | --- |
-| **Semantic-first NL2SQL** | LLM 生成结构化 `SemanticQueryPlan`，SQL 由受治理编译链生成，而不是直接信任模型 SQL |
+| **Semantic-first NL2SQL** | LLM 生成结构化 `SemanticBlueprint`，再由 Semantic Compiler 与 Query Preflight 产出 Verified SQL，而不是直接信任模型 SQL |
 | **Hybrid Semantic Retrieval** | Exact + BM25 + pgvector 混合召回，并通过 RRF 融合多个召回通道 |
 | **Clarification & Approval** | 运行时歧义必须澄清；审批独立支持 `REQUIRE_APPROVAL` / `AUTO_EXECUTE` |
 | **Review & Repair** | 执行后按 `PASS / RETRY_SQL / REPLAN / RERETRIEVE / CLARIFY / FAIL` 路由闭环修复 |
@@ -38,9 +42,11 @@ flowchart LR
     U[User / External Agent] --> R[QueryWeaver Runtime]
     R --> C[Context & Clarification]
     C --> S[Hybrid Semantic Retrieval]
-    S --> P[LLM Typed Semantic Planning]
-    P --> G[Governed SQL Compiler]
-    G --> D[(Business Datasources)]
+    S --> B[Semantic Blueprint]
+    B --> G[Semantic Compiler]
+    G --> P[Query Preflight]
+    P --> Q[Verified SQL]
+    Q --> D[(Business Datasources)]
     D --> V[Post-execution Review]
     V --> A[Grounded Answer]
     V --> E[Repair & Semantic Evolution]
@@ -52,9 +58,11 @@ flowchart LR
 
 ```text
 QueryTask
-  → SemanticQueryPlan
+  → SemanticBlueprint
   → SourceSubPlan
-  → SemanticSqlCompiler
+  → SemanticCompiler
+  → QueryPreflight
+  → Verified SQL
   → SQL Execution
   → Post-execution Review
   → Grounded Synthesis
