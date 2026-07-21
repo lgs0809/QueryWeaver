@@ -15,8 +15,14 @@
  */
 package cn.lgs.queryweaver.service.aimodelconfig;
 
-import cn.lgs.queryweaver.enums.ModelType;
 import cn.lgs.queryweaver.dto.ModelConfigDTO;
+import cn.lgs.queryweaver.enums.ModelType;
+import cn.lgs.queryweaver.semantic.retrieval.EmbeddingModelIdentityProvider;
+import cn.lgs.queryweaver.semantic.retrieval.RerankModel;
+import cn.lgs.queryweaver.semantic.retrieval.RerankModelProvider;
+import java.util.LinkedHashMap;
+import java.util.Objects;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -27,7 +33,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class AiModelRegistry {
+public class AiModelRegistry implements RerankModelProvider, EmbeddingModelIdentityProvider {
 
 	private final DynamicModelFactory modelFactory;
 
@@ -37,6 +43,10 @@ public class AiModelRegistry {
 	private volatile ChatClient currentChatClient;
 
 	private volatile EmbeddingModel currentEmbeddingModel;
+
+	private volatile RerankModel currentRerankModel;
+
+	private volatile boolean rerankResolved;
 
 	// =========================================================
 	// 1. 获取 ChatClient (懒加载 + 缓存)
@@ -97,6 +107,47 @@ public class AiModelRegistry {
 		return currentEmbeddingModel;
 	}
 
+	@Override
+	public Optional<EmbeddingModelIdentity> currentEmbeddingIdentity() {
+		ModelConfigDTO config = modelConfigDataService.getActiveConfigByType(ModelType.EMBEDDING);
+		if (config == null) {
+			return Optional.empty();
+		}
+		LinkedHashMap<String, Object> attributes = new LinkedHashMap<>();
+		attributes.put("provider", Objects.toString(config.getProvider(), ""));
+		attributes.put("modelName", Objects.toString(config.getModelName(), ""));
+		attributes.put("baseUrl", Objects.toString(config.getBaseUrl(), ""));
+		attributes.put("embeddingsPath", Objects.toString(config.getEmbeddingsPath(), ""));
+		String model = Objects.toString(config.getProvider(), "") + ":" + Objects.toString(config.getModelName(), "");
+		return Optional.of(new EmbeddingModelIdentity(model, attributes));
+	}
+
+	/**
+	 * Rerank 是可选增强能力。未配置或初始化失败时返回 empty，由检索链路回退到 RRF。
+	 */
+	@Override
+	public Optional<RerankModel> currentRerankModel() {
+		if (!rerankResolved) {
+			synchronized (this) {
+				if (!rerankResolved) {
+					try {
+						ModelConfigDTO config = modelConfigDataService.getActiveConfigByType(ModelType.RERANK);
+						if (config != null) {
+							currentRerankModel = modelFactory.createRerankModel(config);
+						}
+					}
+					catch (Exception e) {
+						log.warn("Failed to initialize optional RerankModel: {}", e.getMessage());
+					}
+					finally {
+						rerankResolved = true;
+					}
+				}
+			}
+		}
+		return Optional.ofNullable(currentRerankModel);
+	}
+
 	// =========================================================
 	// 3. 刷新/重置缓存 (用于热切换)
 	// =========================================================
@@ -109,6 +160,12 @@ public class AiModelRegistry {
 	public void refreshEmbedding() {
 		this.currentEmbeddingModel = null;
 		log.info("Embedding cache cleared.");
+	}
+
+	public void refreshRerank() {
+		this.currentRerankModel = null;
+		this.rerankResolved = false;
+		log.info("Rerank cache cleared.");
 	}
 
 }

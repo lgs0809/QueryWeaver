@@ -38,6 +38,12 @@ public class ModelCheckVo {
 
 	java.time.LocalDateTime embeddingModelLastValidationTime;
 
+	boolean rerankModelConfigured;
+
+	boolean rerankModelReady;
+
+	java.time.LocalDateTime rerankModelLastValidationTime;
+
 	boolean ready;
 
 }

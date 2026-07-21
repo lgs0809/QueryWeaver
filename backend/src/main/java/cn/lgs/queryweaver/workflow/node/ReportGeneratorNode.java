@@ -49,7 +49,6 @@ import static cn.lgs.queryweaver.constant.Constant.*;
  * results - Summarizing data insights and findings - Providing comprehensive answers to
  * user queries - Creating structured final output for users
  *
- * @author zhangshenghang
  */
 @Slf4j
 @Component

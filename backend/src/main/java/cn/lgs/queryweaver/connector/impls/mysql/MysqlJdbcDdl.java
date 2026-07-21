@@ -23,7 +23,7 @@ import cn.lgs.queryweaver.bo.schema.TableInfoBO;
 import cn.lgs.queryweaver.bo.schema.ColumnInfoBO;
 import cn.lgs.queryweaver.bo.schema.ForeignKeyInfoBO;
 import cn.lgs.queryweaver.bo.schema.ResultSetBO;
-import org.apache.commons.compress.utils.Lists;
+import java.util.ArrayList;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -53,12 +53,12 @@ public class MysqlJdbcDdl extends AbstractJdbcDdl {
 			sql += "AND TABLE_NAME LIKE CONCAT('%%','%s','%%') \n";
 		}
 		sql += "limit 2000;";
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection,
 					String.format(sql, connection.getCatalog(), tablePattern));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -81,13 +81,13 @@ public class MysqlJdbcDdl extends AbstractJdbcDdl {
 	public List<TableInfoBO> fetchTables(Connection connection, String schema, List<String> tables) {
 		String sql = "SELECT TABLE_NAME, TABLE_COMMENT \n" + "FROM INFORMATION_SCHEMA.TABLES \n"
 				+ "WHERE TABLE_SCHEMA = '%s' \n" + "AND TABLE_NAME in(%s) \n" + "limit 200;";
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection,
 					String.format(sql, connection.getCatalog(), tableListStr));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -111,12 +111,12 @@ public class MysqlJdbcDdl extends AbstractJdbcDdl {
 		String sql = "SELECT column_name, column_comment, data_type, "
 				+ "IF(column_key='PRI','true','false') AS '主键唯一', \n" + "IF(IS_NULLABLE='NO','true','false') AS '非空' \n"
 				+ "FROM information_schema.COLUMNS " + "WHERE table_schema='%s' " + "and table_name='%s';";
-		List<ColumnInfoBO> columnInfoList = Lists.newArrayList();
+		List<ColumnInfoBO> columnInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, "INFORMATION_SCHEMA",
 					String.format(sql, connection.getCatalog(), table));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -146,14 +146,14 @@ public class MysqlJdbcDdl extends AbstractJdbcDdl {
 				+ "    REFERENCED_COLUMN_NAME AS '引用列名'\n" + "FROM \n" + "    INFORMATION_SCHEMA.KEY_COLUMN_USAGE\n"
 				+ "WHERE \n" + "    CONSTRAINT_SCHEMA = '%s' " + "    AND CONSTRAINT_NAME != 'PRIMARY'"
 				+ "    AND TABLE_NAME in(%s)\n" + "    AND REFERENCED_TABLE_NAME in (%s);";
-		List<ForeignKeyInfoBO> foreignKeyInfoList = Lists.newArrayList();
+		List<ForeignKeyInfoBO> foreignKeyInfoList = new ArrayList<>();
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 
 		try {
 			sql = String.format(sql, connection.getCatalog(), tableListStr, tableListStr);
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, "INFORMATION_SCHEMA", sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -178,12 +178,12 @@ public class MysqlJdbcDdl extends AbstractJdbcDdl {
 	@Override
 	public List<String> sampleColumn(Connection connection, String schema, String table, String column) {
 		String sql = "SELECT \n" + "    `%s`\n" + "FROM \n" + "    `%s`\n" + "LIMIT 99;";
-		List<String> sampleInfo = Lists.newArrayList();
+		List<String> sampleInfo = new ArrayList<>();
 		try {
 			sql = String.format(sql, column, table);
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {

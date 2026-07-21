@@ -53,6 +53,10 @@ public class ModelConfigCacheInvalidation {
 			aiModelRegistry.refreshEmbedding();
 			return;
 		}
+		if (ModelType.RERANK.equals(type)) {
+			aiModelRegistry.refreshRerank();
+			return;
+		}
 		throw new IllegalArgumentException("未知的模型类型: " + type);
 	}
 

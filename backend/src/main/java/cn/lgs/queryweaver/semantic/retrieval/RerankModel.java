@@ -1,5 +1,5 @@
 /*
- * Copyright 2024-2025 the original author or authors.
+ * Copyright 2024-2026 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,36 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.lgs.queryweaver.vo;
+package cn.lgs.queryweaver.semantic.retrieval;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import java.util.ArrayList;
 import java.util.List;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class BatchImportResult {
+/** Application-facing port for ranking a bounded set of semantic retrieval documents. */
+public interface RerankModel {
 
-	private int total;
+	List<RerankScore> rerank(String query, List<String> documents, int topN);
 
-	private int successCount;
-
-	private int failCount;
-
-	@Builder.Default
-	private List<String> errors = new ArrayList<>();
-
-	public void addError(String error) {
-		if (errors == null) {
-			errors = new ArrayList<>();
-		}
-		errors.add(error);
+	record RerankScore(int index, double score) {
 	}
 
 }

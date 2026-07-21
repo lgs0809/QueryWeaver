@@ -23,7 +23,6 @@ import org.springframework.stereotype.Service;
 import static cn.lgs.queryweaver.enums.ErrorCodeEnum.*;
 
 /**
- * @author zihen
  * @date 2025/12/14 17:34
  */
 @Service("sqlServerJdbcConnectionPool")

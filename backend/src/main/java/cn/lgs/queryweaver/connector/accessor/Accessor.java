@@ -29,8 +29,6 @@ import java.util.List;
 /**
  * Data access interface definition.
  *
- * @author yuluo
- * @author <a href="mailto:yuluo08290126@gmail.com">yuluo</a>
  */
 
 public interface Accessor {

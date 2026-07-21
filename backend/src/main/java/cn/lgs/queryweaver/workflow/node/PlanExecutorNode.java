@@ -37,7 +37,6 @@ import static cn.lgs.queryweaver.constant.Constant.*;
  * Plan execution and validation node, decides next execution node based on plan, and
  * validates before execution.
  *
- * @author zhangshenghang
  */
 @Slf4j
 @Component

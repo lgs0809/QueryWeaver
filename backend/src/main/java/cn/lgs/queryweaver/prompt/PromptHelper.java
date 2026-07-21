@@ -22,7 +22,6 @@ import cn.lgs.queryweaver.dto.prompt.SqlGenerationDTO;
 import cn.lgs.queryweaver.dto.schema.ColumnDTO;
 import cn.lgs.queryweaver.dto.schema.SchemaDTO;
 import cn.lgs.queryweaver.dto.schema.TableDTO;
-import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 
@@ -32,9 +31,18 @@ import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.ai.converter.BeanOutputConverter;
 
-import static cn.lgs.queryweaver.util.ReportTemplateUtil.cleanJsonExample;
-
 public class PromptHelper {
+
+	private static final String CLEAN_JSON_EXAMPLE = """
+			{
+			    "title": { "text": "月度销售额" },
+			    "tooltip": { "trigger": "axis" },
+			    "xAxis": { "type": "category", "data": ["1月", "2月"] },
+			    "yAxis": { "type": "value" },
+			    "series": [
+			        { "type": "bar", "data": [120, 200] }
+			    ]
+			}""";
 
 	public static String buildMixSelectorPrompt(String evidence, String question, SchemaDTO schemaDTO) {
 		String schemaInfo = buildMixMacSqlDbPrompt(schemaDTO, true);
@@ -54,7 +62,7 @@ public class PromptHelper {
 		for (TableDTO tableDTO : schemaDTO.getTable()) {
 			sb.append(buildMixMacSqlTablePrompt(tableDTO, withColumnType)).append("\n");
 		}
-		if (CollectionUtils.isNotEmpty(schemaDTO.getForeignKeys())) {
+		if (schemaDTO.getForeignKeys() != null && !schemaDTO.getForeignKeys().isEmpty()) {
 			sb.append("【Foreign keys】\n").append(StringUtils.join(schemaDTO.getForeignKeys(), "\n"));
 		}
 		return sb.toString();
@@ -84,7 +92,7 @@ public class PromptHelper {
 			if (!StringUtils.equals(columnDTO.getDescription(), columnDTO.getName())) {
 				line.append(", ").append(StringUtils.defaultString(columnDTO.getDescription(), ""));
 			}
-			if (CollectionUtils.isNotEmpty(tableDTO.getPrimaryKeys())
+			if (tableDTO.getPrimaryKeys() != null && !tableDTO.getPrimaryKeys().isEmpty()
 					&& tableDTO.getPrimaryKeys().contains(columnDTO.getName())) {
 				line.append(", Primary Key");
 			}
@@ -93,7 +101,7 @@ public class PromptHelper {
 				.stream()
 				.filter(d -> !StringUtils.isEmpty(d))
 				.collect(Collectors.toList());
-			if (CollectionUtils.isNotEmpty(enumData) && !"id".equals(columnDTO.getName())) {
+			if (!enumData.isEmpty() && !"id".equals(columnDTO.getName())) {
 				line.append(", Examples: [");
 				List<String> data = new ArrayList<>(enumData.subList(0, Math.min(3, enumData.size())));
 				line.append(StringUtils.join(data, ",")).append("]");
@@ -147,7 +155,7 @@ public class PromptHelper {
 		params.put("user_requirements_and_plan", userRequirementsAndPlan);
 		params.put("analysis_steps_and_data", analysisStepsAndData);
 		params.put("summary_and_recommendations", summaryAndRecommendations);
-		params.put("json_example", cleanJsonExample);
+		params.put("json_example", CLEAN_JSON_EXAMPLE);
 		return PromptConstant.getReportGeneratorPlainPromptTemplate().render(params);
 	}
 

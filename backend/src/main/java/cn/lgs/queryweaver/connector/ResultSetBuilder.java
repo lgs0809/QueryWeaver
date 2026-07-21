@@ -16,7 +16,7 @@
 package cn.lgs.queryweaver.connector;
 
 import cn.lgs.queryweaver.bo.schema.ResultSetBO;
-import org.apache.commons.compress.utils.Lists;
+import java.util.ArrayList;
 import org.apache.commons.lang3.StringUtils;
 
 import java.sql.ResultSet;
@@ -43,7 +43,7 @@ public class ResultSetBuilder {
 			rowHead[i - 1] = data.getColumnLabel(i);
 		}
 
-		List<Map<String, String>> resultSetData = Lists.newArrayList();
+		List<Map<String, String>> resultSetData = new ArrayList<>();
 		int count = 0;
 
 		while (rs.next() && count < maxRows) {

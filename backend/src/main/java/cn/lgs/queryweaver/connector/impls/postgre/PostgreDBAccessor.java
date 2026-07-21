@@ -22,8 +22,6 @@ import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
 import org.springframework.stereotype.Service;
 
 /**
- * @author yuluo
- * @author <a href="mailto:yuluo08290126@gmail.com">yuluo</a>
  */
 
 @Service("postgreAccessor")

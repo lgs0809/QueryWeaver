@@ -25,7 +25,7 @@ public interface ModelConfigMapper {
 
 	@Select("""
 			SELECT id, provider, base_url, api_key, model_name, temperature, is_active, max_tokens,
-			       model_type, completions_path, embeddings_path, created_time, updated_time, validation_status, last_validation_time, is_deleted,
+			       model_type, completions_path, embeddings_path, rerank_path, request_timeout_seconds, created_time, updated_time, validation_status, last_validation_time, is_deleted,
 			       proxy_enabled, proxy_host, proxy_port, proxy_username, proxy_password
 			FROM model_config WHERE is_deleted = 0 ORDER BY created_time DESC
 			""")
@@ -33,7 +33,7 @@ public interface ModelConfigMapper {
 
 	@Select("""
 			SELECT id, provider, base_url, api_key, model_name, temperature, is_active, max_tokens,
-			       model_type, completions_path, embeddings_path, created_time, updated_time, validation_status, last_validation_time, is_deleted,
+			       model_type, completions_path, embeddings_path, rerank_path, request_timeout_seconds, created_time, updated_time, validation_status, last_validation_time, is_deleted,
 			       proxy_enabled, proxy_host, proxy_port, proxy_username, proxy_password
 			FROM model_config WHERE id = #{id} AND is_deleted = 0
 			""")
@@ -41,7 +41,7 @@ public interface ModelConfigMapper {
 
 	@Select("""
 			SELECT id, provider, base_url, api_key, model_name, temperature, is_active, max_tokens,
-			       model_type, completions_path, embeddings_path, created_time, updated_time, validation_status, last_validation_time, is_deleted,
+			       model_type, completions_path, embeddings_path, rerank_path, request_timeout_seconds, created_time, updated_time, validation_status, last_validation_time, is_deleted,
 			       proxy_enabled, proxy_host, proxy_port, proxy_username, proxy_password
 			FROM model_config WHERE model_type = #{modelType} AND is_active = TRUE AND is_deleted = 0 LIMIT 1
 			""")
@@ -53,7 +53,7 @@ public interface ModelConfigMapper {
 	@Select("""
 			<script>
 			   SELECT id, provider, base_url, api_key, model_name, temperature, is_active, max_tokens,
-			          model_type, completions_path, embeddings_path, created_time, updated_time, validation_status, last_validation_time, is_deleted,
+			          model_type, completions_path, embeddings_path, rerank_path, request_timeout_seconds, created_time, updated_time, validation_status, last_validation_time, is_deleted,
 			          proxy_enabled, proxy_host, proxy_port, proxy_username, proxy_password
 			   FROM model_config
 			   <where>
@@ -85,10 +85,10 @@ public interface ModelConfigMapper {
 
 	@Insert("""
 			INSERT INTO model_config (provider, base_url, api_key, model_name, temperature, is_active, max_tokens,
-			                         model_type, completions_path, embeddings_path, created_time, updated_time, is_deleted,
+			                         model_type, completions_path, embeddings_path, rerank_path, request_timeout_seconds, created_time, updated_time, is_deleted,
 			                         proxy_enabled, proxy_host, proxy_port, proxy_username, proxy_password)
 			VALUES (#{provider}, #{baseUrl}, #{apiKey}, #{modelName}, #{temperature}, #{isActive}, #{maxTokens},
-			        #{modelType}, #{completionsPath}, #{embeddingsPath}, NOW(), NOW(), 0,
+			        #{modelType}, #{completionsPath}, #{embeddingsPath}, #{rerankPath}, #{requestTimeoutSeconds}, NOW(), NOW(), 0,
 			        #{proxyEnabled}, #{proxyHost}, #{proxyPort}, #{proxyUsername}, #{proxyPassword})
 			""")
 	@Options(useGeneratedKeys = true, keyProperty = "id", keyColumn = "id")
@@ -108,6 +108,8 @@ public interface ModelConfigMapper {
 			            <if test='modelType != null'>model_type = #{modelType},</if>
 			            <if test='completionsPath != null'>completions_path = #{completionsPath},</if>
 			            <if test='embeddingsPath != null'>embeddings_path = #{embeddingsPath},</if>
+			            <if test='rerankPath != null'>rerank_path = #{rerankPath},</if>
+			            <if test='requestTimeoutSeconds != null'>request_timeout_seconds = #{requestTimeoutSeconds},</if>
 			            <if test='isDeleted != null'>is_deleted = #{isDeleted},</if>
 			            <if test='proxyEnabled != null'>proxy_enabled = #{proxyEnabled},</if>
 			            <if test='proxyHost != null'>proxy_host = #{proxyHost},</if>

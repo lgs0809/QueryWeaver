@@ -23,7 +23,6 @@ import lombok.Data;
 /**
  * 用来记录NL2SQL中间过程的类
  *
- * @author vlsmb
  * @since 2025/8/14
  */
 @Data

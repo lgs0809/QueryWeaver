@@ -113,7 +113,6 @@ import reactor.core.publisher.Flux;
  * Handling query results and errors - Providing streaming feedback to users during
  * execution - Managing step-by-step result accumulation
  *
- * @author zhangshenghang
  */
 @Slf4j
 @Component

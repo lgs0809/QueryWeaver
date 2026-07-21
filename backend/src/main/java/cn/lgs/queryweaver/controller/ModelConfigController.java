@@ -98,16 +98,19 @@ public class ModelConfigController {
 	}
 
 	/**
-	 * 检查聊天模型和嵌入模型是否均已配置并启用。
+	 * 返回各模型能力的配置/验证状态。Rerank 是可选增强能力，不影响基础问数能力的 ready 口径。
 	 */
 	@GetMapping("/check-ready")
 	public ApiResponse<ModelCheckVo> checkReady() {
 		ModelConfigDTO chatModel = modelConfigDataService.getActiveConfigByType(ModelType.CHAT);
 		ModelConfigDTO embeddingModel = modelConfigDataService.getActiveConfigByType(ModelType.EMBEDDING);
+		ModelConfigDTO rerankModel = modelConfigDataService.getActiveConfigByType(ModelType.RERANK);
 		boolean chatModelConfigured = chatModel != null;
 		boolean embeddingModelConfigured = embeddingModel != null;
+		boolean rerankModelConfigured = rerankModel != null;
 		boolean chatModelReady = chatModelConfigured && "PASSED".equals(chatModel.getValidationStatus());
 		boolean embeddingModelReady = embeddingModelConfigured && "PASSED".equals(embeddingModel.getValidationStatus());
+		boolean rerankModelReady = rerankModelConfigured && "PASSED".equals(rerankModel.getValidationStatus());
 		return ApiResponse.success("模型配置检查完成", ModelCheckVo.builder()
 			.chatModelConfigured(chatModelConfigured)
 			.chatModelReady(chatModelReady)
@@ -115,6 +118,9 @@ public class ModelConfigController {
 			.embeddingModelConfigured(embeddingModelConfigured)
 			.embeddingModelReady(embeddingModelReady)
 			.embeddingModelLastValidationTime(embeddingModel == null ? null : embeddingModel.getLastValidationTime())
+			.rerankModelConfigured(rerankModelConfigured)
+			.rerankModelReady(rerankModelReady)
+			.rerankModelLastValidationTime(rerankModel == null ? null : rerankModel.getLastValidationTime())
 			.ready(chatModelReady && embeddingModelReady)
 			.build());
 	}

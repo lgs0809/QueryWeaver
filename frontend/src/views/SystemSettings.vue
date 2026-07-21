@@ -74,16 +74,25 @@
         <el-card shadow="never" class="optional-service">
           <div class="service-header">
             <div>
-              <h2>独立 Reranker</h2>
-              <p>可作为检索增强能力，但当前 QueryWeaver 后端没有独立的配置与运行验证代理。</p>
+              <h2>语义重排模型</h2>
+              <p>对混合召回候选进行 Rerank；未配置时自动使用 RRF 结果，不阻断基础问数。</p>
             </div>
-            <el-tag type="info" effect="plain">未接入运行验证</el-tag>
+            <el-tag :type="optionalStatusType(readiness.rerankModelConfigured, readiness.rerankModelReady)" effect="plain">
+              {{ optionalStatusLabel(readiness.rerankModelConfigured, readiness.rerankModelReady) }}
+            </el-tag>
           </div>
-          <el-alert
-            type="info"
-            :closable="false"
-            title="本页不会把部署层存在某个 Reranker 服务推断为“可用”。只有后端接入可验证事实后才会显示健康状态。"
-          />
+          <div class="fact-row">
+            <span>配置</span>
+            <strong>{{ readiness.rerankModelConfigured ? '已有当前配置' : '未配置（可选）' }}</strong>
+          </div>
+          <div class="fact-row">
+            <span>真实可用性验证</span>
+            <strong>{{ readiness.rerankModelReady ? '最近测试通过' : '尚未通过' }}</strong>
+          </div>
+          <div class="fact-row">
+            <span>最近验证</span>
+            <strong>{{ formatTime(readiness.rerankModelLastValidationTime) }}</strong>
+          </div>
         </el-card>
       </div>
 
@@ -96,10 +105,6 @@
         <p>
           “已有当前配置”只表示数据库中存在已启用配置；“已验证可用”必须由模型管理页发起一次真实模型调用并成功。
           任何模型配置修改都会使旧验证结果失效，重新变为“待验证”。
-        </p>
-        <p>
-          当前没有独立 Reranker 的后端配置/探活事实，因此这里不会展示硬编码地址、Docker
-          服务名或假定的健康状态。
         </p>
       </details>
     </section>
@@ -122,6 +127,9 @@
     embeddingModelConfigured: false,
     embeddingModelReady: false,
     embeddingModelLastValidationTime: undefined as string | undefined,
+    rerankModelConfigured: false,
+    rerankModelReady: false,
+    rerankModelLastValidationTime: undefined as string | undefined,
     ready: false,
   });
 
@@ -138,6 +146,10 @@
   };
 
   const statusType = (ready: boolean) => (ready ? 'success' : 'warning');
+  const optionalStatusType = (configured: boolean, ready: boolean) =>
+    !configured ? 'info' : ready ? 'success' : 'warning';
+  const optionalStatusLabel = (configured: boolean, ready: boolean) =>
+    !configured ? '未配置（可选）' : ready ? '已验证可用' : '尚未就绪';
   const formatTime = (value?: string) =>
     value ? new Date(value.replace(' ', 'T')).toLocaleString('zh-CN') : '尚无验证记录';
 

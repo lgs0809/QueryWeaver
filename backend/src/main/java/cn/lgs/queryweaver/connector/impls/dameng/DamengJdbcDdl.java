@@ -19,7 +19,7 @@ import cn.lgs.queryweaver.bo.schema.*;
 import cn.lgs.queryweaver.connector.SqlExecutor;
 import cn.lgs.queryweaver.connector.ddl.AbstractJdbcDdl;
 import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
-import org.apache.commons.compress.utils.Lists;
+import java.util.ArrayList;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -38,11 +38,11 @@ public class DamengJdbcDdl extends AbstractJdbcDdl {
 @Override
 	public List<SchemaInfoBO> showSchemas(Connection connection) {
 		String sql = "SELECT USERNAME FROM SYS.ALL_USERS";
-		List<SchemaInfoBO> schemaInfoList = Lists.newArrayList();
+		List<SchemaInfoBO> schemaInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 			for (int i = 1; i < resultArr.length; i++) {
 				if (resultArr[i].length == 0) {
@@ -64,11 +64,11 @@ public class DamengJdbcDdl extends AbstractJdbcDdl {
 		if (StringUtils.isNotBlank(tablePattern)) {
 			sql = "SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME LIKE '%' || '" + tablePattern + "' || '%'";
 		}
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 			for (int i = 1; i < resultArr.length; i++) {
 				if (resultArr[i].length == 0) {
@@ -87,15 +87,15 @@ public class DamengJdbcDdl extends AbstractJdbcDdl {
 	@Override
 	public List<TableInfoBO> fetchTables(Connection connection, String schema, List<String> tables) {
 		if (tables == null || tables.isEmpty()) {
-			return Lists.newArrayList();
+			return new ArrayList<>();
 		}
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 		String sql = "SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME in(" + tableListStr + ")";
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 			for (int i = 1; i < resultArr.length; i++) {
 				if (resultArr[i].length == 0) {
@@ -115,11 +115,11 @@ public class DamengJdbcDdl extends AbstractJdbcDdl {
 	public List<ColumnInfoBO> showColumns(Connection connection, String schema, String table) {
 		String sql = "SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE FROM USER_TAB_COLUMNS WHERE TABLE_NAME='"
 				+ table + "'";
-		List<ColumnInfoBO> columnInfoList = Lists.newArrayList();
+		List<ColumnInfoBO> columnInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 			for (int i = 1; i < resultArr.length; i++) {
 				if (resultArr[i].length == 0) {
@@ -143,17 +143,17 @@ public class DamengJdbcDdl extends AbstractJdbcDdl {
 	@Override
 	public List<ForeignKeyInfoBO> showForeignKeys(Connection connection, String schema, List<String> tables) {
 		if (tables == null || tables.isEmpty()) {
-			return Lists.newArrayList();
+			return new ArrayList<>();
 		}
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 		String sql = "SELECT uc.TABLE_NAME, ucc.COLUMN_NAME, uc.CONSTRAINT_NAME, uc.R_OWNER, uc.R_CONSTRAINT_NAME "
 				+ "FROM USER_CONSTRAINTS uc JOIN USER_CONS_COLUMNS ucc ON uc.CONSTRAINT_NAME = ucc.CONSTRAINT_NAME "
 				+ "WHERE uc.CONSTRAINT_TYPE='R' AND uc.TABLE_NAME IN (" + tableListStr + ")";
-		List<ForeignKeyInfoBO> foreignKeyInfoList = Lists.newArrayList();
+		List<ForeignKeyInfoBO> foreignKeyInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 			for (int i = 1; i < resultArr.length; i++) {
 				if (resultArr[i].length == 0) {
@@ -176,11 +176,11 @@ public class DamengJdbcDdl extends AbstractJdbcDdl {
 	@Override
 	public List<String> sampleColumn(Connection connection, String schema, String table, String column) {
 		String sql = "SELECT " + column + " FROM " + table + " FETCH FIRST 99 ROWS ONLY";
-		List<String> sampleInfo = Lists.newArrayList();
+		List<String> sampleInfo = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 			for (int i = 1; i < resultArr.length; i++) {
 				if (resultArr[i].length == 0 || column.equalsIgnoreCase(resultArr[i][0])) {

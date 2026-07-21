@@ -13,22 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.lgs.queryweaver.vo;
+package cn.lgs.queryweaver.semantic.retrieval;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import java.util.Optional;
 
-/**
- * API Key response payload.
- */
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class ApiKeyResponse {
+/** Supplies the currently active optional rerank capability to semantic retrieval. */
+public interface RerankModelProvider {
 
-	private String apiKey;
-
-	private Integer apiKeyEnabled;
+	Optional<RerankModel> currentRerankModel();
 
 }

@@ -33,8 +33,6 @@ import java.sql.Connection;
 import java.util.List;
 
 /**
- * @author yuluo
- * @author <a href="mailto:yuluo08290126@gmail.com">yuluo</a>
  */
 @Slf4j
 @AllArgsConstructor

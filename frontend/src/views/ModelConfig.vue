@@ -47,6 +47,7 @@
                   <el-option label="全部" value="" />
                   <el-option label="对话模型 (CHAT)" value="CHAT" />
                   <el-option label="嵌入模型 (EMBEDDING)" value="EMBEDDING" />
+                  <el-option label="重排模型 (RERANK)" value="RERANK" />
                 </el-select>
               </div>
             </div>
@@ -69,13 +70,15 @@
                         {{
                           scope.row.modelType === 'CHAT'
                             ? scope.row.completionsPath || '默认对话路径'
-                            : scope.row.embeddingsPath || '默认嵌入路径'
+                            : scope.row.modelType === 'EMBEDDING'
+                              ? scope.row.embeddingsPath || '默认嵌入路径'
+                              : scope.row.rerankPath || '/v1/rerank'
                         }}
                       </el-descriptions-item>
-                      <el-descriptions-item label="温度">
+                      <el-descriptions-item v-if="scope.row.modelType === 'CHAT'" label="温度">
                         {{ scope.row.temperature ?? 0 }}
                       </el-descriptions-item>
-                      <el-descriptions-item label="最大 Token">
+                      <el-descriptions-item v-if="scope.row.modelType === 'CHAT'" label="最大 Token">
                         {{ scope.row.maxTokens || 2000 }}
                       </el-descriptions-item>
                       <el-descriptions-item label="API Key">
@@ -106,7 +109,13 @@
                     :type="scope.row.modelType === 'CHAT' ? 'primary' : 'success'"
                     effect="plain"
                   >
-                    {{ scope.row.modelType === 'CHAT' ? '业务理解 / 问数' : '语义检索' }}
+                    {{
+                      scope.row.modelType === 'CHAT'
+                        ? '业务理解 / 问数'
+                        : scope.row.modelType === 'EMBEDDING'
+                          ? '语义向量'
+                          : '语义重排'
+                    }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -175,7 +184,7 @@
       <el-dialog
         v-model="dialogVisible"
         :title="dialogTitle"
-        width="600px"
+        width="min(600px, calc(100vw - 32px))"
         :close-on-click-modal="false"
       >
         <el-form
@@ -188,7 +197,10 @@
           <el-form-item label="提供商" prop="provider">
             <el-select
               v-model="formData.provider"
-              placeholder="请选择提供商"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="选择或输入提供商标识"
               style="width: 100%"
               @change="updateBaseUrlByProvider"
             >
@@ -204,6 +216,7 @@
             <el-radio-group v-model="formData.modelType">
               <el-radio label="CHAT">对话模型</el-radio>
               <el-radio label="EMBEDDING">嵌入模型</el-radio>
+              <el-radio label="RERANK">重排模型</el-radio>
             </el-radio-group>
           </el-form-item>
 
@@ -214,19 +227,19 @@
             />
           </el-form-item>
 
-          <el-form-item label="API密钥" prop="apiKey" :required="formData.provider !== 'custom'">
+          <el-form-item label="API 密钥" prop="apiKey">
             <el-input
               v-model="formData.apiKey"
               type="password"
               show-password
-              :placeholder="formData.provider === 'custom' ? '可选填' : '请输入API密钥'"
+              :placeholder="formData.apiKeyConfigured ? '已配置；留空表示保持不变' : '可选；服务需要鉴权时填写'"
             />
           </el-form-item>
 
           <el-form-item label="Base URL" prop="baseUrl">
             <el-input
               v-model="formData.baseUrl"
-              placeholder="请填写兼容 OpenAI 协议的 Base URL，通常不包含 /v1 后缀"
+              placeholder="填写模型服务 Base URL，例如 https://api.example.com"
             />
           </el-form-item>
 
@@ -243,16 +256,34 @@
 
           <el-form-item
             v-if="formData.modelType === 'EMBEDDING'"
-            label="Embeddings路径"
+            label="Embeddings 路径"
             prop="embeddingsPath"
           >
             <el-input
               v-model="formData.embeddingsPath"
-              placeholder="附加到附加到base-url的路径。留空则使用默认值/v1/embeddings"
+              placeholder="附加到 Base URL 的路径；留空使用 /v1/embeddings"
             />
           </el-form-item>
 
-          <el-form-item label="温度" prop="temperature">
+          <el-form-item v-if="formData.modelType === 'RERANK'" label="Rerank 路径" prop="rerankPath">
+            <el-input
+              v-model="formData.rerankPath"
+              placeholder="附加到 Base URL 的路径；留空使用 /v1/rerank"
+            />
+          </el-form-item>
+
+          <el-form-item label="请求超时" prop="requestTimeoutSeconds">
+            <el-input-number
+              v-model="formData.requestTimeoutSeconds"
+              :min="1"
+              :max="600"
+              :step="5"
+              style="width: 100%"
+            />
+            <div class="form-tip">单次模型请求超时，单位秒；适用于 Chat、Embedding 和 Rerank。</div>
+          </el-form-item>
+
+          <el-form-item v-if="formData.modelType === 'CHAT'" label="温度" prop="temperature">
             <el-slider
               v-model="formData.temperature"
               :min="0"
@@ -264,7 +295,7 @@
             <div class="form-tip">建议默认0。控制生成文本的随机性，值越高越随机</div>
           </el-form-item>
 
-          <el-form-item label="最大Token" prop="maxTokens">
+          <el-form-item v-if="formData.modelType === 'CHAT'" label="最大 Token" prop="maxTokens">
             <el-input-number
               v-model="formData.maxTokens"
               :min="100"
@@ -290,7 +321,7 @@
             <el-form-item label="代理主机" prop="proxyHost" :required="formData.proxyEnabled">
               <el-input
                 v-model="formData.proxyHost"
-                placeholder="例如: 127.0.0.1 或 proxy.example.com"
+                placeholder="例如 proxy.example.com"
               />
             </el-form-item>
 
@@ -371,10 +402,12 @@
         maxTokens: 2000,
         completionsPath: '',
         embeddingsPath: '',
+        rerankPath: '',
+        requestTimeoutSeconds: 60,
         isActive: false,
         proxyEnabled: false,
         proxyHost: '',
-        proxyPort: 7890, // 给个常用的默认端口
+        proxyPort: undefined,
         proxyUsername: '',
         proxyPassword: '',
       });
@@ -400,21 +433,10 @@
         provider: [{ required: true, message: '请选择提供商', trigger: 'change' }],
         modelType: [{ required: true, message: '请选择模型类型', trigger: 'change' }],
         modelName: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
-        apiKey: [
-          {
-            validator: (_rule, value, callback) => {
-              if (formData.value.provider === 'custom') {
-                callback();
-              } else if (!value || value.trim() === '') {
-                callback(new Error('请输入API密钥'));
-              } else {
-                callback();
-              }
-            },
-            trigger: 'blur',
-          },
+        baseUrl: [{ required: true, message: '请输入 API 地址', trigger: 'blur' }],
+        requestTimeoutSeconds: [
+          { type: 'number', min: 1, max: 600, message: '请求超时必须在 1-600 秒之间', trigger: 'blur' },
         ],
-        baseUrl: [{ required: true, message: '请输入API地址', trigger: 'blur' }],
         temperature: [
           { type: 'number', min: 0, max: 2, message: '温度值必须在0-2之间', trigger: 'blur' },
         ],
@@ -495,7 +517,14 @@
           maxTokens: 2000,
           completionsPath: '',
           embeddingsPath: '',
+          rerankPath: '',
+          requestTimeoutSeconds: 60,
           isActive: false,
+          proxyEnabled: false,
+          proxyHost: '',
+          proxyPort: undefined,
+          proxyUsername: '',
+          proxyPassword: '',
         };
         dialogVisible.value = true;
       };
@@ -668,6 +697,7 @@
   /* 主内容区域 */
   .main-content {
     width: 100%;
+    max-width: 1600px;
     margin: 0 auto;
     padding: 2rem;
   }

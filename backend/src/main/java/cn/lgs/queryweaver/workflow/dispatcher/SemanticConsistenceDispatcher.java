@@ -22,7 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 import static cn.lgs.queryweaver.constant.Constant.*;
 
 /**
- * @author zhangshenghang
  */
 @Slf4j
 public class SemanticConsistenceDispatcher implements EdgeAction {

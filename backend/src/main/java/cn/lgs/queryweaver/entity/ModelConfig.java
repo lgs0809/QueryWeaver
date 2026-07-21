@@ -43,12 +43,16 @@ public class ModelConfig {
 	private Integer maxTokens;
 
 	// 模型类型
-	// 可选值："CHAT", "EMBEDDING"
+	// 可选值："CHAT", "EMBEDDING", "RERANK"
 	private ModelType modelType;
 
 	private String completionsPath;
 
 	private String embeddingsPath;
+
+	private String rerankPath;
+
+	private Integer requestTimeoutSeconds;
 
 	@JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
 	private LocalDateTime createdTime;

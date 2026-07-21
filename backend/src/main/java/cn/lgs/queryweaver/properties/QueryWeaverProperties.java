@@ -28,15 +28,7 @@ public class QueryWeaverProperties {
 
 	private LlmServiceEnum llmServiceType = LlmServiceEnum.STREAM;
 
-	/**
-	 * cn.lgs.queryweaver.embedding-batch.encoding-type=cl100k_base
-	 * cn.lgs.queryweaver.embedding-batch.max-token-count=2000
-	 * cn.lgs.queryweaver.embedding-batch.reserve-percentage=0.2
-	 * cn.lgs.queryweaver.embedding-batch.max-text-count=10
-	 */
 	private SqlExecutionPolicy sqlExecution = new SqlExecutionPolicy();
-
-	private ReportTemplate reportTemplate = new ReportTemplate();
 
 	/**
 	 * sql执行失败重试次数
@@ -133,18 +125,6 @@ public class QueryWeaverProperties {
 
 		/** Whether a full table scan reported by EXPLAIN must be rejected. */
 		private boolean rejectFullTableScan = false;
-
-	}
-
-	@Getter
-	@Setter
-	public static class ReportTemplate {
-
-		// Marked.js (Markdown 解析器) 南方科技大学开源软件镜像站
-		private String markedUrl = "https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/marked/12.0.0/marked.min.js";
-
-		// ECharts (图表库) 南方科技大学开源软件镜像站
-		private String echartsUrl = "https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/echarts/5.5.0/echarts.min.js";
 
 	}
 

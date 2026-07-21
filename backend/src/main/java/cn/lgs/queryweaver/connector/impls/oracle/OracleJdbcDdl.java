@@ -19,7 +19,7 @@ import cn.lgs.queryweaver.bo.schema.*;
 import cn.lgs.queryweaver.connector.SqlExecutor;
 import cn.lgs.queryweaver.connector.ddl.AbstractJdbcDdl;
 import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
-import org.apache.commons.compress.utils.Lists;
+import java.util.ArrayList;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -53,11 +53,11 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 @Override
 	public List<SchemaInfoBO> showSchemas(Connection connection) {
 		String sql = "SELECT USERNAME FROM ALL_USERS ORDER BY USERNAME";
-		List<SchemaInfoBO> schemaInfoList = Lists.newArrayList();
+		List<SchemaInfoBO> schemaInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -77,7 +77,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 	@Override
 	public List<TableInfoBO> showTables(Connection connection, String schema, String tablePattern) {
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		try {
 			String ownerSchema = getSchema(connection, schema);
 			StringBuilder sql = new StringBuilder();
@@ -93,7 +93,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, ownerSchema, sql.toString());
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -114,7 +114,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 	@Override
 	public List<TableInfoBO> fetchTables(Connection connection, String schema, List<String> tables) {
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		if (tables == null || tables.isEmpty()) {
 			return tableInfoList;
 		}
@@ -132,7 +132,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -153,7 +153,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 	@Override
 	public List<ColumnInfoBO> showColumns(Connection connection, String schema, String table) {
-		List<ColumnInfoBO> columnInfoList = Lists.newArrayList();
+		List<ColumnInfoBO> columnInfoList = new ArrayList<>();
 		try {
 			String ownerSchema = getSchema(connection, schema);
 			String upperTable = table.toUpperCase();
@@ -173,7 +173,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -198,7 +198,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 	@Override
 	public List<ForeignKeyInfoBO> showForeignKeys(Connection connection, String schema, List<String> tables) {
-		List<ForeignKeyInfoBO> foreignKeyInfoList = Lists.newArrayList();
+		List<ForeignKeyInfoBO> foreignKeyInfoList = new ArrayList<>();
 		if (tables == null || tables.isEmpty()) {
 			return foreignKeyInfoList;
 		}
@@ -223,7 +223,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -247,7 +247,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 	@Override
 	public List<String> sampleColumn(Connection connection, String schema, String table, String column) {
-		List<String> sampleInfo = Lists.newArrayList();
+		List<String> sampleInfo = new ArrayList<>();
 		try {
 			String upperTable = table.toUpperCase();
 			String upperColumn = column.toUpperCase();
@@ -256,7 +256,7 @@ public class OracleJdbcDdl extends AbstractJdbcDdl {
 
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {

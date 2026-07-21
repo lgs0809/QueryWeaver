@@ -34,12 +34,10 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "queryweaver.semantic.matching")
 public class SemanticMatchingProperties {
 
-	private Map<String, List<String>> metricTermAliases = defaultMetricTermAliases();
-
-	private static Map<String, List<String>> defaultMetricTermAliases() {
-		Map<String, List<String>> aliases = new LinkedHashMap<>();
-		aliases.put("gmv", List.of("成交金额", "交易金额"));
-		return aliases;
-	}
+	/**
+	 * Optional installation-level aliases. Project-specific terminology belongs in the
+	 * Semantic Catalog / learned semantic assets rather than application defaults.
+	 */
+	private Map<String, List<String>> metricTermAliases = new LinkedHashMap<>();
 
 }

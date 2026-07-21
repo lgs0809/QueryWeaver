@@ -89,6 +89,9 @@ public class ModelConfigOpsService {
 			else if (ModelType.EMBEDDING.getCode().equalsIgnoreCase(modelType)) {
 				testEmbeddingModel(config);
 			}
+			else if (ModelType.RERANK.getCode().equalsIgnoreCase(modelType)) {
+				testRerankModel(config);
+			}
 			else {
 				throw new IllegalArgumentException("未知的模型类型: " + modelType);
 			}
@@ -116,7 +119,10 @@ public class ModelConfigOpsService {
 		String promptText = "Hello";
 
 		// 3. 调用
-		ChatResponse response = tempModel.stream(new Prompt(promptText)).next().toFuture().get(60, TimeUnit.SECONDS);
+		int timeoutSeconds = config.getRequestTimeoutSeconds() == null ? 60
+				: Math.max(1, config.getRequestTimeoutSeconds());
+		ChatResponse response = tempModel.stream(new Prompt(promptText)).next().toFuture().get(timeoutSeconds,
+				TimeUnit.SECONDS);
 
 		// 4. 校验结果
 		if (response == null) {
@@ -128,17 +134,23 @@ public class ModelConfigOpsService {
 	private void testEmbeddingModel(ModelConfigDTO config) {
 		log.info("Testing Embedding Model connection, provider: {} modelName: {}", config.getProvider(),
 				config.getModelName());
-		// 1. 创建临时模型
 		EmbeddingModel tempModel = modelFactory.createEmbeddingModel(config);
-
-		// 2. 发起请求
 		float[] embedding = tempModel.embed("Test");
-
-		// 3. 校验结果
 		if (embedding == null || embedding.length == 0) {
 			throw new RuntimeException("模型生成的向量为空");
 		}
 		log.info("Embedding Model test passed. Dimension: {}", embedding.length);
+	}
+
+	private void testRerankModel(ModelConfigDTO config) {
+		log.info("Testing Rerank Model connection, provider: {} modelName: {}", config.getProvider(),
+				config.getModelName());
+		var scores = modelFactory.createRerankModel(config)
+			.rerank("test query", java.util.List.of("relevant test document", "unrelated test document"), 2);
+		if (scores.isEmpty()) {
+			throw new RuntimeException("重排模型未返回有效分数");
+		}
+		log.info("Rerank Model test passed. Result count: {}", scores.size());
 	}
 
 	/**

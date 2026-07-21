@@ -18,7 +18,6 @@ package cn.lgs.queryweaver.enums;
 /**
  * 运行Python任务的容器池（实现枚举）
  *
- * @author vlsmb
  * @since 2025/7/28
  */
 public enum CodePoolExecutorEnum {

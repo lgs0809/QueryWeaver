@@ -46,7 +46,6 @@ import static cn.lgs.queryweaver.constant.Constant.*;
 /**
  * 生成Python代码的节点
  *
- * @author vlsmb
  * @since 2025/7/30
  */
 @Slf4j

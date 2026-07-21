@@ -45,7 +45,6 @@ import java.util.Map;
 import static cn.lgs.queryweaver.constant.Constant.*;
 
 /**
- * @author zhangshenghang
  */
 @Slf4j
 @Component

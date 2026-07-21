@@ -3,13 +3,10 @@ name: ${QUERYWEAVER_COMPOSE_PROJECT_NAME:-queryweaver}
 services:
   metadata-db:
     image: pgvector/pgvector:pg16
-    container_name: ${QUERYWEAVER_METADATA_CONTAINER:-queryweaver-metadata-db}
     environment:
-      POSTGRES_DB: ${QW_METADATA_DATABASE:-queryweaver}
-      POSTGRES_USER: ${QW_METADATA_USER:-queryweaver}
-      POSTGRES_PASSWORD: ${QW_METADATA_PASSWORD:?set QW_METADATA_PASSWORD}
-    ports:
-      - "${QW_METADATA_PORT:-33306}:5432"
+      POSTGRES_DB: ${QUERYWEAVER_METADATA_DATABASE:-queryweaver}
+      POSTGRES_USER: ${QUERYWEAVER_METADATA_USER:-queryweaver}
+      POSTGRES_PASSWORD: ${QUERYWEAVER_METADATA_PASSWORD:?set QUERYWEAVER_METADATA_PASSWORD}
     volumes:
       - queryweaver-metadata:/var/lib/postgresql/data
     networks: [queryweaver-net]
@@ -20,67 +17,25 @@ services:
       retries: 12
     restart: unless-stopped
 
-  readonly-mysql:
-    image: mysql:8.0.36
-    container_name: ${QUERYWEAVER_SOURCE_MYSQL_CONTAINER:-queryweaver-readonly-mysql}
-    environment:
-      MYSQL_ROOT_PASSWORD: ${QW_SOURCE_ROOT_PASSWORD:?set QW_SOURCE_ROOT_PASSWORD}
-      QW_READER_PASSWORD: ${QW_READER_PASSWORD:?set QW_READER_PASSWORD}
-    ports:
-      - "${QW_SOURCE_MYSQL_PORT:-33307}:3306"
-    volumes:
-      - ../config/mysql/product_db.sql:/docker-entrypoint-initdb.d/10-product.sql:ro
-      - ./mysql/20-readonly-user.sh:/docker-entrypoint-initdb.d/20-readonly-user.sh:ro
-      - queryweaver-source-mysql:/var/lib/mysql
-    networks: [queryweaver-net]
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-    restart: unless-stopped
-
-  readonly-postgres:
-    image: postgres:15
-    container_name: ${QUERYWEAVER_SOURCE_POSTGRES_CONTAINER:-queryweaver-readonly-postgres}
-    environment:
-      POSTGRES_USER: ${QW_POSTGRES_ADMIN:-queryweaver_admin}
-      POSTGRES_PASSWORD: ${QW_POSTGRES_ADMIN_PASSWORD:?set QW_POSTGRES_ADMIN_PASSWORD}
-      QW_POSTGRES_READER_PASSWORD: ${QW_POSTGRES_READER_PASSWORD:?set QW_POSTGRES_READER_PASSWORD}
-    ports:
-      - "${QW_SOURCE_POSTGRES_PORT:-35432}:5432"
-    volumes:
-      - ../config/postgres/china_population_db.sql:/docker-entrypoint-initdb.d/10-china-population.sql:ro
-      - ./postgres/20-readonly-user.sh:/docker-entrypoint-initdb.d/20-readonly-user.sh:ro
-      - queryweaver-source-postgres:/var/lib/postgresql/data
-    networks: [queryweaver-net]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-    restart: unless-stopped
-
   backend:
     profiles: [app]
     build:
       context: ../..
       dockerfile: deploy/Dockerfile-backend
-    image: queryweaver/backend:local
-    container_name: ${QUERYWEAVER_BACKEND_CONTAINER:-queryweaver-backend}
+    image: ${QUERYWEAVER_BACKEND_IMAGE:-queryweaver/backend:local}
     environment:
-      SPRING_PROFILES_ACTIVE: ${QUERYWEAVER_SPRING_PROFILE:-prod}
-      QUERYWEAVER_DATASOURCE_URL: jdbc:postgresql://metadata-db:5432/${QW_METADATA_DATABASE:-queryweaver}?stringtype=unspecified
-      QUERYWEAVER_DATASOURCE_USERNAME: ${QW_METADATA_USER:-queryweaver}
-      QUERYWEAVER_DATASOURCE_PASSWORD: ${QW_METADATA_PASSWORD}
+      SPRING_PROFILES_ACTIVE: ${QUERYWEAVER_SPRING_PROFILE:-standalone}
+      QUERYWEAVER_DATASOURCE_URL: jdbc:postgresql://metadata-db:5432/${QUERYWEAVER_METADATA_DATABASE:-queryweaver}?stringtype=unspecified
+      QUERYWEAVER_DATASOURCE_USERNAME: ${QUERYWEAVER_METADATA_USER:-queryweaver}
+      QUERYWEAVER_DATASOURCE_PASSWORD: ${QUERYWEAVER_METADATA_PASSWORD}
       QUERYWEAVER_DATASOURCE_DRIVER: org.postgresql.Driver
       QUERYWEAVER_CODE_EXECUTOR: remote
       QUERYWEAVER_EXECUTION_REMOTE_URL: http://execution-worker:8066
-      QUERYWEAVER_EXECUTION_INTERNAL_TOKEN: ${QUERYWEAVER_EXECUTION_INTERNAL_TOKEN}
+      QUERYWEAVER_EXECUTION_INTERNAL_TOKEN: ${QUERYWEAVER_EXECUTION_INTERNAL_TOKEN:?set QUERYWEAVER_EXECUTION_INTERNAL_TOKEN}
       QUERYWEAVER_OPERATOR_DEVELOPMENT_MODE: ${QUERYWEAVER_OPERATOR_DEVELOPMENT_MODE:-false}
-      QUERYWEAVER_SECURITY_ENABLED: ${QUERYWEAVER_SECURITY_ENABLED:-true}
-      QUERYWEAVER_JWT_ISSUER_URI: ${QUERYWEAVER_JWT_ISSUER_URI}
-      QUERYWEAVER_SECRET_ENCRYPTION_KEY: ${QUERYWEAVER_SECRET_ENCRYPTION_KEY}
+      QUERYWEAVER_SECURITY_ENABLED: ${QUERYWEAVER_SECURITY_ENABLED:-false}
+      QUERYWEAVER_JWT_ISSUER_URI: ${QUERYWEAVER_JWT_ISSUER_URI:-}
+      QUERYWEAVER_SECRET_ENCRYPTION_KEY: ${QUERYWEAVER_SECRET_ENCRYPTION_KEY:?set QUERYWEAVER_SECRET_ENCRYPTION_KEY}
       QUERYWEAVER_RETENTION_ENABLED: ${QUERYWEAVER_RETENTION_ENABLED:-true}
       QUERYWEAVER_RETENTION_DRY_RUN: ${QUERYWEAVER_RETENTION_DRY_RUN:-true}
       QUERYWEAVER_RETENTION_TERMINAL_RUN_DAYS: ${QUERYWEAVER_RETENTION_TERMINAL_RUN_DAYS:-90}
@@ -88,26 +43,15 @@ services:
       QUERYWEAVER_RETENTION_BATCH_AUDIT_DAYS: ${QUERYWEAVER_RETENTION_BATCH_AUDIT_DAYS:-365}
       QUERYWEAVER_RETENTION_SCAN_DELAY_MS: ${QUERYWEAVER_RETENTION_SCAN_DELAY_MS:-3600000}
       QUERYWEAVER_RETENTION_LEASE_DURATION_SECONDS: ${QUERYWEAVER_RETENTION_LEASE_DURATION_SECONDS:-600}
-      QUERYWEAVER_BENCHMARK_SEMANTIC_EVALUATION_ENABLED: ${QUERYWEAVER_BENCHMARK_SEMANTIC_EVALUATION_ENABLED:-false}
       QUERYWEAVER_PLANNER_REASONING_ENABLED: ${QUERYWEAVER_PLANNER_REASONING_ENABLED:-true}
       QUERYWEAVER_PLANNER_REASONING_EFFORT: ${QUERYWEAVER_PLANNER_REASONING_EFFORT:-medium}
       QUERYWEAVER_PLANNER_REASONING_MODEL_OVERRIDE: ${QUERYWEAVER_PLANNER_REASONING_MODEL_OVERRIDE:-}
-      QUERYWEAVER_PLANNER_REASONING_DOWNGRADE_ON_UNSUPPORTED: ${QUERYWEAVER_PLANNER_REASONING_DOWNGRADE_ON_UNSUPPORTED:-true}
       QUERYWEAVER_POST_EXECUTION_REVIEW_SEMANTIC_ENABLED: ${QUERYWEAVER_POST_EXECUTION_REVIEW_SEMANTIC_ENABLED:-true}
-      QUERYWEAVER_POST_EXECUTION_REVIEW_ALWAYS_SEMANTIC_REVIEW: ${QUERYWEAVER_POST_EXECUTION_REVIEW_ALWAYS_SEMANTIC_REVIEW:-false}
       QUERYWEAVER_MCP_ENABLED: ${QUERYWEAVER_MCP_ENABLED:-true}
-      QUERYWEAVER_MCP_PUBLIC_BASE_URL: ${QUERYWEAVER_MCP_PUBLIC_BASE_URL:-http://127.0.0.1:28065}
+      QUERYWEAVER_MCP_PUBLIC_BASE_URL: ${QUERYWEAVER_MCP_PUBLIC_BASE_URL:-http://127.0.0.1:${QUERYWEAVER_BACKEND_PORT:-28065}}
       QUERYWEAVER_MCP_ENDPOINT: ${QUERYWEAVER_MCP_ENDPOINT:-/mcp}
-      QUERYWEAVER_REPAIR_POLICY_MAX_SQL_REPAIRS: ${QUERYWEAVER_REPAIR_POLICY_MAX_SQL_REPAIRS:-2}
-      QUERYWEAVER_REPAIR_POLICY_MAX_SEMANTIC_REPLANS: ${QUERYWEAVER_REPAIR_POLICY_MAX_SEMANTIC_REPLANS:-1}
-      QUERYWEAVER_REPAIR_POLICY_MAX_RETRIEVAL_REPAIRS: ${QUERYWEAVER_REPAIR_POLICY_MAX_RETRIEVAL_REPAIRS:-1}
-      QUERYWEAVER_REPAIR_POLICY_MAX_SEMANTIC_REVIEWS: ${QUERYWEAVER_REPAIR_POLICY_MAX_SEMANTIC_REVIEWS:-1}
-      QUERYWEAVER_REPAIR_POLICY_MAX_CLARIFICATIONS: ${QUERYWEAVER_REPAIR_POLICY_MAX_CLARIFICATIONS:-1}
-      QUERYWEAVER_REPAIR_POLICY_MAX_TOTAL_TRANSITIONS: ${QUERYWEAVER_REPAIR_POLICY_MAX_TOTAL_TRANSITIONS:-3}
-      QUERYWEAVER_CONCURRENCY_SQL_LIMITS_DEFAULT_PER_USER: ${QUERYWEAVER_CONCURRENCY_SQL_LIMITS_DEFAULT_PER_USER:-3}
-      AI_DASHSCOPE_API_KEY: ${AI_DASHSCOPE_API_KEY:-}
     ports:
-      - "${QW_BACKEND_PORT:-28065}:8065"
+      - "${QUERYWEAVER_BACKEND_PORT:-28065}:8065"
     volumes:
       - queryweaver-uploads:/app/uploads
     depends_on:
@@ -118,15 +62,23 @@ services:
     networks: [queryweaver-net]
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8065/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
     restart: unless-stopped
 
   execution-worker:
     profiles: [app, worker]
-    image: queryweaver/backend:local
-    container_name: ${QUERYWEAVER_WORKER_CONTAINER:-queryweaver-execution-worker}
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile-backend
+    image: ${QUERYWEAVER_BACKEND_IMAGE:-queryweaver/backend:local}
+    user: "0:0"
     environment:
       QUERYWEAVER_RUNTIME_ROLE: execution-worker
-      QUERYWEAVER_EXECUTION_INTERNAL_TOKEN: ${QUERYWEAVER_EXECUTION_INTERNAL_TOKEN}
+      QUERYWEAVER_EXECUTION_INTERNAL_TOKEN: ${QUERYWEAVER_EXECUTION_INTERNAL_TOKEN:?set QUERYWEAVER_EXECUTION_INTERNAL_TOKEN}
       QUERYWEAVER_EXECUTION_IMAGE: ${QUERYWEAVER_EXECUTION_IMAGE:-continuumio/anaconda3:latest}
       QUERYWEAVER_EXECUTION_NETWORK_MODE: none
       QUERYWEAVER_EXECUTION_READ_ONLY_ROOT: "true"
@@ -139,7 +91,7 @@ services:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8066/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 18
     networks: [queryweaver-net]
     restart: unless-stopped
 
@@ -148,25 +100,72 @@ services:
     build:
       context: ../..
       dockerfile: deploy/Dockerfile-frontend
-    image: queryweaver/frontend:local
-    container_name: ${QUERYWEAVER_FRONTEND_CONTAINER:-queryweaver-frontend}
+    image: ${QUERYWEAVER_FRONTEND_IMAGE:-queryweaver/frontend:local}
     ports:
-      - "${QW_FRONTEND_PORT:-23000}:80"
-    depends_on: [backend]
+      - "${QUERYWEAVER_FRONTEND_PORT:-23000}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
     networks: [queryweaver-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/queryweaver/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  demo-mysql:
+    profiles: [demo]
+    image: mysql:8.0.36
+    environment:
+      MYSQL_ROOT_PASSWORD: ${QUERYWEAVER_DEMO_MYSQL_ROOT_PASSWORD:-}
+      QUERYWEAVER_DEMO_MYSQL_READER_PASSWORD: ${QUERYWEAVER_DEMO_MYSQL_READER_PASSWORD:-}
+    ports:
+      - "${QUERYWEAVER_DEMO_MYSQL_PORT:-33307}:3306"
+    volumes:
+      - ../config/mysql/product_db.sql:/docker-entrypoint-initdb.d/10-demo.sql:ro
+      - ./mysql/20-readonly-user.sh:/docker-entrypoint-initdb.d/20-readonly-user.sh:ro
+      - queryweaver-demo-mysql:/var/lib/mysql
+    networks: [queryweaver-net]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  demo-postgres:
+    profiles: [demo]
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${QUERYWEAVER_DEMO_POSTGRES_ADMIN:-queryweaver_admin}
+      POSTGRES_PASSWORD: ${QUERYWEAVER_DEMO_POSTGRES_ADMIN_PASSWORD:-}
+      QUERYWEAVER_DEMO_POSTGRES_READER_PASSWORD: ${QUERYWEAVER_DEMO_POSTGRES_READER_PASSWORD:-}
+    ports:
+      - "${QUERYWEAVER_DEMO_POSTGRES_PORT:-35432}:5432"
+    volumes:
+      - ../config/postgres/china_population_db.sql:/docker-entrypoint-initdb.d/10-demo.sql:ro
+      - ./postgres/20-readonly-user.sh:/docker-entrypoint-initdb.d/20-readonly-user.sh:ro
+      - queryweaver-demo-postgres:/var/lib/postgresql/data
+    networks: [queryweaver-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 
 volumes:
   queryweaver-metadata:
-    name: ${QW_METADATA_VOLUME:-queryweaver-metadata-pg16}
-  queryweaver-source-mysql:
-    name: ${QW_SOURCE_MYSQL_VOLUME:-queryweaver-source-mysql}
-  queryweaver-source-postgres:
-    name: ${QW_SOURCE_POSTGRES_VOLUME:-queryweaver-source-postgres}
+    name: ${QUERYWEAVER_METADATA_VOLUME:-queryweaver-metadata-pg16}
   queryweaver-uploads:
-    name: ${QW_UPLOADS_VOLUME:-queryweaver-uploads}
+    name: ${QUERYWEAVER_UPLOADS_VOLUME:-queryweaver-uploads}
+  queryweaver-demo-mysql:
+    name: ${QUERYWEAVER_DEMO_MYSQL_VOLUME:-queryweaver-demo-mysql}
+  queryweaver-demo-postgres:
+    name: ${QUERYWEAVER_DEMO_POSTGRES_VOLUME:-queryweaver-demo-postgres}
 
 networks:
   queryweaver-net:
-    name: queryweaver-net
+    name: ${QUERYWEAVER_NETWORK_NAME:-queryweaver-net}
     driver: bridge

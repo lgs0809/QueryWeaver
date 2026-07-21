@@ -16,7 +16,7 @@
 package cn.lgs.queryweaver.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +33,8 @@ class ModelConfigDTOTest {
 
 		assertEquals(0.0d, model.getTemperature());
 		assertEquals(2000, model.getMaxTokens());
-		assertTrue(model.getIsActive());
+		assertEquals(60, model.getRequestTimeoutSeconds());
+		assertFalse(model.getIsActive());
 		assertEquals(Boolean.FALSE, model.getProxyEnabled());
 	}
 

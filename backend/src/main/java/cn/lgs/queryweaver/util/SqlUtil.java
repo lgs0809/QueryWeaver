@@ -21,7 +21,6 @@ import lombok.experimental.UtilityClass;
 /**
  * SQL 工具类
  *
- * @author Yang Yufeng
  * @version 1.0
  */
 @UtilityClass

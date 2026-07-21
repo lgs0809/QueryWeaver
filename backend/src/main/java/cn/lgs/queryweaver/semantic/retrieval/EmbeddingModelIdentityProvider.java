@@ -13,19 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.lgs.queryweaver.enums;
+package cn.lgs.queryweaver.semantic.retrieval;
 
-import lombok.Getter;
+import java.util.Map;
+import java.util.Optional;
 
-@Getter
-public enum SplitterType {
+/** Supplies the active embedding model identity without exposing model configuration persistence details. */
+public interface EmbeddingModelIdentityProvider {
 
-	TOKEN("token"), RECURSIVE("recursive"), SENTENCE("sentence"), PARAGRAPH("paragraph"), SEMANTIC("semantic");
+	Optional<EmbeddingModelIdentity> currentEmbeddingIdentity();
 
-	private final String value;
+	record EmbeddingModelIdentity(String model, Map<String, Object> attributes) {
 
-	SplitterType(String value) {
-		this.value = value;
+		public EmbeddingModelIdentity {
+			attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+		}
 	}
 
 }

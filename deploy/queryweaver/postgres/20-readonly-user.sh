@@ -2,7 +2,7 @@
 set -eu
 
 psql --username "${POSTGRES_USER}" --dbname postgres \
-  --set=reader_password="${QW_POSTGRES_READER_PASSWORD}" <<'SQL'
+  --set=reader_password="${QUERYWEAVER_DEMO_POSTGRES_READER_PASSWORD}" <<'SQL'
 SELECT format('CREATE ROLE queryweaver_reader LOGIN PASSWORD %L', :'reader_password')
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'queryweaver_reader')\gexec
 ALTER ROLE queryweaver_reader NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;

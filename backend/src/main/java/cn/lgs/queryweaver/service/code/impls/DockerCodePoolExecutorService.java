@@ -54,7 +54,6 @@ import static com.github.dockerjava.api.model.HostConfig.newHostConfig;
 /**
  * 运行Python任务的容器池（Docker实现类）
  *
- * @author vlsmb
  * @since 2025/7/12
  */
 @Slf4j
@@ -117,10 +116,8 @@ public class DockerCodePoolExecutorService extends AbstractCodePoolExecutorServi
 		log.info("Detected operating system: {}", osName);
 
 		if (osName.contains("win")) {
-			// Windows系统
 			log.info("Using Windows Docker configuration");
-			// On Windows, try TCP connection first, more stable
-			return "tcp://localhost:2375";
+			return "npipe://./pipe/docker_engine";
 		}
 		else if (osName.contains("nix") || osName.contains("nux") || osName.contains("aix")) {
 			// Linux/Unix系统
@@ -185,8 +182,6 @@ public class DockerCodePoolExecutorService extends AbstractCodePoolExecutorServi
 			}
 			// 2. Fallback: Standard Windows Docker Desktop named pipe
 			windowsHosts.add("npipe://./pipe/docker_engine");
-			// 3. Fallback: Localhost TCP (common setting)
-			windowsHosts.add("tcp://localhost:2375");
 
 			for (String dockerHost : windowsHosts) {
 				try {
@@ -217,9 +212,7 @@ public class DockerCodePoolExecutorService extends AbstractCodePoolExecutorServi
 
 			// If all Windows connection methods fail
 			throw new RuntimeException(
-					"Failed to connect to Docker on Windows. Please ensure Docker Desktop is running and either:\n"
-							+ "1. Enable 'Expose daemon on tcp://localhost:2375 without TLS' in Docker Desktop settings, or\n"
-							+ "2. Ensure Docker Desktop's named pipe is available");
+					"Failed to connect to Docker on Windows. Please ensure Docker Desktop is running and its named pipe is available, or configure queryweaver.code-executor.host explicitly.");
 
 		}
 		else {

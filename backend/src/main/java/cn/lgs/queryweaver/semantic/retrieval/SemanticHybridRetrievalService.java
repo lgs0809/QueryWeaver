@@ -42,6 +42,10 @@ public class SemanticHybridRetrievalService {
 
 	private static final double RRF_K = 60d;
 
+	private static final int MIN_RERANK_CANDIDATES = 50;
+
+	private static final int RERANK_CANDIDATE_MULTIPLIER = 3;
+
 	private static final Pattern LATIN_OR_NUMBER = Pattern.compile("[\\p{L}\\p{N}_:.]+",
 			Pattern.UNICODE_CHARACTER_CLASS);
 
@@ -51,10 +55,13 @@ public class SemanticHybridRetrievalService {
 
 	private final SemanticRetrievalIndexService indexService;
 
+	private final RerankModelProvider rerankModelProvider;
+
 	public SemanticHybridRetrievalService(SemanticRetrievalDocumentRepository documentRepository,
-			SemanticRetrievalIndexService indexService) {
+			SemanticRetrievalIndexService indexService, RerankModelProvider rerankModelProvider) {
 		this.documentRepository = documentRepository;
 		this.indexService = indexService;
+		this.rerankModelProvider = rerankModelProvider;
 	}
 
 	public List<RetrievalHit> retrieve(Long projectId, Long projectVersionId, String catalogHash, String query,
@@ -143,13 +150,93 @@ public class SemanticHybridRetrievalService {
 					document.modelCode(), document.physicalTable(), rrf, Map.copyOf(channelRanks),
 					Map.copyOf(channelScores)));
 		}
-		return hits.stream()
+		List<RetrievalHit> rrfRanked = hits.stream()
 			.sorted(Comparator.comparingDouble(RetrievalHit::score)
 				.reversed()
 				.thenComparing(RetrievalHit::modelCode)
 				.thenComparing(RetrievalHit::assetKey))
-			.limit(limit)
 			.toList();
+		List<RetrievalHit> withRrfEvidence = addRrfEvidence(rrfRanked);
+		return rerankOrFallback(query, withRrfEvidence, documents, limit);
+	}
+
+	private List<RetrievalHit> addRrfEvidence(List<RetrievalHit> ranked) {
+		List<RetrievalHit> output = new ArrayList<>(ranked.size());
+		for (int index = 0; index < ranked.size(); index++) {
+			RetrievalHit hit = ranked.get(index);
+			LinkedHashMap<String, Integer> ranks = new LinkedHashMap<>(hit.channelRanks());
+			LinkedHashMap<String, Double> scores = new LinkedHashMap<>(hit.channelScores());
+			ranks.put("RRF", index + 1);
+			scores.put("RRF", hit.score());
+			output.add(new RetrievalHit(hit.documentType(), hit.assetType(), hit.assetKey(), hit.modelCode(),
+					hit.physicalTable(), hit.score(), Map.copyOf(ranks), Map.copyOf(scores)));
+		}
+		return List.copyOf(output);
+	}
+
+	private List<RetrievalHit> rerankOrFallback(String query, List<RetrievalHit> rrfRanked,
+			List<SemanticRetrievalDocument> documents, int limit) {
+		if (rrfRanked.isEmpty()) {
+			return List.of();
+		}
+		var optionalReranker = rerankModelProvider.currentRerankModel();
+		if (optionalReranker.isEmpty()) {
+			return rrfRanked.stream().limit(limit).toList();
+		}
+		int candidateLimit = Math.min(rrfRanked.size(),
+				Math.max(MIN_RERANK_CANDIDATES, limit * RERANK_CANDIDATE_MULTIPLIER));
+		List<RetrievalHit> candidates = rrfRanked.subList(0, candidateLimit);
+		Map<String, SemanticRetrievalDocument> byAssetKey = documents.stream()
+			.collect(Collectors.toMap(SemanticRetrievalDocument::assetKey, value -> value, (left, right) -> left));
+		List<String> rerankDocuments = candidates.stream()
+			.map(hit -> rerankText(byAssetKey.get(hit.assetKey())))
+			.toList();
+		try {
+			List<RerankModel.RerankScore> scores = optionalReranker.orElseThrow()
+				.rerank(query, rerankDocuments, Math.min(limit, candidates.size()));
+			List<RerankModel.RerankScore> ordered = scores.stream()
+				.filter(score -> score.index() >= 0 && score.index() < candidates.size())
+				.sorted(Comparator.comparingDouble(RerankModel.RerankScore::score).reversed())
+				.limit(limit)
+				.toList();
+			if (ordered.isEmpty()) {
+				return rrfRanked.stream().limit(limit).toList();
+			}
+			List<RetrievalHit> reranked = new ArrayList<>(limit);
+			Set<Integer> usedIndexes = new LinkedHashSet<>();
+			for (int rank = 0; rank < ordered.size(); rank++) {
+				RerankModel.RerankScore score = ordered.get(rank);
+				if (!usedIndexes.add(score.index())) {
+					continue;
+				}
+				RetrievalHit hit = candidates.get(score.index());
+				LinkedHashMap<String, Integer> ranks = new LinkedHashMap<>(hit.channelRanks());
+				LinkedHashMap<String, Double> channelScores = new LinkedHashMap<>(hit.channelScores());
+				ranks.put("RERANK", rank + 1);
+				channelScores.put("RERANK", score.score());
+				reranked.add(new RetrievalHit(hit.documentType(), hit.assetType(), hit.assetKey(), hit.modelCode(),
+						hit.physicalTable(), score.score(), Map.copyOf(ranks), Map.copyOf(channelScores)));
+			}
+			if (reranked.size() < limit) {
+				for (int index = 0; index < candidates.size() && reranked.size() < limit; index++) {
+					if (!usedIndexes.contains(index)) {
+						reranked.add(candidates.get(index));
+					}
+				}
+			}
+			return List.copyOf(reranked);
+		}
+		catch (RuntimeException ex) {
+			log.warn("Optional rerank request failed; falling back to RRF: {}", ex.getMessage());
+			return rrfRanked.stream().limit(limit).toList();
+		}
+	}
+
+	private String rerankText(SemanticRetrievalDocument document) {
+		if (document == null) {
+			return "";
+		}
+		return StringUtils.hasText(document.semanticText()) ? document.semanticText() : document.lexicalText();
 	}
 
 	private Map<String, Double> exactScores(List<SemanticRetrievalDocument> documents, String query,

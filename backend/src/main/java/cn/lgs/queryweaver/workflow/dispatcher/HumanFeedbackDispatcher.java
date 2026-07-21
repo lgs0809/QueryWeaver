@@ -23,7 +23,6 @@ import static com.alibaba.cloud.ai.graph.StateGraph.END;
 /**
  * Dispatcher for human feedback node routing.
  *
- * @author Makoto
  */
 public class HumanFeedbackDispatcher implements EdgeAction {
 

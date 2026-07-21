@@ -22,7 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 使用AI模拟运行Python代码（便于在无Docker环境测试）
  *
- * @author vlsmb
  * @since 2025/7/30
  */
 @Slf4j

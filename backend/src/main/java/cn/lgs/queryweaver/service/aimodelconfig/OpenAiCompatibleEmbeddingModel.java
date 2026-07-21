@@ -47,6 +47,8 @@ import org.springframework.web.client.RestClient;
  */
 final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
 
+	private static final String DEFAULT_EMBEDDINGS_PATH = "/v1/embeddings";
+
 	private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleEmbeddingModel.class);
 
 	private final RestClient restClient;
@@ -57,14 +59,16 @@ final class OpenAiCompatibleEmbeddingModel implements EmbeddingModel {
 
 	OpenAiCompatibleEmbeddingModel(RestClient.Builder builder, String baseUrl, String apiKey, String embeddingsPath,
 			String defaultModel) {
-		RestClient.Builder configured = builder.baseUrl(baseUrl)
+		ModelEndpointResolver.Endpoint endpoint = ModelEndpointResolver.resolve(baseUrl, embeddingsPath,
+				DEFAULT_EMBEDDINGS_PATH);
+		RestClient.Builder configured = builder.baseUrl(endpoint.baseUrl())
 			.defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
 			.defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE);
 		if (StringUtils.hasText(apiKey)) {
 			configured.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
 		}
 		this.restClient = configured.build();
-		this.embeddingsPath = StringUtils.hasText(embeddingsPath) ? embeddingsPath : "/v1/embeddings";
+		this.embeddingsPath = endpoint.path();
 		this.defaultModel = defaultModel;
 	}
 

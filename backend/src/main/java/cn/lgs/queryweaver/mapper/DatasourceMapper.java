@@ -30,7 +30,6 @@ import java.util.Map;
 /**
  * Data Source Mapper Interface
  *
- * @author Alibaba Cloud AI
  */
 @Mapper
 public interface DatasourceMapper {

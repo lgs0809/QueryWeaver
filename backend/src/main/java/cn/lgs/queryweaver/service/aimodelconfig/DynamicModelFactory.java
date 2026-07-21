@@ -17,6 +17,7 @@ package cn.lgs.queryweaver.service.aimodelconfig;
 
 import cn.lgs.queryweaver.dto.ModelConfigDTO;
 import cn.lgs.queryweaver.properties.ModelClientProperties;
+import cn.lgs.queryweaver.semantic.retrieval.RerankModel;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,8 @@ import reactor.util.retry.Retry;
 @RequiredArgsConstructor
 public class DynamicModelFactory {
 
+	private static final String DEFAULT_CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
+
 	private final ModelClientProperties modelClientProperties;
 
 	/**
@@ -62,15 +65,14 @@ public class DynamicModelFactory {
 
 		// 2. 构建 OpenAiApi (核心通讯对象)
 		String apiKey = StringUtils.hasText(config.getApiKey()) ? config.getApiKey() : "";
+		ModelEndpointResolver.Endpoint endpoint = ModelEndpointResolver.resolve(config.getBaseUrl(),
+				config.getCompletionsPath(), DEFAULT_CHAT_COMPLETIONS_PATH);
 		OpenAiApi.Builder apiBuilder = OpenAiApi.builder()
 			.apiKey(apiKey)
-			.baseUrl(config.getBaseUrl())
+			.baseUrl(endpoint.baseUrl())
+			.completionsPath(endpoint.path())
 			.restClientBuilder(getProxiedRestClientBuilder(config))
 			.webClientBuilder(getProxiedWebClientBuilder(config));
-
-		if (StringUtils.hasText(config.getCompletionsPath())) {
-			apiBuilder.completionsPath(config.getCompletionsPath());
-		}
 		OpenAiApi openAiApi = apiBuilder.build();
 
 		// 3. 构建运行时选项 (设置默认的模型名称，如 "deepseek-chat" 或 "gpt-4")
@@ -97,66 +99,41 @@ public class DynamicModelFactory {
 				config.getEmbeddingsPath(), config.getModelName());
 	}
 
+	public RerankModel createRerankModel(ModelConfigDTO config) {
+		log.info("Creating NEW RerankModel instance. Provider: {}, Model: {}, BaseUrl: {}", config.getProvider(),
+				config.getModelName(), config.getBaseUrl());
+		checkBasic(config);
+		String apiKey = StringUtils.hasText(config.getApiKey()) ? config.getApiKey() : "";
+		return new HttpRerankModel(getEmbeddingRestClientBuilder(config), config.getBaseUrl(), apiKey,
+				config.getRerankPath(), config.getModelName());
+	}
+
 	private static void checkBasic(ModelConfigDTO config) {
 		Assert.hasText(config.getBaseUrl(), "baseUrl must not be empty");
-		if (!"custom".equalsIgnoreCase(config.getProvider())) {
-			Assert.hasText(config.getApiKey(), "apiKey must not be empty");
-		}
 		Assert.hasText(config.getModelName(), "modelName must not be empty");
 	}
 
 	private RestClient.Builder getProxiedRestClientBuilder(ModelConfigDTO config) {
-		if (config.getProxyEnabled() == null || !config.getProxyEnabled()) {
-			return RestClient.builder();
-		}
-
-		// 打印同步代理日志
-		log.info("【Proxy-Init】Model [{}] is using SYNC proxy -> {}:{}", config.getModelName(), config.getProxyHost(),
-				config.getProxyPort());
-
-		BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
-		if (StringUtils.hasText(config.getProxyUsername())) {
-			log.info("【Proxy-Auth】Enabling Basic Auth for SYNC proxy, user: {}", config.getProxyUsername());
-			credsProvider.setCredentials(new AuthScope(config.getProxyHost(), config.getProxyPort()),
-					new UsernamePasswordCredentials(config.getProxyUsername(),
-							config.getProxyPassword().toCharArray()));
-		}
-
-		CloseableHttpClient httpClient = HttpClients.custom()
-			.setProxy(new HttpHost(config.getProxyHost(), config.getProxyPort()))
-			.setDefaultCredentialsProvider(credsProvider)
-			.build();
-
-		return RestClient.builder().requestFactory(new HttpComponentsClientHttpRequestFactory(httpClient));
-	}
-
-	private RestClient.Builder getEmbeddingRestClientBuilder(ModelConfigDTO config) {
-		Duration timeout = modelClientProperties.getEmbeddingRequestTimeout();
-		long timeoutMillis = timeout == null ? 5000L : Math.max(1L, timeout.toMillis());
-		if (timeoutMillis > Integer.MAX_VALUE) {
-			timeoutMillis = Integer.MAX_VALUE;
-		}
-		int timeoutValue = (int) timeoutMillis;
-
+		int timeoutValue = requestTimeoutMillis(config);
 		CloseableHttpClient httpClient;
 		if (config.getProxyEnabled() == null || !config.getProxyEnabled()) {
 			httpClient = HttpClients.createDefault();
 		}
 		else {
-			log.info("【Proxy-Init】Embedding model [{}] is using SYNC proxy -> {}:{}", config.getModelName(),
-					config.getProxyHost(), config.getProxyPort());
+			log.info("Model [{}] is using HTTP proxy -> {}:{}", config.getModelName(), config.getProxyHost(),
+					config.getProxyPort());
 			BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
 			if (StringUtils.hasText(config.getProxyUsername())) {
 				credsProvider.setCredentials(new AuthScope(config.getProxyHost(), config.getProxyPort()),
 						new UsernamePasswordCredentials(config.getProxyUsername(),
-								config.getProxyPassword().toCharArray()));
+								StringUtils.hasText(config.getProxyPassword()) ? config.getProxyPassword().toCharArray()
+										: new char[0]));
 			}
 			httpClient = HttpClients.custom()
 					.setProxy(new HttpHost(config.getProxyHost(), config.getProxyPort()))
 					.setDefaultCredentialsProvider(credsProvider)
 					.build();
 		}
-
 		HttpComponentsClientHttpRequestFactory requestFactory = new HttpComponentsClientHttpRequestFactory(httpClient);
 		requestFactory.setConnectTimeout(timeoutValue);
 		requestFactory.setConnectionRequestTimeout(timeoutValue);
@@ -164,28 +141,37 @@ public class DynamicModelFactory {
 		return RestClient.builder().requestFactory(requestFactory);
 	}
 
-	private WebClient.Builder getProxiedWebClientBuilder(ModelConfigDTO config) {
-		WebClient.Builder builder;
-		if (config.getProxyEnabled() == null || !config.getProxyEnabled()) {
-			builder = WebClient.builder();
-		}
-		else {
-			log.info("【Proxy-Init】Model [{}] is using ASYNC (Netty) proxy -> {}:{}", config.getModelName(),
-					config.getProxyHost(), config.getProxyPort());
+	private RestClient.Builder getEmbeddingRestClientBuilder(ModelConfigDTO config) {
+		return getProxiedRestClientBuilder(config);
+	}
 
-			HttpClient nettyClient = HttpClient.create().responseTimeout(java.time.Duration.ofMinutes(3)).proxy(p -> {
+	private WebClient.Builder getProxiedWebClientBuilder(ModelConfigDTO config) {
+		Duration timeout = Duration.ofMillis(requestTimeoutMillis(config));
+		HttpClient nettyClient = HttpClient.create().responseTimeout(timeout);
+		if (config.getProxyEnabled() != null && config.getProxyEnabled()) {
+			log.info("Model [{}] is using HTTP proxy -> {}:{}", config.getModelName(), config.getProxyHost(),
+					config.getProxyPort());
+			nettyClient = nettyClient.proxy(p -> {
 				ProxyProvider.Builder proxyBuilder = p.type(ProxyProvider.Proxy.HTTP)
 					.host(config.getProxyHost())
 					.port(config.getProxyPort());
-
 				if (StringUtils.hasText(config.getProxyUsername())) {
-					log.info("【Proxy-Auth】Enabling Basic Auth for ASYNC proxy, user: {}", config.getProxyUsername());
 					proxyBuilder.username(config.getProxyUsername()).password(s -> config.getProxyPassword());
 				}
 			});
-			builder = WebClient.builder().clientConnector(new ReactorClientHttpConnector(nettyClient));
 		}
+		WebClient.Builder builder = WebClient.builder().clientConnector(new ReactorClientHttpConnector(nettyClient));
 		return configureConnectionRetry(builder, config.getModelName());
+	}
+
+	private int requestTimeoutMillis(ModelConfigDTO config) {
+		if (config.getRequestTimeoutSeconds() != null && config.getRequestTimeoutSeconds() > 0) {
+			long configured = config.getRequestTimeoutSeconds().longValue() * 1000L;
+			return (int) Math.min(Integer.MAX_VALUE, configured);
+		}
+		Duration fallback = modelClientProperties.getRequestTimeout();
+		long fallbackMillis = fallback == null ? 60000L : Math.max(1L, fallback.toMillis());
+		return (int) Math.min(Integer.MAX_VALUE, fallbackMillis);
 	}
 
 	WebClient.Builder configureConnectionRetry(WebClient.Builder builder, String modelName) {

@@ -17,6 +17,8 @@ package cn.lgs.queryweaver.dto;
 
 import cn.lgs.queryweaver.annotation.InEnum;
 import cn.lgs.queryweaver.enums.ModelType;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -47,7 +49,7 @@ public class ModelConfigDTO {
 	private String modelName;
 
 	@NotBlank(message = "modelType must not be empty")
-	@InEnum(value = ModelType.class, message = "CHAT/EMBEDDING 之一")
+	@InEnum(value = ModelType.class, message = "CHAT/EMBEDDING/RERANK 之一")
 	private String modelType;
 
 	// 仅当厂商路径非标准时填写，例如 "/custom/chat"
@@ -56,6 +58,14 @@ public class ModelConfigDTO {
 	// 仅当厂商路径非标准时填写
 	private String embeddingsPath;
 
+	// Rerank 服务路径；留空时使用常见的 /v1/rerank
+	private String rerankPath;
+
+	@Min(value = 1, message = "requestTimeoutSeconds must be at least 1")
+	@Max(value = 600, message = "requestTimeoutSeconds must not exceed 600")
+	@Builder.Default
+	private Integer requestTimeoutSeconds = 60;
+
 	@Builder.Default
 	private Double temperature = 0.0;
 
@@ -63,7 +73,7 @@ public class ModelConfigDTO {
 	private Integer maxTokens = 2000;
 
 	@Builder.Default
-	private Boolean isActive = true;
+	private Boolean isActive = false;
 
 	// 模型代理配置，默认关闭（使用直连）
 	@Builder.Default

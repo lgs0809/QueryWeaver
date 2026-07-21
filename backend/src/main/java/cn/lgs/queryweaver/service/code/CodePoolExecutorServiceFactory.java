@@ -28,7 +28,6 @@ import org.springframework.stereotype.Component;
 /**
  * 运行Python任务的容器池（工厂Bean）
  *
- * @author vlsmb
  * @since 2025/7/28
  */
 @Component

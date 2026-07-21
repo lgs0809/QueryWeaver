@@ -23,7 +23,7 @@ import cn.lgs.queryweaver.bo.schema.ResultSetBO;
 import cn.lgs.queryweaver.bo.schema.SchemaInfoBO;
 import cn.lgs.queryweaver.bo.schema.TableInfoBO;
 import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
-import org.apache.commons.compress.utils.Lists;
+import java.util.ArrayList;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -42,11 +42,11 @@ public class H2JdbcDdl extends AbstractJdbcDdl {
 @Override
 	public List<SchemaInfoBO> showSchemas(Connection connection) {
 		String sql = "SELECT schema_name FROM information_schema.schemata;";
-		List<SchemaInfoBO> schemaInfoList = Lists.newArrayList();
+		List<SchemaInfoBO> schemaInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -72,12 +72,12 @@ public class H2JdbcDdl extends AbstractJdbcDdl {
 			sql += "AND TABLE_NAME LIKE CONCAT('%%','%s','%%') \n";
 		}
 		sql += "limit 2000;";
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection,
 					String.format(sql, schema, tablePattern));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -100,13 +100,13 @@ public class H2JdbcDdl extends AbstractJdbcDdl {
 	public List<TableInfoBO> fetchTables(Connection connection, String schema, List<String> tables) {
 		String sql = "SELECT TABLE_NAME, REMARKS \n" + "FROM INFORMATION_SCHEMA.TABLES \n"
 				+ "WHERE TABLE_SCHEMA = '%s' \n" + "AND TABLE_NAME in(%s) \n" + "limit 200;";
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection,
 					String.format(sql, schema, tableListStr));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -131,12 +131,12 @@ public class H2JdbcDdl extends AbstractJdbcDdl {
 				+ "CASE WHEN IS_IDENTITY = 'YES' THEN TRUE ELSE FALSE END AS 主键唯一, \n"
 				+ "CASE WHEN IS_NULLABLE = 'NO' THEN TRUE ELSE FALSE END AS 非空 \n" + "FROM information_schema.COLUMNS "
 				+ "WHERE table_schema='%s' " + "and table_name='%s';";
-		List<ColumnInfoBO> columnInfoList = Lists.newArrayList();
+		List<ColumnInfoBO> columnInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, "INFORMATION_SCHEMA",
 					String.format(sql, schema, table));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -167,14 +167,14 @@ public class H2JdbcDdl extends AbstractJdbcDdl {
 				+ "    join information_schema.key_column_usage kc on rc.constraint_name=kc.constraint_name \n"
 				+ "    join information_schema.key_column_usage kc2 on rc.unique_constraint_name=kc2.constraint_name \n"
 				+ "WHERE kc.constraint_schema='%s' and kc.table_name in (%s) and kc2.table_name in (%s);";
-		List<ForeignKeyInfoBO> foreignKeyInfoList = Lists.newArrayList();
+		List<ForeignKeyInfoBO> foreignKeyInfoList = new ArrayList<>();
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 
 		try {
 			sql = String.format(sql, schema, tableListStr, tableListStr);
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, "INFORMATION_SCHEMA", sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -199,12 +199,12 @@ public class H2JdbcDdl extends AbstractJdbcDdl {
 	@Override
 	public List<String> sampleColumn(Connection connection, String schema, String table, String column) {
 		String sql = "SELECT \n" + "    `%s`\n" + "FROM \n" + "    `%s`.`%s`\n" + "LIMIT 99;";
-		List<String> sampleInfo = Lists.newArrayList();
+		List<String> sampleInfo = new ArrayList<>();
 		try {
 			sql = String.format(sql, column, schema, table);
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {

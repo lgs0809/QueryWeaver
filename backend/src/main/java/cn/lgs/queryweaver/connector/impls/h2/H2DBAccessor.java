@@ -22,8 +22,6 @@ import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
 import org.springframework.stereotype.Service;
 
 /**
- * @author HunterPorter
- * @author <a href="mailto:zongpeng_hzp@163.com">HunterPorter</a>
  */
 
 @Service("h2Accessor")

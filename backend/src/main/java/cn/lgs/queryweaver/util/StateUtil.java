@@ -34,7 +34,6 @@ import static cn.lgs.queryweaver.constant.Constant.QUERY_ENHANCE_NODE_OUTPUT;
 /**
  * State management utility class, providing type-safe state getting methods
  *
- * @author zhangshenghang
  */
 public class StateUtil {
 

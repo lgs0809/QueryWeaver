@@ -23,7 +23,7 @@ import cn.lgs.queryweaver.bo.schema.TableInfoBO;
 import cn.lgs.queryweaver.connector.SqlExecutor;
 import cn.lgs.queryweaver.connector.ddl.AbstractJdbcDdl;
 import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
-import org.apache.commons.compress.utils.Lists;
+import java.util.ArrayList;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -59,11 +59,11 @@ public class HiveJdbcDdl extends AbstractJdbcDdl {
 			sql.append(" LIKE '").append(tablePattern).append("'");
 		}
 
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql.toString());
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -83,7 +83,7 @@ public class HiveJdbcDdl extends AbstractJdbcDdl {
 
 	@Override
 	public List<TableInfoBO> fetchTables(Connection connection, String schema, List<String> tables) {
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 
 		for (String tableName : tables) {
 			try {
@@ -113,11 +113,11 @@ public class HiveJdbcDdl extends AbstractJdbcDdl {
 		String fullTableName = StringUtils.isNotBlank(schema) ? schema + "." + table : table;
 		String sql = "DESCRIBE " + fullTableName;
 
-		List<ColumnInfoBO> columnInfoList = Lists.newArrayList();
+		List<ColumnInfoBO> columnInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -159,11 +159,11 @@ public class HiveJdbcDdl extends AbstractJdbcDdl {
 		String fullTableName = StringUtils.isNotBlank(schema) ? schema + "." + table : table;
 		String sql = String.format("SELECT `%s` FROM %s LIMIT 99", column, fullTableName);
 
-		List<String> sampleInfo = Lists.newArrayList();
+		List<String> sampleInfo = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {

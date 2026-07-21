@@ -15,11 +15,8 @@
  */
 package cn.lgs.queryweaver.semantic.retrieval;
 
-import cn.lgs.queryweaver.dto.ModelConfigDTO;
-import cn.lgs.queryweaver.enums.ModelType;
 import cn.lgs.queryweaver.common.EmbeddingModelSupport;
 import cn.lgs.queryweaver.common.json.CanonicalJson;
-import cn.lgs.queryweaver.service.aimodelconfig.ModelConfigDataService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -58,15 +55,15 @@ public class SemanticRetrievalIndexService {
 
 	private final EmbeddingModel embeddingModel;
 
-	private final ModelConfigDataService modelConfigDataService;
+	private final EmbeddingModelIdentityProvider embeddingModelIdentityProvider;
 
 	private final CanonicalJson canonicalJson = new CanonicalJson();
 
 	public SemanticRetrievalIndexService(JdbcTemplate jdbc, Optional<EmbeddingModel> embeddingModel,
-			Optional<ModelConfigDataService> modelConfigDataService) {
+			Optional<EmbeddingModelIdentityProvider> embeddingModelIdentityProvider) {
 		this.jdbc = jdbc;
 		this.embeddingModel = embeddingModel.orElse(null);
-		this.modelConfigDataService = modelConfigDataService.orElse(null);
+		this.embeddingModelIdentityProvider = embeddingModelIdentityProvider.orElse(null);
 	}
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -464,14 +461,11 @@ public class SemanticRetrievalIndexService {
 		String model = embeddingModel.getClass().getName();
 		LinkedHashMap<String, Object> identity = new LinkedHashMap<>();
 		identity.put("implementation", model);
-		if (modelConfigDataService != null) {
-			ModelConfigDTO config = modelConfigDataService.getActiveConfigByType(ModelType.EMBEDDING);
-			if (config != null) {
-				model = Objects.toString(config.getProvider(), "") + ":" + Objects.toString(config.getModelName(), "");
-				identity.put("provider", config.getProvider());
-				identity.put("modelName", config.getModelName());
-				identity.put("baseUrl", config.getBaseUrl());
-				identity.put("embeddingsPath", config.getEmbeddingsPath());
+		if (embeddingModelIdentityProvider != null) {
+			var configured = embeddingModelIdentityProvider.currentEmbeddingIdentity().orElse(null);
+			if (configured != null) {
+				model = Objects.toString(configured.model(), model);
+				identity.putAll(configured.attributes());
 			}
 		}
 		return new ConfiguredIdentity(truncate(model, 255), canonicalJson.hash(identity));

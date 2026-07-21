@@ -16,7 +16,6 @@
 package cn.lgs.queryweaver.constant;
 
 /**
- * @author zhangshenghang
  */
 public final class Constant {
 
@@ -24,7 +23,7 @@ public final class Constant {
 
 	}
 
-	public static final String PROJECT_PROPERTIES_PREFIX = "cn.lgs.queryweaver";
+	public static final String PROJECT_PROPERTIES_PREFIX = "queryweaver";
 
 	public static final String INPUT_KEY = "input";
 

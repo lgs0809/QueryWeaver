@@ -23,7 +23,7 @@ import cn.lgs.queryweaver.bo.schema.TableInfoBO;
 import cn.lgs.queryweaver.connector.ddl.AbstractJdbcDdl;
 import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
 import cn.lgs.queryweaver.connector.SqlExecutor;
-import org.apache.commons.compress.utils.Lists;
+import java.util.ArrayList;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -39,7 +39,6 @@ import java.util.stream.Collectors;
 import static cn.lgs.queryweaver.util.ColumnTypeUtil.wrapType;
 
 /**
- * @author jiuhe
  * @since 2024/3/15
  */
 @Service
@@ -50,11 +49,11 @@ public class PostgreJdbcDdl extends AbstractJdbcDdl {
 @Override
 	public List<SchemaInfoBO> showSchemas(Connection connection) {
 		String sql = "SELECT schema_name \n" + "FROM information_schema.schemata;";
-		List<SchemaInfoBO> schemaInfoList = Lists.newArrayList();
+		List<SchemaInfoBO> schemaInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -84,12 +83,12 @@ public class PostgreJdbcDdl extends AbstractJdbcDdl {
 		}
 		sql += "limit 2000;";
 
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection,
 					String.format(sql, schema, tablePattern));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -116,13 +115,13 @@ public class PostgreJdbcDdl extends AbstractJdbcDdl {
 				+ "LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = '0' \n"
 				+ "WHERE tb.table_schema = '%s' \n" + "AND tb.table_name IN (%s) \n" + " limit 2000;";
 
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection,
 					String.format(sql, schema, tableListStr));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -153,12 +152,12 @@ public class PostgreJdbcDdl extends AbstractJdbcDdl {
 				+ "    pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n" + "WHERE\n" + "    c.relname = '%s'\n"
 				+ "    AND a.attnum > 0\n" + "    AND NOT a.attisdropped\n" + "    AND n.nspname = '%s'\n"
 				+ "ORDER BY\n" + "    a.attnum;";
-		List<ColumnInfoBO> columnInfoList = Lists.newArrayList();
+		List<ColumnInfoBO> columnInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null,
 					String.format(sql, table, schema));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -192,14 +191,14 @@ public class PostgreJdbcDdl extends AbstractJdbcDdl {
 				+ "    ON ccu.constraint_name = tc.constraint_name\n" + "    AND ccu.table_schema = tc.table_schema\n"
 				+ "WHERE\n" + "    tc.constraint_type = 'FOREIGN KEY'\n" + "    AND tc.table_schema='public'\n"
 				+ "    AND tc.table_name in (%s)";
-		List<ForeignKeyInfoBO> foreignKeyInfoList = Lists.newArrayList();
+		List<ForeignKeyInfoBO> foreignKeyInfoList = new ArrayList<>();
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 
 		try {
 			sql = String.format(sql, tableListStr);
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -224,12 +223,12 @@ public class PostgreJdbcDdl extends AbstractJdbcDdl {
 	@Override
 	public List<String> sampleColumn(Connection connection, String schema, String table, String column) {
 		String sql = "SELECT \n" + "    \"%s\"\n" + "FROM \n" + "    \"%s\"\n" + "LIMIT 99;";
-		List<String> sampleInfo = Lists.newArrayList();
+		List<String> sampleInfo = new ArrayList<>();
 		try {
 			sql = String.format(sql, column, table);
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, schema, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {

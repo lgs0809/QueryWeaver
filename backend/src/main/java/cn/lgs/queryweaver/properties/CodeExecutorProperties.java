@@ -23,7 +23,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import static cn.lgs.queryweaver.constant.Constant.PROJECT_PROPERTIES_PREFIX;
 
 /**
- * @author vlsmb
  * @since 2025/7/12
  */
 @Getter
@@ -67,7 +66,7 @@ public class CodeExecutorProperties {
 	/**
 	 * Container name prefix
 	 */
-	String containerNamePrefix = "nl2sql-python-exec-";
+	String containerNamePrefix = "queryweaver-python-exec-";
 
 	/**
 	 * Task blocking queue size

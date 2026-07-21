@@ -19,7 +19,6 @@ import cn.lgs.queryweaver.bo.schema.*;
 import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
 import cn.lgs.queryweaver.connector.SqlExecutor;
 import cn.lgs.queryweaver.connector.ddl.AbstractJdbcDdl;
-import org.apache.commons.compress.utils.Lists;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -36,7 +35,6 @@ import java.util.stream.Collectors;
 import static cn.lgs.queryweaver.util.ColumnTypeUtil.wrapType;
 
 /**
- * @author zihen
  * @date 2025/12/14 17:34
  */
 @Service
@@ -47,11 +45,11 @@ public class SqlServerJdbcDdl extends AbstractJdbcDdl {
 @Override
 	public List<SchemaInfoBO> showSchemas(Connection connection) {
 		String sql = "SELECT schema_name FROM INFORMATION_SCHEMA.SCHEMATA WHERE schema_name NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest', 'db_owner', 'db_accessadmin', 'db_securityadmin', 'db_ddladmin', 'db_backupoperator', 'db_datareader', 'db_datawriter', 'db_denydatareader', 'db_denydatawriter');";
-		List<SchemaInfoBO> schemaInfoList = Lists.newArrayList();
+		List<SchemaInfoBO> schemaInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -82,12 +80,12 @@ public class SqlServerJdbcDdl extends AbstractJdbcDdl {
 		sql += "ORDER BY t.TABLE_NAME \n";
 		sql += "OFFSET 0 ROWS FETCH NEXT 2000 ROWS ONLY;";
 
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection,
 					String.format(sql, schema, tablePattern));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -114,13 +112,13 @@ public class SqlServerJdbcDdl extends AbstractJdbcDdl {
 				+ "WHERE t.TABLE_SCHEMA = '%s' AND t.TABLE_TYPE = 'BASE TABLE' \n" + "AND t.TABLE_NAME IN (%s) \n"
 				+ "ORDER BY t.TABLE_NAME;";
 
-		List<TableInfoBO> tableInfoList = Lists.newArrayList();
+		List<TableInfoBO> tableInfoList = new ArrayList<>();
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection,
 					String.format(sql, schema, tableListStr));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -155,12 +153,12 @@ public class SqlServerJdbcDdl extends AbstractJdbcDdl {
 				+ ") pk ON c.TABLE_SCHEMA = pk.TABLE_SCHEMA AND c.TABLE_NAME = pk.TABLE_NAME AND c.COLUMN_NAME = pk.COLUMN_NAME \n"
 				+ "WHERE c.TABLE_SCHEMA = '%s' AND c.TABLE_NAME = '%s' \n" + "ORDER BY c.ORDINAL_POSITION;";
 
-		List<ColumnInfoBO> columnInfoList = Lists.newArrayList();
+		List<ColumnInfoBO> columnInfoList = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null,
 					String.format(sql, schema, table));
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -196,14 +194,14 @@ public class SqlServerJdbcDdl extends AbstractJdbcDdl {
 				+ "WHERE i1.CONSTRAINT_TYPE = 'PRIMARY KEY') PT ON PT.TABLE_NAME = PK.TABLE_NAME \n"
 				+ "WHERE FK.TABLE_SCHEMA = '%s' AND FK.TABLE_NAME IN (%s);";
 
-		List<ForeignKeyInfoBO> foreignKeyInfoList = Lists.newArrayList();
+		List<ForeignKeyInfoBO> foreignKeyInfoList = new ArrayList<>();
 		String tableListStr = String.join(", ", tables.stream().map(x -> "'" + x + "'").collect(Collectors.toList()));
 
 		try {
 			sql = String.format(sql, schema, tableListStr);
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {
@@ -228,11 +226,11 @@ public class SqlServerJdbcDdl extends AbstractJdbcDdl {
 	@Override
 	public List<String> sampleColumn(Connection connection, String schema, String table, String column) {
 		String sql = super.getSelectSql(BizDataSourceTypeEnum.SQL_SERVER.getTypeName(), table, column, 99);
-		List<String> sampleInfo = Lists.newArrayList();
+		List<String> sampleInfo = new ArrayList<>();
 		try {
 			String[][] resultArr = SqlExecutor.executeSqlAndReturnArr(connection, null, sql);
 			if (resultArr.length <= 1) {
-				return Lists.newArrayList();
+				return new ArrayList<>();
 			}
 
 			for (int i = 1; i < resultArr.length; i++) {

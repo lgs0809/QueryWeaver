@@ -8,14 +8,12 @@ spring:
         jwt:
           issuer-uri: ${QUERYWEAVER_JWT_ISSUER_URI}
 
-cn:
-  lgs:
-    queryweaver:
-      code-executor:
-        code-pool-executor: ${QUERYWEAVER_CODE_EXECUTOR:docker}
-      sql-execution:
-        require-time-filter: true
-        reject-full-table-scan: true
+queryweaver:
+  code-executor:
+    code-pool-executor: ${QUERYWEAVER_CODE_EXECUTOR:docker}
+  sql-execution:
+    require-time-filter: true
+    reject-full-table-scan: true
 
 springdoc:
   api-docs:
@@ -25,7 +23,7 @@ springdoc:
 
 queryweaver:
   mcp:
-    enabled: false
+    enabled: ${QUERYWEAVER_MCP_ENABLED:true}
   security:
     enabled: true
   operator:

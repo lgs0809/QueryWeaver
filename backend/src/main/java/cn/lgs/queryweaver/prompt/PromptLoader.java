@@ -26,7 +26,6 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Prompt loader, used to load prompt templates from file system
  *
- * @author zhangshenghang
  */
 @Slf4j
 public class PromptLoader {

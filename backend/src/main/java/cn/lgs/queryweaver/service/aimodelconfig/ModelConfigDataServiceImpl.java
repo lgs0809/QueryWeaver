@@ -112,6 +112,9 @@ public class ModelConfigDataServiceImpl implements ModelConfigDataService {
 		if (dto.getEmbeddingsPath() != null) {
 			dto.setEmbeddingsPath(dto.getEmbeddingsPath().trim());
 		}
+		if (dto.getRerankPath() != null) {
+			dto.setRerankPath(dto.getRerankPath().trim());
+		}
 	}
 
 	/**
@@ -161,9 +164,11 @@ public class ModelConfigDataServiceImpl implements ModelConfigDataService {
 		oldEntity.setModelName(dto.getModelName());
 		oldEntity.setTemperature(dto.getTemperature());
 		oldEntity.setMaxTokens(dto.getMaxTokens()); // 新增字段
-		oldEntity.setCompletionsPath(dto.getCompletionsPath()); // 路径字段
-		oldEntity.setEmbeddingsPath(dto.getEmbeddingsPath()); // 路径字段
-		oldEntity.setUpdatedTime(LocalDateTime.now()); // 更新时间
+		oldEntity.setCompletionsPath(dto.getCompletionsPath());
+		oldEntity.setEmbeddingsPath(dto.getEmbeddingsPath());
+		oldEntity.setRerankPath(dto.getRerankPath());
+		oldEntity.setRequestTimeoutSeconds(dto.getRequestTimeoutSeconds());
+		oldEntity.setUpdatedTime(LocalDateTime.now());
 		oldEntity.setProxyEnabled(dto.getProxyEnabled());
 		oldEntity.setProxyHost(dto.getProxyHost());
 		oldEntity.setProxyPort(dto.getProxyPort());

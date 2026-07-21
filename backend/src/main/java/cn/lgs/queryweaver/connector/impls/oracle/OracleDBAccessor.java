@@ -22,7 +22,6 @@ import cn.lgs.queryweaver.enums.BizDataSourceTypeEnum;
 import org.springframework.stereotype.Service;
 
 /**
- * @author zihenzzz
  */
 
 @Service("oracleAccessor")

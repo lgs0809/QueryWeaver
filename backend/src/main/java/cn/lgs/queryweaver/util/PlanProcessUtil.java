@@ -38,7 +38,6 @@ import static cn.lgs.queryweaver.constant.Constant.PLAN_PARSED_OUTPUT_HASH;
  * util class for plan-based execution nodes Provides common functionality for nodes that
  * execute based on predefined plans
  *
- * @author zhangshenghang
  */
 public final class PlanProcessUtil {
 

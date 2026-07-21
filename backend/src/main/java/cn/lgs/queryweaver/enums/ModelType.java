@@ -31,7 +31,12 @@ public enum ModelType {
 	/**
 	 * 嵌入模型
 	 */
-	EMBEDDING("EMBEDDING");
+	EMBEDDING("EMBEDDING"),
+
+	/**
+	 * 检索重排模型
+	 */
+	RERANK("RERANK");
 
 	private final String code;
 

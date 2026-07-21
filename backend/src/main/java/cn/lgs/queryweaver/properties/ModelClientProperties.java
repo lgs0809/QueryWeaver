@@ -40,7 +40,7 @@ public class ModelClientProperties {
 	@DecimalMax("1.0")
 	private double connectionRetryJitter = 0.2d;
 
-	/** Bounds synchronous Embedding calls while allowing normal batch indexing to complete. */
-	private Duration embeddingRequestTimeout = Duration.ofSeconds(30);
+	/** Default request timeout when a persisted model configuration does not override it. */
+	private Duration requestTimeout = Duration.ofSeconds(60);
 
 }

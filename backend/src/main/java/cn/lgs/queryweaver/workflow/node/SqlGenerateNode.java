@@ -64,7 +64,6 @@ import static cn.lgs.queryweaver.util.PlanProcessUtil.getCurrentExecutionStepIns
  * Managing retry logic with schema advice - Providing streaming feedback during
  * regeneration process
  *
- * @author zhangshenghang
  */
 @Slf4j
 @Component

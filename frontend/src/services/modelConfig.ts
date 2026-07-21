@@ -25,12 +25,14 @@ export interface ModelConfig {
   apiKeyHint?: string;
   baseUrl: string;
   modelName: string;
-  modelType: string; // "CHAT" or "EMBEDDING"
+  modelType: 'CHAT' | 'EMBEDDING' | 'RERANK';
   temperature?: number;
   maxTokens?: number;
   isActive?: boolean;
-  completionsPath?: string; // 对话模型路径
-  embeddingsPath?: string; // 嵌入模型路径
+  completionsPath?: string;
+  embeddingsPath?: string;
+  rerankPath?: string;
+  requestTimeoutSeconds?: number;
   proxyEnabled?: boolean; //代理开关，默认为关闭（直连）
   proxyHost?: string;
   proxyPort?: number;
@@ -47,6 +49,9 @@ interface ModelCheckReady {
   embeddingModelConfigured: boolean;
   embeddingModelReady: boolean;
   embeddingModelLastValidationTime?: string;
+  rerankModelConfigured: boolean;
+  rerankModelReady: boolean;
+  rerankModelLastValidationTime?: string;
   ready: boolean;
 }
 
@@ -117,6 +122,8 @@ class ModelConfigService {
         chatModelReady: false,
         embeddingModelConfigured: false,
         embeddingModelReady: false,
+        rerankModelConfigured: false,
+        rerankModelReady: false,
         ready: false,
       }
     );
