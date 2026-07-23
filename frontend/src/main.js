@@ -19,6 +19,7 @@ import router from '@/router';
 
 // 引入全局样式
 import '@/styles/global.css';
+import 'bootstrap-icons/font/bootstrap-icons.css';
 import 'element-plus/dist/index.css';
 import {
   ElAlert,

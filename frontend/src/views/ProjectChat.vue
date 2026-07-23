@@ -1672,8 +1672,11 @@
 <style scoped>
   .chat-shell {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: clamp(280px, 20vw, 320px) minmax(0, 1fr);
+    width: 100%;
+    max-width: 1600px;
     height: calc(100vh - 64px);
+    margin: 0 auto;
     background: #f8fafc;
   }
   .conversation-sidebar {
