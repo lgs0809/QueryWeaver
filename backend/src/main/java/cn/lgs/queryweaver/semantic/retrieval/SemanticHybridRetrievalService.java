@@ -157,7 +157,7 @@ public class SemanticHybridRetrievalService {
 				.thenComparing(RetrievalHit::assetKey))
 			.toList();
 		List<RetrievalHit> withRrfEvidence = addRrfEvidence(rrfRanked);
-		return rerankOrFallback(query, withRrfEvidence, documents, limit);
+		return rerank(query, withRrfEvidence, documents, limit);
 	}
 
 	private List<RetrievalHit> addRrfEvidence(List<RetrievalHit> ranked) {
@@ -174,15 +174,12 @@ public class SemanticHybridRetrievalService {
 		return List.copyOf(output);
 	}
 
-	private List<RetrievalHit> rerankOrFallback(String query, List<RetrievalHit> rrfRanked,
+	private List<RetrievalHit> rerank(String query, List<RetrievalHit> rrfRanked,
 			List<SemanticRetrievalDocument> documents, int limit) {
 		if (rrfRanked.isEmpty()) {
 			return List.of();
 		}
-		var optionalReranker = rerankModelProvider.currentRerankModel();
-		if (optionalReranker.isEmpty()) {
-			return rrfRanked.stream().limit(limit).toList();
-		}
+		RerankModel reranker = rerankModelProvider.currentRerankModel();
 		int candidateLimit = Math.min(rrfRanked.size(),
 				Math.max(MIN_RERANK_CANDIDATES, limit * RERANK_CANDIDATE_MULTIPLIER));
 		List<RetrievalHit> candidates = rrfRanked.subList(0, candidateLimit);
@@ -191,45 +188,35 @@ public class SemanticHybridRetrievalService {
 		List<String> rerankDocuments = candidates.stream()
 			.map(hit -> rerankText(byAssetKey.get(hit.assetKey())))
 			.toList();
-		try {
-			List<RerankModel.RerankScore> scores = optionalReranker.orElseThrow()
-				.rerank(query, rerankDocuments, Math.min(limit, candidates.size()));
-			List<RerankModel.RerankScore> ordered = scores.stream()
-				.filter(score -> score.index() >= 0 && score.index() < candidates.size())
-				.sorted(Comparator.comparingDouble(RerankModel.RerankScore::score).reversed())
-				.limit(limit)
-				.toList();
-			if (ordered.isEmpty()) {
-				return rrfRanked.stream().limit(limit).toList();
-			}
-			List<RetrievalHit> reranked = new ArrayList<>(limit);
-			Set<Integer> usedIndexes = new LinkedHashSet<>();
-			for (int rank = 0; rank < ordered.size(); rank++) {
-				RerankModel.RerankScore score = ordered.get(rank);
-				if (!usedIndexes.add(score.index())) {
-					continue;
-				}
-				RetrievalHit hit = candidates.get(score.index());
-				LinkedHashMap<String, Integer> ranks = new LinkedHashMap<>(hit.channelRanks());
-				LinkedHashMap<String, Double> channelScores = new LinkedHashMap<>(hit.channelScores());
-				ranks.put("RERANK", rank + 1);
-				channelScores.put("RERANK", score.score());
-				reranked.add(new RetrievalHit(hit.documentType(), hit.assetType(), hit.assetKey(), hit.modelCode(),
-						hit.physicalTable(), score.score(), Map.copyOf(ranks), Map.copyOf(channelScores)));
-			}
-			if (reranked.size() < limit) {
-				for (int index = 0; index < candidates.size() && reranked.size() < limit; index++) {
-					if (!usedIndexes.contains(index)) {
-						reranked.add(candidates.get(index));
-					}
-				}
-			}
-			return List.copyOf(reranked);
+		List<RerankModel.RerankScore> scores = reranker.rerank(query, rerankDocuments,
+				Math.min(limit, candidates.size()));
+		List<RerankModel.RerankScore> ordered = scores.stream()
+			.filter(score -> score.index() >= 0 && score.index() < candidates.size())
+			.sorted(Comparator.comparingDouble(RerankModel.RerankScore::score).reversed())
+			.limit(limit)
+			.toList();
+		if (ordered.isEmpty()) {
+			throw new IllegalStateException("Rerank model returned no usable scores.");
 		}
-		catch (RuntimeException ex) {
-			log.warn("Optional rerank request failed; falling back to RRF: {}", ex.getMessage());
-			return rrfRanked.stream().limit(limit).toList();
+		List<RetrievalHit> reranked = new ArrayList<>(limit);
+		Set<Integer> usedIndexes = new LinkedHashSet<>();
+		for (int rank = 0; rank < ordered.size(); rank++) {
+			RerankModel.RerankScore score = ordered.get(rank);
+			if (!usedIndexes.add(score.index())) {
+				continue;
+			}
+			RetrievalHit hit = candidates.get(score.index());
+			LinkedHashMap<String, Integer> ranks = new LinkedHashMap<>(hit.channelRanks());
+			LinkedHashMap<String, Double> channelScores = new LinkedHashMap<>(hit.channelScores());
+			ranks.put("RERANK", rank + 1);
+			channelScores.put("RERANK", score.score());
+			reranked.add(new RetrievalHit(hit.documentType(), hit.assetType(), hit.assetKey(), hit.modelCode(),
+					hit.physicalTable(), score.score(), Map.copyOf(ranks), Map.copyOf(channelScores)));
 		}
+		if (reranked.isEmpty()) {
+			throw new IllegalStateException("Rerank model returned no usable scores.");
+		}
+		return List.copyOf(reranked);
 	}
 
 	private String rerankText(SemanticRetrievalDocument document) {

@@ -40,6 +40,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     QUERYWEAVER_MCP_PUBLIC_BASE_URL=*)
       printf 'QUERYWEAVER_MCP_PUBLIC_BASE_URL=\n' >>"$tmp"
       ;;
+    QUERYWEAVER_OPERATOR_DEVELOPMENT_MODE=*)
+      # The generated environment targets the standalone/local-evaluation profile.
+      # ProductionConfigurationGuard requires this to be false when prod is enabled.
+      printf 'QUERYWEAVER_OPERATOR_DEVELOPMENT_MODE=true\n' >>"$tmp"
+      ;;
     QUERYWEAVER_METADATA_PORT=*)
       ;;
     *)

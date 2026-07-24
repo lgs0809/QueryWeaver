@@ -16,6 +16,7 @@
 package cn.lgs.queryweaver.semantic.retrieval;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -25,7 +26,6 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -54,8 +54,8 @@ class SemanticHybridRetrievalServiceTest {
 
 	@Test
 	void rerankerCanReorderRrfCandidatesAndKeepsEvidence() {
-		when(rerankModelProvider.currentRerankModel()).thenReturn(Optional.of((query, documents, topN) -> List.of(
-				new RerankModel.RerankScore(1, 0.99d), new RerankModel.RerankScore(0, 0.25d))));
+		when(rerankModelProvider.currentRerankModel()).thenReturn((query, documents, topN) -> List.of(
+				new RerankModel.RerankScore(1, 0.99d), new RerankModel.RerankScore(0, 0.25d)));
 
 		List<SemanticHybridRetrievalService.RetrievalHit> hits = service.retrieve(1L, 2L, "catalog", "metric amount", 2);
 
@@ -66,25 +66,24 @@ class SemanticHybridRetrievalServiceTest {
 	}
 
 	@Test
-	void missingRerankerFallsBackToRrfWithoutDroppingEvidence() {
-		when(rerankModelProvider.currentRerankModel()).thenReturn(Optional.empty());
+	void missingRerankerFailsRetrieval() {
+		when(rerankModelProvider.currentRerankModel())
+			.thenThrow(new IllegalStateException("No active RERANK model configured."));
 
-		List<SemanticHybridRetrievalService.RetrievalHit> hits = service.retrieve(1L, 2L, "catalog", "metric amount", 1);
-
-		assertThat(hits).hasSize(1);
-		assertThat(hits.get(0).channelRanks()).containsKey("RRF").doesNotContainKey("RERANK");
+		assertThatThrownBy(() -> service.retrieve(1L, 2L, "catalog", "metric amount", 1))
+			.isInstanceOf(IllegalStateException.class)
+			.hasMessageContaining("RERANK");
 	}
 
 	@Test
-	void rerankerFailureFallsBackToRrfWithoutFailingRetrieval() {
-		when(rerankModelProvider.currentRerankModel()).thenReturn(Optional.of((query, documents, topN) -> {
+	void rerankerFailureFailsRetrieval() {
+		when(rerankModelProvider.currentRerankModel()).thenReturn((query, documents, topN) -> {
 			throw new IllegalStateException("rerank unavailable");
-		}));
+		});
 
-		List<SemanticHybridRetrievalService.RetrievalHit> hits = service.retrieve(1L, 2L, "catalog", "metric amount", 2);
-
-		assertThat(hits).hasSize(2);
-		assertThat(hits).allSatisfy(hit -> assertThat(hit.channelRanks()).containsKey("RRF").doesNotContainKey("RERANK"));
+		assertThatThrownBy(() -> service.retrieve(1L, 2L, "catalog", "metric amount", 2))
+			.isInstanceOf(IllegalStateException.class)
+			.hasMessageContaining("rerank unavailable");
 	}
 
 	private SemanticRetrievalDocument document(String assetKey, String lexical, String semantic) {

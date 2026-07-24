@@ -167,7 +167,7 @@
               {{
                 platformReadinessError
                   ? '模型能力状态暂时无法确认。历史会话和已有结果仍可查看。'
-                  : 'Chat Model 或 Embedding Model 当前不可用。历史会话和已有结果仍可查看。'
+                  : 'Chat Model、Embedding Model 或 Rerank Model 当前不可用。历史会话和已有结果仍可查看。'
               }}
             </span>
           </template>

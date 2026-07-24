@@ -97,9 +97,7 @@ public class ModelConfigController {
 		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
-	/**
-	 * 返回各模型能力的配置/验证状态。Rerank 是可选增强能力，不影响基础问数能力的 ready 口径。
-	 */
+	/** 返回各模型能力的配置/验证状态。Chat、Embedding、Rerank 均为标准问数链路的必需能力。 */
 	@GetMapping("/check-ready")
 	public ApiResponse<ModelCheckVo> checkReady() {
 		ModelConfigDTO chatModel = modelConfigDataService.getActiveConfigByType(ModelType.CHAT);
@@ -121,7 +119,7 @@ public class ModelConfigController {
 			.rerankModelConfigured(rerankModelConfigured)
 			.rerankModelReady(rerankModelReady)
 			.rerankModelLastValidationTime(rerankModel == null ? null : rerankModel.getLastValidationTime())
-			.ready(chatModelReady && embeddingModelReady)
+			.ready(chatModelReady && embeddingModelReady && rerankModelReady)
 			.build());
 	}
 

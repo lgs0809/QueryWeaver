@@ -8,6 +8,7 @@ import { queryWeaverService, type OperatorView } from '@/services/queryweaver';
 export interface PlatformReadiness {
   chatModelReady: boolean;
   embeddingModelReady: boolean;
+  rerankModelReady: boolean;
   ready: boolean;
 }
 

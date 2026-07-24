@@ -100,5 +100,5 @@ QueryWeaver is ready.
 Web Console: http://127.0.0.1:$FRONTEND_PORT/queryweaver/
 Backend:     http://127.0.0.1:$BACKEND_PORT
 
-Model services are external dependencies. Configure and validate Chat, Embedding and optional Rerank APIs in the Web Console.
+Model services are external dependencies. Configure and validate Chat, Embedding and Rerank APIs in the Web Console.
 EOF

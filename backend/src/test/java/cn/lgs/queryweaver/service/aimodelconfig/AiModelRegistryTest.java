@@ -16,31 +16,53 @@
 package cn.lgs.queryweaver.service.aimodelconfig;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import cn.lgs.queryweaver.dto.ModelConfigDTO;
 import cn.lgs.queryweaver.enums.ModelType;
+import cn.lgs.queryweaver.semantic.retrieval.RerankModel;
 import org.junit.jupiter.api.Test;
 
 class AiModelRegistryTest {
 
 	@Test
-	void missingRerankConfigurationIsNegativelyCachedUntilRefresh() {
+	void missingRerankConfigurationFailsClearly() {
 		DynamicModelFactory modelFactory = mock(DynamicModelFactory.class);
 		ModelConfigDataService configDataService = mock(ModelConfigDataService.class);
 		when(configDataService.getActiveConfigByType(ModelType.RERANK)).thenReturn(null);
 		AiModelRegistry registry = new AiModelRegistry(modelFactory, configDataService);
 
-		assertThat(registry.currentRerankModel()).isEmpty();
-		assertThat(registry.currentRerankModel()).isEmpty();
+		assertThatThrownBy(registry::currentRerankModel)
+			.isInstanceOf(IllegalStateException.class)
+			.hasMessageContaining("RERANK");
 		verify(configDataService).getActiveConfigByType(ModelType.RERANK);
-		verifyNoMoreInteractions(configDataService, modelFactory);
+		verifyNoInteractions(modelFactory);
+	}
+
+	@Test
+	void activeRerankModelIsCachedUntilRefresh() {
+		DynamicModelFactory modelFactory = mock(DynamicModelFactory.class);
+		ModelConfigDataService configDataService = mock(ModelConfigDataService.class);
+		ModelConfigDTO config = mock(ModelConfigDTO.class);
+		RerankModel rerankModel = mock(RerankModel.class);
+		when(configDataService.getActiveConfigByType(ModelType.RERANK)).thenReturn(config);
+		when(modelFactory.createRerankModel(config)).thenReturn(rerankModel);
+		AiModelRegistry registry = new AiModelRegistry(modelFactory, configDataService);
+
+		assertThat(registry.currentRerankModel()).isSameAs(rerankModel);
+		assertThat(registry.currentRerankModel()).isSameAs(rerankModel);
+		verify(configDataService).getActiveConfigByType(ModelType.RERANK);
+		verify(modelFactory).createRerankModel(config);
 
 		registry.refreshRerank();
-		assertThat(registry.currentRerankModel()).isEmpty();
-		verify(configDataService, org.mockito.Mockito.times(2)).getActiveConfigByType(ModelType.RERANK);
+		assertThat(registry.currentRerankModel()).isSameAs(rerankModel);
+		verify(configDataService, times(2)).getActiveConfigByType(ModelType.RERANK);
+		verify(modelFactory, times(2)).createRerankModel(config);
 	}
 
 }

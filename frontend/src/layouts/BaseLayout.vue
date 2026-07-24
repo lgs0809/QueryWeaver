@@ -108,6 +108,7 @@
     const missing = [];
     if (!readiness.value.chatModelReady) missing.push('Chat Model');
     if (!readiness.value.embeddingModelReady) missing.push('Embedding Model');
+    if (!readiness.value.rerankModelReady) missing.push('Rerank Model');
     return `${missing.join('、')} 暂不可用；历史数据与控制面保持可访问，新问数和语义构建会被暂停。`;
   });
 

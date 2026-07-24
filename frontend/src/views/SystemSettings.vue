@@ -71,19 +71,19 @@
           </div>
         </el-card>
 
-        <el-card shadow="never" class="optional-service">
+        <el-card shadow="never">
           <div class="service-header">
             <div>
               <h2>语义重排模型</h2>
-              <p>对混合召回候选进行 Rerank；未配置时自动使用 RRF 结果，不阻断基础问数。</p>
+              <p>对 RRF 融合后的候选进行深度相关性重排，是标准语义检索链路的一部分。</p>
             </div>
-            <el-tag :type="optionalStatusType(readiness.rerankModelConfigured, readiness.rerankModelReady)" effect="plain">
-              {{ optionalStatusLabel(readiness.rerankModelConfigured, readiness.rerankModelReady) }}
+            <el-tag :type="statusType(readiness.rerankModelReady)" effect="plain">
+              {{ readiness.rerankModelReady ? '已验证可用' : '尚未就绪' }}
             </el-tag>
           </div>
           <div class="fact-row">
             <span>配置</span>
-            <strong>{{ readiness.rerankModelConfigured ? '已有当前配置' : '未配置（可选）' }}</strong>
+            <strong>{{ readiness.rerankModelConfigured ? '已有当前配置' : '未配置' }}</strong>
           </div>
           <div class="fact-row">
             <span>真实可用性验证</span>
@@ -146,10 +146,6 @@
   };
 
   const statusType = (ready: boolean) => (ready ? 'success' : 'warning');
-  const optionalStatusType = (configured: boolean, ready: boolean) =>
-    !configured ? 'info' : ready ? 'success' : 'warning';
-  const optionalStatusLabel = (configured: boolean, ready: boolean) =>
-    !configured ? '未配置（可选）' : ready ? '已验证可用' : '尚未就绪';
   const formatTime = (value?: string) =>
     value ? new Date(value.replace(' ', 'T')).toLocaleString('zh-CN') : '尚无验证记录';
 
@@ -184,7 +180,7 @@
   }
   .service-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 18px;
     margin: 24px 0;
   }
@@ -207,9 +203,6 @@
   .fact-row strong {
     color: #0f172a;
     text-align: right;
-  }
-  .optional-service {
-    grid-column: 1 / -1;
   }
   .actions {
     display: flex;
@@ -239,9 +232,6 @@
     }
     .service-grid {
       grid-template-columns: 1fr;
-    }
-    .optional-service {
-      grid-column: auto;
     }
   }
 </style>

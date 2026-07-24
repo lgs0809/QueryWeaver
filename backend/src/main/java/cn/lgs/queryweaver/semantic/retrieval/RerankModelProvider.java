@@ -15,11 +15,9 @@
  */
 package cn.lgs.queryweaver.semantic.retrieval;
 
-import java.util.Optional;
-
-/** Supplies the currently active optional rerank capability to semantic retrieval. */
+/** Supplies the currently active rerank capability to semantic retrieval. */
 public interface RerankModelProvider {
 
-	Optional<RerankModel> currentRerankModel();
+	RerankModel currentRerankModel();
 
 }

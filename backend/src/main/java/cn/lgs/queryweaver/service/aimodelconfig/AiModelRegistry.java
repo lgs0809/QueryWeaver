@@ -46,8 +46,6 @@ public class AiModelRegistry implements RerankModelProvider, EmbeddingModelIdent
 
 	private volatile RerankModel currentRerankModel;
 
-	private volatile boolean rerankResolved;
-
 	// =========================================================
 	// 1. 获取 ChatClient (懒加载 + 缓存)
 	// =========================================================
@@ -122,30 +120,27 @@ public class AiModelRegistry implements RerankModelProvider, EmbeddingModelIdent
 		return Optional.of(new EmbeddingModelIdentity(model, attributes));
 	}
 
-	/**
-	 * Rerank 是可选增强能力。未配置或初始化失败时返回 empty，由检索链路回退到 RRF。
-	 */
 	@Override
-	public Optional<RerankModel> currentRerankModel() {
-		if (!rerankResolved) {
+	public RerankModel currentRerankModel() {
+		if (currentRerankModel == null) {
 			synchronized (this) {
-				if (!rerankResolved) {
+				if (currentRerankModel == null) {
+					ModelConfigDTO config = modelConfigDataService.getActiveConfigByType(ModelType.RERANK);
+					if (config == null) {
+						throw new IllegalStateException(
+								"No active RERANK model configured. Please configure it in the dashboard.");
+					}
 					try {
-						ModelConfigDTO config = modelConfigDataService.getActiveConfigByType(ModelType.RERANK);
-						if (config != null) {
-							currentRerankModel = modelFactory.createRerankModel(config);
-						}
+						currentRerankModel = modelFactory.createRerankModel(config);
 					}
 					catch (Exception e) {
-						log.warn("Failed to initialize optional RerankModel: {}", e.getMessage());
-					}
-					finally {
-						rerankResolved = true;
+						log.error("Failed to initialize RerankModel: {}", e.getMessage(), e);
+						throw new IllegalStateException("Failed to initialize active RERANK model.", e);
 					}
 				}
 			}
 		}
-		return Optional.ofNullable(currentRerankModel);
+		return currentRerankModel;
 	}
 
 	// =========================================================
@@ -164,7 +159,6 @@ public class AiModelRegistry implements RerankModelProvider, EmbeddingModelIdent
 
 	public void refreshRerank() {
 		this.currentRerankModel = null;
-		this.rerankResolved = false;
 		log.info("Rerank cache cleared.");
 	}
 

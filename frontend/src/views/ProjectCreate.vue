@@ -308,6 +308,7 @@
     if (!platformReadiness.value?.chatModelReady || chatModels.value.length === 0)
       missing.push('Chat Model');
     if (!platformReadiness.value?.embeddingModelReady) missing.push('Embedding Model');
+    if (!platformReadiness.value?.rerankModelReady) missing.push('Rerank Model');
     return missing.length
       ? `${missing.join('、')} 当前不可用。可以查看已有项目，但创建和项目理解需要先恢复这些模型能力。`
       : '模型能力状态暂时无法确认，请检查系统模型配置。';
@@ -402,7 +403,7 @@
 
   const nextStep = () => {
     if (!platformReadiness.value?.ready) {
-      ElMessage.warning('Chat Model 与 Embedding Model 均准备好后才能开始创建项目');
+      ElMessage.warning('Chat Model、Embedding Model 与 Rerank Model 均准备好后才能开始创建项目');
       return;
     }
     if (activeStep.value === 0) {
