@@ -3,14 +3,14 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>cn.lgs.queryweaver</groupId>
-        <artifactId>queryweaver-parent</artifactId>
+        <groupId>cn.lgs.semevosql</groupId>
+        <artifactId>semevosql-parent</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>queryweaver</artifactId>
-    <name>QueryWeaver Backend</name>
+    <artifactId>semevosql-backend</artifactId>
+    <name>SemEvoSQL Backend</name>
 
     <dependencies>
         <dependency>
@@ -263,13 +263,13 @@
 
     </dependencies>
     <build>
-        <finalName>queryweaver</finalName>
+        <finalName>semevosql-backend</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>cn.lgs.queryweaver.QueryWeaverApplication</mainClass>
+                    <mainClass>cn.lgs.semevosql.SemEvoSQLApplication</mainClass>
                 </configuration>
                 <executions>
                     <execution>
