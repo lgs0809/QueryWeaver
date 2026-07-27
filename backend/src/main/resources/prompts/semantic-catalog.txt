@@ -1,4 +1,4 @@
-### QueryWeaver 已发布语义目录
+### SemEvoSQL 已发布语义目录
 以下内容来自当前 Project Version 已发布的受治理 Semantic Catalog，是高级执行路径的权威语义上下文。
 
 目录可能包含：
