@@ -3,10 +3,10 @@
     xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>cn.lgs.queryweaver</groupId>
-  <artifactId>queryweaver-parent</artifactId>
+  <groupId>cn.lgs.semevosql</groupId>
+  <artifactId>semevosql-parent</artifactId>
   <packaging>pom</packaging>
-  <name>QueryWeaver</name>
+  <name>SemEvoSQL</name>
   <version>${revision}</version>
 
   <modules>
@@ -16,7 +16,7 @@
   <properties>
     <!-- Spring AI Alibaba Version -->
     <spring-ai-alibaba.version>1.1.0.0</spring-ai-alibaba.version>
-    <!-- QueryWeaver Version -->
+    <!-- SemEvoSQL Version -->
     <revision>1.0.0</revision>
 
     <!-- Maven project basic config -->

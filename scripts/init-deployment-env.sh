@@ -3,8 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-TEMPLATE="$PROJECT_ROOT/deploy/queryweaver/.env.example"
-TARGET="${QUERYWEAVER_COMPOSE_ENV_FILE:-$PROJECT_ROOT/deploy/queryweaver/.env}"
+TEMPLATE="$PROJECT_ROOT/deploy/semevosql/.env.example"
+TARGET="${SEMEVOSQL_COMPOSE_ENV_FILE:-$PROJECT_ROOT/deploy/semevosql/.env}"
 
 if [[ ! -f "$TEMPLATE" ]]; then
   echo "Deployment template is missing: $TEMPLATE" >&2
@@ -28,19 +28,24 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 while IFS= read -r line || [[ -n "$line" ]]; do
   case "$line" in
-    QUERYWEAVER_METADATA_PASSWORD=)
-      printf 'QUERYWEAVER_METADATA_PASSWORD=%s\n' "$metadata_value" >>"$tmp"
+    SEMEVOSQL_METADATA_PASSWORD=)
+      printf 'SEMEVOSQL_METADATA_PASSWORD=%s\n' "$metadata_value" >>"$tmp"
       ;;
-    QUERYWEAVER_EXECUTION_INTERNAL_TOKEN=)
-      printf 'QUERYWEAVER_EXECUTION_INTERNAL_TOKEN=%s\n' "$execution_value" >>"$tmp"
+    SEMEVOSQL_EXECUTION_INTERNAL_TOKEN=)
+      printf 'SEMEVOSQL_EXECUTION_INTERNAL_TOKEN=%s\n' "$execution_value" >>"$tmp"
       ;;
-    QUERYWEAVER_SECRET_ENCRYPTION_KEY=)
-      printf 'QUERYWEAVER_SECRET_ENCRYPTION_KEY=%s\n' "$encryption_value" >>"$tmp"
+    SEMEVOSQL_SECRET_ENCRYPTION_KEY=)
+      printf 'SEMEVOSQL_SECRET_ENCRYPTION_KEY=%s\n' "$encryption_value" >>"$tmp"
       ;;
-    QUERYWEAVER_MCP_PUBLIC_BASE_URL=*)
-      printf 'QUERYWEAVER_MCP_PUBLIC_BASE_URL=\n' >>"$tmp"
+    SEMEVOSQL_MCP_PUBLIC_BASE_URL=*)
+      printf 'SEMEVOSQL_MCP_PUBLIC_BASE_URL=\n' >>"$tmp"
       ;;
-    QUERYWEAVER_METADATA_PORT=*)
+    SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE=*)
+      # The generated environment targets the standalone/local-evaluation profile.
+      # ProductionConfigurationGuard requires this to be false when prod is enabled.
+      printf 'SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE=true\n' >>"$tmp"
+      ;;
+    SEMEVOSQL_METADATA_PORT=*)
       ;;
     *)
       printf '%s\n' "$line" >>"$tmp"
@@ -55,4 +60,4 @@ trap - EXIT
 chmod 600 "$TARGET" 2>/dev/null || true
 
 echo "Created $TARGET"
-echo "Review ports/security settings if needed, then run: ./scripts/start-queryweaver.sh"
+echo "Review ports/security settings if needed, then run: ./scripts/start-semevosql.sh"

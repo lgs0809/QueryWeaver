@@ -6,11 +6,11 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${QUERYWEAVER_JWT_ISSUER_URI}
+          issuer-uri: ${SEMEVOSQL_JWT_ISSUER_URI}
 
-queryweaver:
+semevosql:
   code-executor:
-    code-pool-executor: ${QUERYWEAVER_CODE_EXECUTOR:docker}
+    code-pool-executor: ${SEMEVOSQL_CODE_EXECUTOR:docker}
   sql-execution:
     require-time-filter: true
     reject-full-table-scan: true
@@ -21,9 +21,9 @@ springdoc:
   swagger-ui:
     enabled: false
 
-queryweaver:
+semevosql:
   mcp:
-    enabled: ${QUERYWEAVER_MCP_ENABLED:true}
+    enabled: ${SEMEVOSQL_MCP_ENABLED:true}
   security:
     enabled: true
   operator:
@@ -32,5 +32,5 @@ queryweaver:
 logging:
   level:
     root: info
-    cn.lgs.queryweaver: info
+    cn.lgs.semevosql: info
     org.springframework.jdbc: warn

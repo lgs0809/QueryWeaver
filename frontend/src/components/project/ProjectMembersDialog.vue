@@ -45,10 +45,10 @@
   import { computed, ref, watch } from 'vue';
   import { ElMessage, ElMessageBox } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type ProjectAccessRole,
     type ProjectMembership,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{ modelValue: boolean; projectId: number }>();
   const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>();
@@ -66,7 +66,7 @@
     if (!visible.value) return;
     loading.value = true;
     try {
-      members.value = await queryWeaverService.projectMembers(props.projectId);
+      members.value = await semEvoSQLService.projectMembers(props.projectId);
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '项目成员加载失败');
     } finally {
@@ -79,7 +79,7 @@
     if (!id) return;
     saving.value = true;
     try {
-      await queryWeaverService.grantProjectMember(props.projectId, id, memberRole.value);
+      await semEvoSQLService.grantProjectMember(props.projectId, id, memberRole.value);
       memberId.value = '';
       memberRole.value = 'VIEWER';
       ElMessage.success('项目成员权限已更新');
@@ -98,7 +98,7 @@
         '移除项目成员',
         { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' },
       );
-      await queryWeaverService.revokeProjectMember(props.projectId, member.operatorId);
+      await semEvoSQLService.revokeProjectMember(props.projectId, member.operatorId);
       ElMessage.success('项目成员已移除');
       await load();
     } catch (error) {

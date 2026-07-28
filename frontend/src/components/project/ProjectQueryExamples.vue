@@ -84,7 +84,7 @@
             原问句：{{ scope.row.original_question }}
           </div>
           <div class="subtle">
-            {{ scope.row.intent_type || 'UNKNOWN_INTENT' }}
+            {{ intentLabel(scope.row.intent_type) }}
             · {{ scope.row.conversation_independent ? '独立案例' : '上下文绑定案例' }}
           </div>
           <el-tag v-if="!scope.row.typed_ir_json" size="small" type="danger" class="inline-tag">
@@ -157,7 +157,7 @@
       </el-table-column>
     </el-table>
 
-    <el-drawer v-model="drawerVisible" title="结构化 Query Case 详情" size="76%">
+    <el-drawer v-model="drawerVisible" title="验证案例详情" size="76%">
       <template v-if="selected">
         <el-alert
           v-if="!selected.typed_ir_json"
@@ -175,115 +175,68 @@
         />
 
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="Case ID">
-            <code>{{ selected.id }}</code>
-          </el-descriptions-item>
-          <el-descriptions-item label="Status">
+          <el-descriptions-item label="状态">
             <el-tag :type="statusType(selected.status)">{{ statusLabel(selected.status) }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="Catalog Hash">
-            <code>{{ selected.catalog_hash }}</code>
-          </el-descriptions-item>
-          <el-descriptions-item label="Lineage Hash">
-            <code>{{ selected.evidence_lineage_hash || '-' }}</code>
-          </el-descriptions-item>
-          <el-descriptions-item label="Original Question" :span="2">
-            {{ selected.original_question || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="Normalized Question" :span="2">
-            {{ selected.normalized_question }}
-          </el-descriptions-item>
-          <el-descriptions-item label="Intent Type">
-            {{ selected.intent_type || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="Conversation Independent">
-            {{ truth(selected.conversation_independent) ? 'true' : 'false' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="Context Hash">
-            <code>{{ selected.context_hash || '-' }}</code>
-          </el-descriptions-item>
-          <el-descriptions-item label="Result Schema Hash">
-            <code>{{ selected.result_schema_hash || '-' }}</code>
-          </el-descriptions-item>
-          <el-descriptions-item label="Canonical Shape Hash" :span="2">
-            <code>{{ selected.canonical_shape_hash || '-' }}</code>
-          </el-descriptions-item>
-          <el-descriptions-item label="Rebind Status">
+          <el-descriptions-item label="版本适配">
             {{ rebindLabel(selected.rebind_status) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Source Example">
-            {{ selected.source_example_id || '-' }}
+          <el-descriptions-item label="原始问题" :span="2">
+            {{ selected.original_question || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="Recall / Failure / Consecutive">
-            {{ selected.recall_count || 0 }} / {{ selected.failed_after_recall_count || 0 }} /
-            {{ selected.consecutive_recall_issue_count || 0 }}
+          <el-descriptions-item label="标准化问题" :span="2">
+            {{ selected.normalized_question }}
           </el-descriptions-item>
-          <el-descriptions-item label="Quarantine Time">
-            {{ formatTime(selected.quarantine_time) }}
+          <el-descriptions-item label="查询类型">
+            {{ intentLabel(selected.intent_type) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Quarantine Reason" :span="2">
-            {{ selected.quarantine_reason || '-' }}
+          <el-descriptions-item label="会话依赖">
+            {{ truth(selected.conversation_independent) ? '无需历史对话' : '依赖当前会话上下文' }}
           </el-descriptions-item>
+          <el-descriptions-item label="案例来源">
+            {{ selected.source_example_id ? '由历史案例适配而来' : '当前业务模型下形成' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="使用情况">
+            命中 {{ selected.recall_count || 0 }} · 采用 {{ selected.adopted_count || 0 }} · 失败
+            {{ selected.failed_after_recall_count || 0 }}
+          </el-descriptions-item>
+          <template v-if="selected.status === 'QUARANTINED'">
+            <el-descriptions-item label="暂停时间">
+              {{ formatTime(selected.quarantine_time) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="暂停原因">
+              {{ selected.quarantine_reason || '复用质量需要进一步确认' }}
+            </el-descriptions-item>
+          </template>
         </el-descriptions>
 
-        <h3>Root Evidence 与派生血缘</h3>
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="Root Evidence IDs">
-            <code>{{ formatIds(selected.root_evidence_ids) }}</code>
-          </el-descriptions-item>
-          <el-descriptions-item label="Derived From Case IDs">
-            <code>{{ formatIds(selected.derived_from_case_ids) }}</code>
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <h3>Resolved Time Range</h3>
-        <pre>{{ pretty(selected.resolved_time_range_json) }}</pre>
-        <h3>Semantic Blueprint</h3>
-        <pre>{{ pretty(selected.typed_ir_json) }}</pre>
-        <h3>Resolution</h3>
-        <pre>{{ pretty(selected.resolution_json) }}</pre>
-        <h3>Quality Proof</h3>
-        <pre>{{ pretty(selected.quality_proof_json) }}</pre>
-
-        <h3>当前版本重新编译 SQL</h3>
+        <h3>当前版本验证 SQL</h3>
         <p class="section-note">
-          该 SQL 仅是当前案例的验证产物；在线命中时仍会使用 IR Hint 重新编译并经过 Guard。
+          该 SQL 用于验证此案例；后续实际查询仍会根据当前业务模型重新生成，并经过执行前安全校验。
         </p>
         <pre>{{ selected.sql_text || '-' }}</pre>
         <template v-if="selected.historical_sql_text">
-          <h3>旧版本 SQL 基线</h3>
+          <h3>历史版本 SQL</h3>
           <pre>{{ selected.historical_sql_text }}</pre>
         </template>
 
-        <h3>资产引用与 Fingerprint</h3>
-        <el-table :data="selected.assetReferences || []" empty-text="暂无资产引用">
-          <el-table-column prop="asset_type" label="类型" width="150" />
-          <el-table-column prop="asset_key" label="Asset Key" min-width="240" />
-          <el-table-column prop="asset_fingerprint" label="Fingerprint" min-width="300">
-            <template #default="scope">
-              <code>{{ scope.row.asset_fingerprint || '-' }}</code>
-            </template>
+        <h3>关联业务资产</h3>
+        <el-table :data="selected.assetReferences || []" empty-text="暂无关联业务资产">
+          <el-table-column label="类型" width="150">
+            <template #default="scope">{{ assetTypeLabel(scope.row.asset_type) }}</template>
           </el-table-column>
+          <el-table-column prop="asset_key" label="业务资产" min-width="260" />
         </el-table>
 
-        <h3>跨版本 Rebind 血缘</h3>
-        <div class="lineage">
-          <div class="lineage-node">
-            <strong>{{ selected.source_example_id ? '来源 Case' : '当前 Case' }}</strong>
-            <code>{{ selected.source_example_id || selected.id }}</code>
-          </div>
-          <span>→</span>
-          <div class="lineage-node">
-            <strong>当前 Case</strong>
-            <code>{{ selected.id }}</code>
-            <small>{{ rebindLabel(selected.rebind_status) }}</small>
-          </div>
-        </div>
-        <el-table :data="selected.rebinds || []" empty-text="暂无下游 Rebind">
-          <el-table-column prop="target_version_id" label="目标版本" width="120" />
-          <el-table-column prop="target_example_id" label="目标 Case" min-width="220" />
-          <el-table-column prop="status" label="状态" width="170" />
-          <el-table-column prop="reason" label="原因 / 不兼容说明" min-width="300" />
+        <h3>跨版本适配记录</h3>
+        <el-table :data="selected.rebinds || []" empty-text="暂无后续版本适配记录">
+          <el-table-column label="目标版本" width="140">
+            <template #default="scope">v{{ versionNumber(scope.row.target_version_id) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="190">
+            <template #default="scope">{{ rebindLabel(scope.row.status) }}</template>
+          </el-table-column>
+          <el-table-column prop="reason" label="适配说明" min-width="320" />
         </el-table>
       </template>
     </el-drawer>
@@ -294,11 +247,11 @@
   import { onMounted, ref, watch } from 'vue';
   import { ElMessage, ElMessageBox } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type QueryCaseIndexReadiness,
     type SemanticProjectVersion,
     type ValidatedQueryExample,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -338,14 +291,14 @@
     if (!props.projectId) return;
     loading.value = true;
     try {
-      examples.value = await queryWeaverService.queryExamples(
+      examples.value = await semEvoSQLService.queryExamples(
         props.projectId,
         selectedVersionId.value,
         status.value,
         rebindStatus.value,
       );
     } catch (error) {
-      ElMessage.error(error instanceof Error ? error.message : 'Query Case 加载失败');
+      ElMessage.error(error instanceof Error ? error.message : '验证案例加载失败');
     } finally {
       loading.value = false;
     }
@@ -354,10 +307,10 @@
   const loadIndexReadiness = async () => {
     if (!props.projectId) return;
     try {
-      indexReadiness.value = await queryWeaverService.queryCaseIndexReadiness(props.projectId);
+      indexReadiness.value = await semEvoSQLService.queryCaseIndexReadiness(props.projectId);
     } catch (error) {
       indexReadiness.value = undefined;
-      ElMessage.warning(error instanceof Error ? error.message : 'Query Case 索引状态加载失败');
+      ElMessage.warning(error instanceof Error ? error.message : '验证案例索引状态加载失败');
     }
   };
 
@@ -368,13 +321,13 @@
   const reindexCurrentProject = async () => {
     try {
       await ElMessageBox.confirm(
-        '将使用当前 Embedding 模型重建本项目已批准 Query Case 的向量索引。重建期间 Exact/BM25 召回仍可使用。',
-        '重建 Query Case 向量索引',
+        '将使用当前向量模型重建本项目已确认案例的语义索引。重建期间关键词召回仍可使用。',
+        '重建验证案例索引',
         { type: 'warning', confirmButtonText: '开始重建', cancelButtonText: '取消' },
       );
       reindexing.value = true;
-      const result = await queryWeaverService.reindexQueryCaseIndex(props.projectId);
-      ElMessage.success(`Query Case 向量索引已重建：${result.indexedEmbeddings} 条`);
+      const result = await semEvoSQLService.reindexQueryCaseIndex(props.projectId);
+      ElMessage.success(`验证案例索引已重建：${result.indexedEmbeddings} 条`);
       await loadIndexReadiness();
     } catch (error) {
       if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
@@ -386,9 +339,9 @@
   const openDetail = async (example: ValidatedQueryExample) => {
     drawerVisible.value = true;
     try {
-      selected.value = await queryWeaverService.queryExample(props.projectId, example.id);
+      selected.value = await semEvoSQLService.queryExample(props.projectId, example.id);
     } catch (error) {
-      ElMessage.error(error instanceof Error ? error.message : 'Query Case 详情加载失败');
+      ElMessage.error(error instanceof Error ? error.message : '验证案例详情加载失败');
     }
   };
 
@@ -396,9 +349,9 @@
     try {
       const response = await ElMessageBox.prompt(
         action === 'RESTORE'
-          ? '说明独立 Replay、人工复核或其他足以恢复该案例的证据。'
+          ? '说明独立回归验证、人工复核或其他足以恢复该案例的证据。'
           : '说明为什么该隔离案例应被永久拒绝。',
-        action === 'RESTORE' ? '恢复隔离 Query Case' : '拒绝隔离 Query Case',
+        action === 'RESTORE' ? '恢复暂停的验证案例' : '拒绝暂停的验证案例',
         {
           inputType: 'textarea',
           inputValidator: value => Boolean(value.trim()) || '必须填写治理原因',
@@ -406,19 +359,19 @@
       );
       governingId.value = example.id;
       if (action === 'RESTORE') {
-        await queryWeaverService.restoreQuarantinedQueryExample(
+        await semEvoSQLService.restoreQuarantinedQueryExample(
           props.projectId,
           example.id,
           response.value,
         );
-        ElMessage.success('Query Case 已从隔离状态恢复');
+        ElMessage.success('验证案例已恢复复用');
       } else {
-        await queryWeaverService.rejectQuarantinedQueryExample(
+        await semEvoSQLService.rejectQuarantinedQueryExample(
           props.projectId,
           example.id,
           response.value,
         );
-        ElMessage.success('隔离 Query Case 已拒绝');
+        ElMessage.success('验证案例已拒绝复用');
       }
       await load();
     } catch (error) {
@@ -456,8 +409,32 @@
     INVALID: '无效',
     SUPERSEDED: '已被替代',
   };
-  const statusLabel = (value: string) => statusLabels[value] || value;
-  const rebindLabel = (value: string) => rebindLabels[value] || value;
+  const statusLabel = (value: string) => statusLabels[value] || '未知状态';
+  const rebindLabel = (value: string) => rebindLabels[value] || '待确认';
+  const intentLabel = (value?: string) =>
+    ({
+      AGGREGATION: '汇总统计',
+      COMPARISON: '对比分析',
+      TREND: '趋势分析',
+      DETAIL: '明细查询',
+      RANKING: '排序分析',
+      DISTRIBUTION: '分布分析',
+    })[value || ''] || '业务查询';
+  const assetTypeLabel = (value?: string) =>
+    ({
+      MODEL: '业务模型',
+      COLUMN: '字段',
+      METRIC: '指标',
+      DIMENSION: '维度',
+      RELATIONSHIP: '模型关系',
+      GRAIN: '统计粒度',
+      ENUM_VALUE: '枚举值',
+      RULE: '业务规则',
+      GOLDEN_CASE: '验证案例',
+      PLANNING_POLICY: '规划策略',
+      MERGE_POLICY: '跨源合并策略',
+      AUTHORITY_RULE: '跨源授权规则',
+    })[value || ''] || '业务资产';
   const indexStatusLabel = (value: QueryCaseIndexReadiness['status']) =>
     ({
       INDEX_READY: '向量索引就绪',
@@ -474,21 +451,6 @@
   const versionNumber = (versionId: number) =>
     props.versions.find(item => item.id === versionId)?.versionNumber || String(versionId);
   const formatTime = (value?: string) => (value ? new Date(value).toLocaleString('zh-CN') : '-');
-  const pretty = (value?: string) => {
-    try {
-      return JSON.stringify(JSON.parse(value || '{}'), null, 2);
-    } catch {
-      return value || '-';
-    }
-  };
-  const formatIds = (value?: string) => {
-    try {
-      const parsed = JSON.parse(value || '[]');
-      return Array.isArray(parsed) && parsed.length ? parsed.join(', ') : '-';
-    } catch {
-      return value || '-';
-    }
-  };
 
   watch(
     () => [props.activeVersionId, props.versions.length],

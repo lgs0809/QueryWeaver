@@ -481,7 +481,9 @@
               <el-table :data="policy.authorityRules" empty-text="尚无权威来源规则" size="small">
                 <el-table-column prop="logicalAssetCode" label="业务资产" min-width="180" />
                 <el-table-column prop="logicalAssetType" label="类型" width="130" />
-                <el-table-column prop="datasourceId" label="数据连接 ID" width="120" />
+                <el-table-column label="数据连接" min-width="160">
+                  <template #default="scope">{{ datasourceLabel(scope.row.datasourceId) }}</template>
+                </el-table-column>
                 <el-table-column prop="sourceRole" label="来源角色" min-width="140" />
                 <el-table-column prop="priority" label="优先级" width="90" />
                 <el-table-column label="允许回退" width="100">
@@ -493,7 +495,9 @@
             </el-tab-pane>
             <el-tab-pane label="数据时效">
               <el-table :data="policy.freshnessPolicies" empty-text="尚无数据时效规则" size="small">
-                <el-table-column prop="datasourceId" label="数据连接 ID" width="120" />
+                <el-table-column label="数据连接" min-width="160">
+                  <template #default="scope">{{ datasourceLabel(scope.row.datasourceId) }}</template>
+                </el-table-column>
                 <el-table-column prop="businessDateField" label="业务日期字段" min-width="160" />
                 <el-table-column prop="freshnessType" label="更新方式" min-width="130" />
                 <el-table-column prop="latencyMinutes" label="允许延迟(分钟)" width="140" />
@@ -509,14 +513,14 @@
                 <el-table-column prop="relationshipCode" label="关系" min-width="150" />
                 <el-table-column label="左侧" min-width="210">
                   <template #default="scope">
-                    DS {{ scope.row.leftDatasourceId }} · {{ scope.row.leftModelCode }}.{{
+                    {{ datasourceLabel(scope.row.leftDatasourceId) }} · {{ scope.row.leftModelCode }}.{{
                       scope.row.leftKey
                     }}
                   </template>
                 </el-table-column>
                 <el-table-column label="右侧" min-width="210">
                   <template #default="scope">
-                    DS {{ scope.row.rightDatasourceId }} · {{ scope.row.rightModelCode }}.{{
+                    {{ datasourceLabel(scope.row.rightDatasourceId) }} · {{ scope.row.rightModelCode }}.{{
                       scope.row.rightKey
                     }}
                   </template>
@@ -643,13 +647,14 @@
 <script setup lang="ts">
   import { computed, onMounted, ref, watch } from 'vue';
   import { ElMessage, ElMessageBox } from 'element-plus';
+  import datasourceService from '@/services/datasource';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type MultiSourcePolicySnapshot,
     type SemanticCatalogColumn,
     type SemanticCatalogSnapshot,
     type SemanticProjectVersion,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   type BusinessSection =
     | 'objects'
@@ -690,6 +695,7 @@
   const catalogJson = ref('');
   const policyJson = ref('');
   const violations = ref<string[]>([]);
+  const datasourceNames = ref<Record<number, string>>({});
   const loading = ref(false);
   const savingCatalog = ref(false);
   const savingPolicy = ref(false);
@@ -708,6 +714,8 @@
   const editable = computed(
     () => selectedVersion.value?.status === 'DRAFT' && props.canEdit !== false,
   );
+  const datasourceLabel = (datasourceId?: number) =>
+    (datasourceId ? datasourceNames.value[datasourceId] : undefined) || '未命名数据连接';
   const catalogStats = computed(() => [
     { key: 'objects' as const, label: '业务对象', value: catalog.value?.models.length || 0 },
     { key: 'metrics' as const, label: '指标', value: catalog.value?.metrics.length || 0 },
@@ -870,11 +878,18 @@
     loading.value = true;
     errorMessage.value = '';
     try {
-      [catalog.value, policy.value, violations.value] = await Promise.all([
-        queryWeaverService.semanticCatalog(props.projectId, selectedVersionId.value),
-        queryWeaverService.multiSourcePolicy(props.projectId, selectedVersionId.value),
-        queryWeaverService.multiSourcePolicyViolations(props.projectId, selectedVersionId.value),
+      const [nextCatalog, nextPolicy, nextViolations, datasources] = await Promise.all([
+        semEvoSQLService.semanticCatalog(props.projectId, selectedVersionId.value),
+        semEvoSQLService.multiSourcePolicy(props.projectId, selectedVersionId.value),
+        semEvoSQLService.multiSourcePolicyViolations(props.projectId, selectedVersionId.value),
+        datasourceService.getAllDatasource(),
       ]);
+      catalog.value = nextCatalog;
+      policy.value = nextPolicy;
+      violations.value = nextViolations;
+      datasourceNames.value = Object.fromEntries(
+        datasources.filter(item => item.id).map(item => [item.id as number, item.name || `数据连接 ${item.id}`]),
+      );
       syncJsonEditors();
     } catch (error) {
       errorMessage.value = error instanceof Error ? error.message : '业务模型加载失败';
@@ -905,13 +920,13 @@
     if (!selectedVersionId.value || !editable.value) return;
     savingCatalog.value = true;
     try {
-      catalog.value = await queryWeaverService.replaceSemanticCatalog(
+      catalog.value = await semEvoSQLService.replaceSemanticCatalog(
         props.projectId,
         selectedVersionId.value,
         nextCatalog,
       );
       catalogJson.value = JSON.stringify(catalog.value, null, 2);
-      violations.value = await queryWeaverService.multiSourcePolicyViolations(
+      violations.value = await semEvoSQLService.multiSourcePolicyViolations(
         props.projectId,
         selectedVersionId.value,
       );
@@ -940,13 +955,13 @@
     if (!selectedVersionId.value || !editable.value) return;
     savingPolicy.value = true;
     try {
-      policy.value = await queryWeaverService.replaceMultiSourcePolicy(
+      policy.value = await semEvoSQLService.replaceMultiSourcePolicy(
         props.projectId,
         selectedVersionId.value,
         parseJson<MultiSourcePolicySnapshot>(policyJson.value, '多数据源策略'),
       );
       policyJson.value = JSON.stringify(policy.value, null, 2);
-      violations.value = await queryWeaverService.multiSourcePolicyViolations(
+      violations.value = await semEvoSQLService.multiSourcePolicyViolations(
         props.projectId,
         selectedVersionId.value,
       );

@@ -36,7 +36,7 @@
 
 <script setup lang="ts">
   import { computed } from 'vue';
-  import type { ProjectHealth } from '@/services/queryweaver';
+  import type { ProjectHealth } from '@/services/semevosql';
   import {
     projectLifecycleStages,
     projectPrimaryAction,
@@ -74,7 +74,7 @@
     }
     return (
       primaryAction.value?.description ||
-      'QueryWeaver 会根据当前项目事实确定下一步，不会跳过业务确认、验证或发布门禁。'
+      'SemEvoSQL 会根据当前项目事实确定下一步，不会跳过业务确认、验证或发布门禁。'
     );
   });
 </script>

@@ -31,7 +31,7 @@
 
 <script setup lang="ts">
   import { computed } from 'vue';
-  import type { QueryRun, RunEvent } from '@/services/queryweaver';
+  import type { QueryRun, RunEvent } from '@/services/semevosql';
 
   const props = defineProps<{
     run: QueryRun;

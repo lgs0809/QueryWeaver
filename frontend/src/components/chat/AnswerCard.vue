@@ -162,7 +162,7 @@
 
 <script setup lang="ts">
   import { computed, ref } from 'vue';
-  import type { QueryExecutionExplanation, ResultArtifact } from '@/services/queryweaver';
+  import type { QueryExecutionExplanation, ResultArtifact } from '@/services/semevosql';
 
   const props = defineProps<{
     content: string;

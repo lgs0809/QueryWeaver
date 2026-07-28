@@ -229,7 +229,7 @@
 
 <script setup lang="ts">
   import { computed } from 'vue';
-  import type { ProjectHealth } from '@/services/queryweaver';
+  import type { ProjectHealth } from '@/services/semevosql';
 
   const props = withDefaults(
     defineProps<{

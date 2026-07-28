@@ -132,10 +132,10 @@
   import { computed, onMounted, ref, watch } from 'vue';
   import { ElMessage } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type OnboardingView,
     type SemanticProjectVersion,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -180,7 +180,7 @@
     if (!selectedVersionId.value) return;
     loading.value = true;
     try {
-      view.value = await queryWeaverService.onboarding(props.projectId, selectedVersionId.value);
+      view.value = await semEvoSQLService.onboarding(props.projectId, selectedVersionId.value);
       answer.value = view.value.nextQuestion?.recommendedAnswer || '';
     } catch {
       view.value = undefined;
@@ -193,7 +193,7 @@
     if (!selectedVersionId.value) return;
     loading.value = true;
     try {
-      view.value = await queryWeaverService.startOnboarding(
+      view.value = await semEvoSQLService.startOnboarding(
         props.projectId,
         selectedVersionId.value,
       );
@@ -212,7 +212,7 @@
     }
     submitting.value = true;
     try {
-      view.value = await queryWeaverService.answerOnboarding(
+      view.value = await semEvoSQLService.answerOnboarding(
         props.projectId,
         selectedVersionId.value,
         view.value.nextQuestion,
@@ -231,7 +231,7 @@
     if (!selectedVersionId.value || !view.value) return;
     confirming.value = true;
     try {
-      view.value = await queryWeaverService.confirmOnboarding(
+      view.value = await semEvoSQLService.confirmOnboarding(
         props.projectId,
         selectedVersionId.value,
         view.value.summary.revision,

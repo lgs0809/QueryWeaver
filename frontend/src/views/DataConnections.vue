@@ -8,7 +8,7 @@
       <div class="page-heading">
         <div>
           <h1>数据连接</h1>
-          <p>统一管理 QueryWeaver 可使用的数据库连接。密码不会在页面或查询接口中回显。</p>
+          <p>统一管理 SemEvoSQL 可使用的数据库连接。密码不会在页面或查询接口中回显。</p>
         </div>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建连接</el-button>
       </div>

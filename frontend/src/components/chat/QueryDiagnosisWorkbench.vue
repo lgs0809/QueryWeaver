@@ -389,11 +389,11 @@
   import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
   import { ElMessage, ElMessageBox } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type QueryCorrectionOption,
     type QueryDiagnosis,
     type SemanticBindingScope,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     modelValue: boolean;
@@ -486,7 +486,7 @@
     loading.value = true;
     error.value = '';
     try {
-      diagnosis.value = await queryWeaverService.diagnosis(props.runId);
+      diagnosis.value = await semEvoSQLService.diagnosis(props.runId);
       if (!bindingForm.rawExpression && diagnosis.value.question) {
         bindingForm.rawExpression = diagnosis.value.question;
       }
@@ -507,7 +507,7 @@
     bindingForm.assetKey = '';
     try {
       correctionOptions.value = (
-        await queryWeaverService.correctionOptions(props.runId, bindingForm.assetType)
+        await semEvoSQLService.correctionOptions(props.runId, bindingForm.assetType)
       ).options;
     } catch (caught) {
       ElMessage.error(caught instanceof Error ? caught.message : '业务资产加载失败');
@@ -523,7 +523,7 @@
     mutating.value = true;
     activeMutation.value = 'CORRECT_BINDING';
     try {
-      const result = await queryWeaverService.correctBinding(
+      const result = await semEvoSQLService.correctBinding(
         diagnosis.value.projectId,
         diagnosis.value.conversationId,
         diagnosis.value.runId,
@@ -556,7 +556,7 @@
     mutating.value = true;
     activeMutation.value = 'PROPOSE_DEFINITION';
     try {
-      await queryWeaverService.proposeDefinitionCorrection(
+      await semEvoSQLService.proposeDefinitionCorrection(
         diagnosis.value.projectId,
         diagnosis.value.conversationId,
         diagnosis.value.runId,
@@ -586,7 +586,7 @@
     activeMutation.value = code;
     try {
       if (code === 'REVIEW_CANDIDATE') {
-        await queryWeaverService.reviewSemanticEvolution(
+        await semEvoSQLService.reviewSemanticEvolution(
           governance.candidateId,
           true,
           `Query diagnosis confirmed from run ${diagnosis.value.runId}`,
@@ -601,25 +601,25 @@
             inputErrorMessage: '版本号必须使用 x.x.x 格式',
           },
         );
-        await queryWeaverService.createSemanticEvolutionDraft(
+        await semEvoSQLService.createSemanticEvolutionDraft(
           governance.candidateId,
           version.value.trim(),
         );
         ElMessage.success('修复 Draft 已创建并应用 Patch');
       } else if (code === 'START_REPLAY') {
-        await queryWeaverService.replaySemanticEvolution(governance.candidateId);
+        await semEvoSQLService.replaySemanticEvolution(governance.candidateId);
         ElMessage.success('定向 Replay 已启动，会在后台持久执行');
       } else if (code === 'READY_FOR_PUBLISH') {
-        await queryWeaverService.readySemanticEvolution(governance.candidateId);
+        await semEvoSQLService.readySemanticEvolution(governance.candidateId);
         ElMessage.success('已通过 Replay 门禁，等待发布');
       } else if (code === 'PUBLISH_DRAFT' && governance.targetDraftVersionId) {
-        await queryWeaverService.publishProjectVersion(
+        await semEvoSQLService.publishProjectVersion(
           diagnosis.value.projectId,
           governance.targetDraftVersionId,
         );
         ElMessage.success('修复版本已发布');
       } else if (code === 'ACTIVATE_DRAFT' && governance.targetDraftVersionId) {
-        await queryWeaverService.activateProjectVersion(
+        await semEvoSQLService.activateProjectVersion(
           diagnosis.value.projectId,
           governance.targetDraftVersionId,
         );

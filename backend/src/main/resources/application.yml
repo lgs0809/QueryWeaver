@@ -16,7 +16,7 @@ management:
       enabled: false
   metrics:
     tags:
-      application: queryweaver
+      application: semevosql
 
 springdoc:
   api-docs:
@@ -25,63 +25,63 @@ springdoc:
     path: /swagger-ui.html
 
 # Shared defaults are fail-closed. Local-only credentials and unsafe conveniences live in application-local.yml.
-queryweaver:
+semevosql:
   instance-id: ${HOSTNAME:local}
   mcp:
-    enabled: ${QUERYWEAVER_MCP_ENABLED:true}
+    enabled: ${SEMEVOSQL_MCP_ENABLED:true}
     external:
-      public-base-url: ${QUERYWEAVER_MCP_PUBLIC_BASE_URL:http://localhost:8065}
-      endpoint-path: ${QUERYWEAVER_MCP_ENDPOINT:/mcp}
-      credential-ttl-days: ${QUERYWEAVER_MCP_CREDENTIAL_TTL_DAYS:90}
-      retry-window-seconds: ${QUERYWEAVER_MCP_RETRY_WINDOW_SECONDS:300}
-  runtime-role: ${QUERYWEAVER_RUNTIME_ROLE:application}
+      public-base-url: ${SEMEVOSQL_MCP_PUBLIC_BASE_URL:http://localhost:8065}
+      endpoint-path: ${SEMEVOSQL_MCP_ENDPOINT:/mcp}
+      credential-ttl-days: ${SEMEVOSQL_MCP_CREDENTIAL_TTL_DAYS:90}
+      retry-window-seconds: ${SEMEVOSQL_MCP_RETRY_WINDOW_SECONDS:300}
+  runtime-role: ${SEMEVOSQL_RUNTIME_ROLE:application}
   security:
-    enabled: ${QUERYWEAVER_SECURITY_ENABLED:false}
-    principal-claim: ${QUERYWEAVER_SECURITY_PRINCIPAL_CLAIM:sub}
-    role-claim: ${QUERYWEAVER_SECURITY_ROLE_CLAIM:roles}
-    authority-prefix: ROLE_QUERYWEAVER_
+    enabled: ${SEMEVOSQL_SECURITY_ENABLED:false}
+    principal-claim: ${SEMEVOSQL_SECURITY_PRINCIPAL_CLAIM:sub}
+    role-claim: ${SEMEVOSQL_SECURITY_ROLE_CLAIM:roles}
+    authority-prefix: ROLE_SEMEVOSQL_
   secrets:
-    encryption-key: ${QUERYWEAVER_SECRET_ENCRYPTION_KEY:}
-    migrate-plaintext: ${QUERYWEAVER_MIGRATE_PLAINTEXT_SECRETS:true}
+    encryption-key: ${SEMEVOSQL_SECRET_ENCRYPTION_KEY:}
+    migrate-plaintext: ${SEMEVOSQL_MIGRATE_PLAINTEXT_SECRETS:true}
   operator:
-    development-mode: ${QUERYWEAVER_OPERATOR_DEVELOPMENT_MODE:false}
-    default-operator: ${QUERYWEAVER_OPERATOR_DEFAULT_OPERATOR:local-operator}
-    default-role: ${QUERYWEAVER_OPERATOR_DEFAULT_ROLE:ADMIN}
+    development-mode: ${SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE:false}
+    default-operator: ${SEMEVOSQL_OPERATOR_DEFAULT_OPERATOR:local-operator}
+    default-role: ${SEMEVOSQL_OPERATOR_DEFAULT_ROLE:ADMIN}
   model-client:
-    connection-max-retries: ${QUERYWEAVER_MODEL_CONNECTION_MAX_RETRIES:3}
-    connection-initial-backoff: ${QUERYWEAVER_MODEL_CONNECTION_INITIAL_BACKOFF:250ms}
-    connection-max-backoff: ${QUERYWEAVER_MODEL_CONNECTION_MAX_BACKOFF:2s}
-    connection-retry-jitter: ${QUERYWEAVER_MODEL_CONNECTION_RETRY_JITTER:0.2}
-    request-timeout: ${QUERYWEAVER_MODEL_REQUEST_TIMEOUT:60s}
+    connection-max-retries: ${SEMEVOSQL_MODEL_CONNECTION_MAX_RETRIES:3}
+    connection-initial-backoff: ${SEMEVOSQL_MODEL_CONNECTION_INITIAL_BACKOFF:250ms}
+    connection-max-backoff: ${SEMEVOSQL_MODEL_CONNECTION_MAX_BACKOFF:2s}
+    connection-retry-jitter: ${SEMEVOSQL_MODEL_CONNECTION_RETRY_JITTER:0.2}
+    request-timeout: ${SEMEVOSQL_MODEL_REQUEST_TIMEOUT:60s}
   llm-service-type: stream
   code-executor:
-    code-pool-executor: ${QUERYWEAVER_CODE_EXECUTOR:docker}
-    remote-url: ${QUERYWEAVER_EXECUTION_REMOTE_URL:}
-    internal-token: ${QUERYWEAVER_EXECUTION_INTERNAL_TOKEN:}
-    max-code-bytes: ${QUERYWEAVER_EXECUTION_MAX_CODE_BYTES:1048576}
-    max-input-bytes: ${QUERYWEAVER_EXECUTION_MAX_INPUT_BYTES:5242880}
-    max-requirement-bytes: ${QUERYWEAVER_EXECUTION_MAX_REQUIREMENT_BYTES:65536}
-    image-name: ${QUERYWEAVER_EXECUTION_IMAGE:continuumio/anaconda3:latest}
-    network-mode: ${QUERYWEAVER_EXECUTION_NETWORK_MODE:none}
-    limit-memory: ${QUERYWEAVER_EXECUTION_MEMORY_MB:500}
-    cpu-core: ${QUERYWEAVER_EXECUTION_CPU_CORES:1}
-    pids-limit: ${QUERYWEAVER_EXECUTION_PIDS_LIMIT:64}
-    run-as-user: ${QUERYWEAVER_EXECUTION_RUN_AS_USER:65534:65534}
-    read-only-root-filesystem: ${QUERYWEAVER_EXECUTION_READ_ONLY_ROOT:true}
-    tmpfs-size-mb: ${QUERYWEAVER_EXECUTION_TMPFS_SIZE_MB:128}
-    code-timeout: ${QUERYWEAVER_EXECUTION_CODE_TIMEOUT:60s}
+    code-pool-executor: ${SEMEVOSQL_CODE_EXECUTOR:docker}
+    remote-url: ${SEMEVOSQL_EXECUTION_REMOTE_URL:}
+    internal-token: ${SEMEVOSQL_EXECUTION_INTERNAL_TOKEN:}
+    max-code-bytes: ${SEMEVOSQL_EXECUTION_MAX_CODE_BYTES:1048576}
+    max-input-bytes: ${SEMEVOSQL_EXECUTION_MAX_INPUT_BYTES:5242880}
+    max-requirement-bytes: ${SEMEVOSQL_EXECUTION_MAX_REQUIREMENT_BYTES:65536}
+    image-name: ${SEMEVOSQL_EXECUTION_IMAGE:continuumio/anaconda3:latest}
+    network-mode: ${SEMEVOSQL_EXECUTION_NETWORK_MODE:none}
+    limit-memory: ${SEMEVOSQL_EXECUTION_MEMORY_MB:500}
+    cpu-core: ${SEMEVOSQL_EXECUTION_CPU_CORES:1}
+    pids-limit: ${SEMEVOSQL_EXECUTION_PIDS_LIMIT:64}
+    run-as-user: ${SEMEVOSQL_EXECUTION_RUN_AS_USER:65534:65534}
+    read-only-root-filesystem: ${SEMEVOSQL_EXECUTION_READ_ONLY_ROOT:true}
+    tmpfs-size-mb: ${SEMEVOSQL_EXECUTION_TMPFS_SIZE_MB:128}
+    code-timeout: ${SEMEVOSQL_EXECUTION_CODE_TIMEOUT:60s}
     python-max-tries-count: 5
   file:
-    type: ${QUERYWEAVER_FILE_TYPE:local}
-    path-prefix: queryweaver
-    path: ${QUERYWEAVER_FILE_PATH:uploads}
+    type: ${SEMEVOSQL_FILE_TYPE:local}
+    path-prefix: semevosql
+    path: ${SEMEVOSQL_FILE_PATH:uploads}
     image-size: 2097152
     oss:
-      access-key-id: ${QUERYWEAVER_OSS_ACCESS_KEY_ID:}
-      access-key-secret: ${QUERYWEAVER_OSS_ACCESS_KEY_SECRET:}
-      endpoint: ${QUERYWEAVER_OSS_ENDPOINT:}
-      bucket-name: ${QUERYWEAVER_OSS_BUCKET_NAME:}
-      custom-domain: ${QUERYWEAVER_OSS_CUSTOM_DOMAIN:}
+      access-key-id: ${SEMEVOSQL_OSS_ACCESS_KEY_ID:}
+      access-key-secret: ${SEMEVOSQL_OSS_ACCESS_KEY_SECRET:}
+      endpoint: ${SEMEVOSQL_OSS_ENDPOINT:}
+      bucket-name: ${SEMEVOSQL_OSS_BUCKET_NAME:}
+      custom-domain: ${SEMEVOSQL_OSS_CUSTOM_DOMAIN:}
   max-sql-retry-count: 10
   sql-execution:
     max-rows: 1000
@@ -97,40 +97,40 @@ queryweaver:
     max-time-range-days: 366
     reject-full-table-scan: true
   langfuse:
-    enabled: ${QUERYWEAVER_LANGFUSE_ENABLED:false}
-    host: ${QUERYWEAVER_LANGFUSE_HOST:}
-    public-key: ${QUERYWEAVER_LANGFUSE_PUBLIC_KEY:}
-    secret-key: ${QUERYWEAVER_LANGFUSE_SECRET_KEY:}
+    enabled: ${SEMEVOSQL_LANGFUSE_ENABLED:false}
+    host: ${SEMEVOSQL_LANGFUSE_HOST:}
+    public-key: ${SEMEVOSQL_LANGFUSE_PUBLIC_KEY:}
+    secret-key: ${SEMEVOSQL_LANGFUSE_SECRET_KEY:}
   context:
-    recent-turn-count: ${QUERYWEAVER_CONTEXT_RECENT_TURNS:6}
-    compression-enabled: ${QUERYWEAVER_CONTEXT_COMPRESSION_ENABLED:true}
-    compression-trigger-ratio: ${QUERYWEAVER_CONTEXT_COMPRESSION_TRIGGER_RATIO:0.70}
-    minimum-compressible-turns: ${QUERYWEAVER_CONTEXT_MINIMUM_COMPRESSIBLE_TURNS:4}
-    compression-max-batch-turns: ${QUERYWEAVER_CONTEXT_COMPRESSION_MAX_BATCH_TURNS:20}
-    compressed-summary-max-chars: ${QUERYWEAVER_CONTEXT_COMPRESSED_SUMMARY_MAX_CHARS:300}
-    compressed-correction-max-count: ${QUERYWEAVER_CONTEXT_COMPRESSED_CORRECTION_MAX_COUNT:5}
-    compressed-question-max-count: ${QUERYWEAVER_CONTEXT_COMPRESSED_QUESTION_MAX_COUNT:3}
-    retrieval-candidate-count: ${QUERYWEAVER_CONTEXT_RETRIEVAL_CANDIDATES:50}
-    retrieved-turn-count: ${QUERYWEAVER_CONTEXT_RETRIEVED_TURNS:3}
-    min-relevance-score: ${QUERYWEAVER_CONTEXT_MIN_RELEVANCE:0.08}
-    explicit-reference-boost: ${QUERYWEAVER_CONTEXT_REFERENCE_BOOST:0.35}
-    query-enhance-max-tokens: ${QUERYWEAVER_CONTEXT_ENHANCE_MAX_TOKENS:3000}
-    feasibility-max-tokens: ${QUERYWEAVER_CONTEXT_FEASIBILITY_MAX_TOKENS:2200}
-    general-max-tokens: ${QUERYWEAVER_CONTEXT_GENERAL_MAX_TOKENS:3000}
-    max-result-preview-rows: ${QUERYWEAVER_CONTEXT_RESULT_PREVIEW_ROWS:3}
-    max-result-summary-tokens: ${QUERYWEAVER_CONTEXT_RESULT_MAX_TOKENS:600}
-    fallback-planner-max-tokens: ${QUERYWEAVER_CONTEXT_FALLBACK_PLAN_MAX_TOKENS:500}
+    recent-turn-count: ${SEMEVOSQL_CONTEXT_RECENT_TURNS:6}
+    compression-enabled: ${SEMEVOSQL_CONTEXT_COMPRESSION_ENABLED:true}
+    compression-trigger-ratio: ${SEMEVOSQL_CONTEXT_COMPRESSION_TRIGGER_RATIO:0.70}
+    minimum-compressible-turns: ${SEMEVOSQL_CONTEXT_MINIMUM_COMPRESSIBLE_TURNS:4}
+    compression-max-batch-turns: ${SEMEVOSQL_CONTEXT_COMPRESSION_MAX_BATCH_TURNS:20}
+    compressed-summary-max-chars: ${SEMEVOSQL_CONTEXT_COMPRESSED_SUMMARY_MAX_CHARS:300}
+    compressed-correction-max-count: ${SEMEVOSQL_CONTEXT_COMPRESSED_CORRECTION_MAX_COUNT:5}
+    compressed-question-max-count: ${SEMEVOSQL_CONTEXT_COMPRESSED_QUESTION_MAX_COUNT:3}
+    retrieval-candidate-count: ${SEMEVOSQL_CONTEXT_RETRIEVAL_CANDIDATES:50}
+    retrieved-turn-count: ${SEMEVOSQL_CONTEXT_RETRIEVED_TURNS:3}
+    min-relevance-score: ${SEMEVOSQL_CONTEXT_MIN_RELEVANCE:0.08}
+    explicit-reference-boost: ${SEMEVOSQL_CONTEXT_REFERENCE_BOOST:0.35}
+    query-enhance-max-tokens: ${SEMEVOSQL_CONTEXT_ENHANCE_MAX_TOKENS:3000}
+    feasibility-max-tokens: ${SEMEVOSQL_CONTEXT_FEASIBILITY_MAX_TOKENS:2200}
+    general-max-tokens: ${SEMEVOSQL_CONTEXT_GENERAL_MAX_TOKENS:3000}
+    max-result-preview-rows: ${SEMEVOSQL_CONTEXT_RESULT_PREVIEW_ROWS:3}
+    max-result-summary-tokens: ${SEMEVOSQL_CONTEXT_RESULT_MAX_TOKENS:600}
+    fallback-planner-max-tokens: ${SEMEVOSQL_CONTEXT_FALLBACK_PLAN_MAX_TOKENS:500}
   run:
     recovery-scan-ms: 10000
     lease-renew-ms: 10000
   retention:
-    enabled: ${QUERYWEAVER_RETENTION_ENABLED:false}
-    dry-run: ${QUERYWEAVER_RETENTION_DRY_RUN:true}
-    terminal-run-days: ${QUERYWEAVER_RETENTION_TERMINAL_RUN_DAYS:90}
-    batch-size: ${QUERYWEAVER_RETENTION_BATCH_SIZE:100}
-    batch-audit-days: ${QUERYWEAVER_RETENTION_BATCH_AUDIT_DAYS:365}
-    scan-delay-ms: ${QUERYWEAVER_RETENTION_SCAN_DELAY_MS:3600000}
-    lease-duration-seconds: ${QUERYWEAVER_RETENTION_LEASE_DURATION_SECONDS:600}
+    enabled: ${SEMEVOSQL_RETENTION_ENABLED:false}
+    dry-run: ${SEMEVOSQL_RETENTION_DRY_RUN:true}
+    terminal-run-days: ${SEMEVOSQL_RETENTION_TERMINAL_RUN_DAYS:90}
+    batch-size: ${SEMEVOSQL_RETENTION_BATCH_SIZE:100}
+    batch-audit-days: ${SEMEVOSQL_RETENTION_BATCH_AUDIT_DAYS:365}
+    scan-delay-ms: ${SEMEVOSQL_RETENTION_SCAN_DELAY_MS:3600000}
+    lease-duration-seconds: ${SEMEVOSQL_RETENTION_LEASE_DURATION_SECONDS:600}
   concurrency:
     interactive-query:
       max-concurrent: 20
@@ -163,17 +163,17 @@ queryweaver:
 
 spring:
   datasource:
-    url: ${QUERYWEAVER_DATASOURCE_URL}
-    username: ${QUERYWEAVER_DATASOURCE_USERNAME}
-    password: ${QUERYWEAVER_DATASOURCE_PASSWORD:}
-    driver-class-name: ${QUERYWEAVER_DATASOURCE_DRIVER:org.postgresql.Driver}
+    url: ${SEMEVOSQL_DATASOURCE_URL}
+    username: ${SEMEVOSQL_DATASOURCE_USERNAME}
+    password: ${SEMEVOSQL_DATASOURCE_PASSWORD:}
+    driver-class-name: ${SEMEVOSQL_DATASOURCE_DRIVER:org.postgresql.Driver}
     type: com.alibaba.druid.pool.DruidDataSource
     validation-query: SELECT 1
     test-while-idle: true
     test-on-borrow: false
     test-on-return: false
   flyway:
-    enabled: ${QUERYWEAVER_FLYWAY_ENABLED:true}
+    enabled: ${SEMEVOSQL_FLYWAY_ENABLED:true}
     locations: classpath:db/migration/{vendor}
     baseline-on-migrate: true
     baseline-version: 1
@@ -185,8 +185,8 @@ spring:
   ai:
     mcp:
       server:
-        enabled: ${QUERYWEAVER_MCP_ENABLED:true}
-        name: queryweaver-project-data
+        enabled: ${SEMEVOSQL_MCP_ENABLED:true}
+        name: semevosql-project-data
         version: 1.0.0
         protocol: STREAMABLE
         type: ASYNC
@@ -199,9 +199,9 @@ spring:
           prompt: false
           completion: false
         streamable-http:
-          mcp-endpoint: ${QUERYWEAVER_MCP_ENDPOINT:/mcp}
+          mcp-endpoint: ${SEMEVOSQL_MCP_ENDPOINT:/mcp}
   codec:
-    max-in-memory-size: ${QUERYWEAVER_HTTP_MAX_IN_MEMORY_SIZE:12MB}
+    max-in-memory-size: ${SEMEVOSQL_HTTP_MAX_IN_MEMORY_SIZE:12MB}
   webflux:
     multipart:
       max-file-size: 10MB
@@ -215,5 +215,5 @@ mybatis:
 
 logging:
   level:
-    cn.lgs.queryweaver: info
+    cn.lgs.semevosql: info
     org.springframework.jdbc: info
