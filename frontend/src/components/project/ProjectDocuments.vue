@@ -275,7 +275,7 @@
   import { computed, onMounted, reactive, ref, watch } from 'vue';
   import { ElMessage, ElMessageBox, type UploadFile, type UploadRawFile } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type MaterialCategory,
     type MaterialLifecycle,
     type ProjectDatasourceBinding,
@@ -284,7 +284,7 @@
     type ProjectDocumentProvenance,
     type ProjectDocumentType,
     type SemanticProjectVersion,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -375,8 +375,8 @@
     loading.value = true;
     try {
       [documents.value, datasourceBindings.value] = await Promise.all([
-        queryWeaverService.projectDocuments(props.projectId, selectedVersionId.value),
-        queryWeaverService.projectDatasourceBindings(props.projectId, selectedVersionId.value),
+        semEvoSQLService.projectDocuments(props.projectId, selectedVersionId.value),
+        semEvoSQLService.projectDatasourceBindings(props.projectId, selectedVersionId.value),
       ]);
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '项目文档加载失败');
@@ -428,7 +428,7 @@
       for (const material of selectedMaterials.value) {
         const { file, category } = material;
         if (file.name.toLowerCase().endsWith('.zip')) {
-          const result = await queryWeaverService.uploadProjectBundle(
+          const result = await semEvoSQLService.uploadProjectBundle(
             props.projectId,
             selectedVersionId.value,
             {
@@ -444,7 +444,7 @@
           duplicates += result.duplicateCount;
           continue;
         }
-        const result = await queryWeaverService.uploadProjectDocument(
+        const result = await semEvoSQLService.uploadProjectDocument(
           props.projectId,
           selectedVersionId.value,
           {
@@ -478,7 +478,7 @@
     attemptDialogVisible.value = true;
     attemptsLoading.value = true;
     try {
-      attempts.value = await queryWeaverService.projectDocumentAttempts(
+      attempts.value = await semEvoSQLService.projectDocumentAttempts(
         props.projectId,
         selectedVersionId.value,
         document.id,
@@ -496,7 +496,7 @@
     provenanceDialogVisible.value = true;
     provenanceLoading.value = true;
     try {
-      provenance.value = await queryWeaverService.projectDocumentProvenance(
+      provenance.value = await semEvoSQLService.projectDocumentProvenance(
         props.projectId,
         selectedVersionId.value,
         document.id,
@@ -516,7 +516,7 @@
         '重解析项目文档',
         { type: 'warning' },
       );
-      await queryWeaverService.reparseProjectDocument(
+      await semEvoSQLService.reparseProjectDocument(
         props.projectId,
         selectedVersionId.value,
         document.id,
@@ -538,7 +538,7 @@
         '删除项目文档',
         { type: 'warning' },
       );
-      await queryWeaverService.deleteProjectDocument(
+      await semEvoSQLService.deleteProjectDocument(
         props.projectId,
         selectedVersionId.value,
         document.id,

@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0.
  */
 
-import type { ProjectHealth } from './queryweaver';
+import type { ProjectHealth } from './semevosql';
 
 type ProjectLifecycleState = 'done' | 'current' | 'pending';
 type ProjectLifecycleStageId =

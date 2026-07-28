@@ -78,7 +78,7 @@
 
         <el-empty
           v-if="!loading && !listError && projects.length === 0"
-          description="还没有数据项目。连接数据库后，QueryWeaver 会自动理解结构并只追问必要的业务规则。"
+          description="还没有数据项目。连接数据库后，SemEvoSQL 会自动理解结构并只追问必要的业务规则。"
         >
           <el-button
             v-if="canCreateProject"
@@ -192,11 +192,11 @@
   import { platformContext } from '@/services/platformContext';
   import { projectListAction } from '@/services/projectCapabilities.mjs';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type ProjectHealth,
     type ProjectHealthSummary,
     type SemanticProject,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const router = useRouter();
   const projects = ref<SemanticProject[]>([]);
@@ -268,8 +268,8 @@
     listError.value = '';
     try {
       const [nextProjects, summaries, operator] = await Promise.all([
-        queryWeaverService.listProjects(),
-        queryWeaverService.projectHealthSummaries(),
+        semEvoSQLService.listProjects(),
+        semEvoSQLService.projectHealthSummaries(),
         platformContext.operator(),
       ]);
       projects.value = nextProjects;
@@ -309,7 +309,7 @@
   const startChat = (projectId: number) => router.push({ path: '/chat', query: { projectId } });
   const retryProjectHealth = async (projectId: number) => {
     try {
-      const nextHealth = await queryWeaverService.projectHealth(projectId);
+      const nextHealth = await semEvoSQLService.projectHealth(projectId);
       healthByProject.value = {
         ...healthByProject.value,
         [projectId]: summaryFromHealth(nextHealth, healthByProject.value[projectId]),

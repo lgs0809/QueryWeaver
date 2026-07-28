@@ -16,7 +16,7 @@ performance/
 # image only needs the packaged application jar.
 target/
 backend/target/*
-!backend/target/queryweaver.jar
+!backend/target/semevosql.jar
 
 # Frontend Dockerfile consumes the production bundle created by npm run build.
 # Keep frontend/dist in the context, but exclude transient caches.

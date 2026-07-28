@@ -7,7 +7,7 @@
     <template v-if="!hasProject">
       <div class="welcome-icon"><i class="bi bi-database-add"></i></div>
       <h2>先创建第一个数据项目</h2>
-      <p>连接业务数据库后，QueryWeaver 会自动理解表结构，并只追问无法安全推断的关键业务规则。</p>
+      <p>连接业务数据库后，SemEvoSQL 会自动理解表结构，并只追问无法安全推断的关键业务规则。</p>
       <el-button type="primary" size="large" @click="emit('create-project')">
         创建数据项目
       </el-button>
@@ -17,7 +17,7 @@
       <div class="welcome-icon"><i class="bi bi-stars"></i></div>
       <h2>向「{{ projectName }}」提问</h2>
       <p>
-        直接用业务语言提问。QueryWeaver
+        直接用业务语言提问。SemEvoSQL
         会基于当前已发布的业务模型理解口径、选择数据并返回可追溯结果。
       </p>
 

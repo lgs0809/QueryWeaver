@@ -627,7 +627,7 @@
     serializeRunCursor,
   } from '@/services/runRecoveryState.mjs';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type ProjectAccessView,
     type ProjectConversation,
     type ProjectHealth,
@@ -644,7 +644,7 @@
     type SemanticPreferenceUpgradePrompt,
     type SemanticProject,
     type SemanticProjectVersion,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const QueryDiagnosisWorkbench = defineAsyncComponent(
     () => import('@/components/chat/QueryDiagnosisWorkbench.vue'),
@@ -665,7 +665,7 @@
     error?: string;
   }
 
-  const RUN_CURSOR_STORAGE_KEY = 'queryweaver:project-chat:active-run';
+  const RUN_CURSOR_STORAGE_KEY = 'semevosql:project-chat:active-run';
   const TERMINAL_STATUSES = ['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED'];
 
   const route = useRoute();
@@ -853,7 +853,7 @@
       void refreshRun(event.runId, true);
     },
     subscribe: (runId, afterSequence, onEvent, onError, onOpen) =>
-      queryWeaverService.subscribeRun(runId, afterSequence, onEvent, onError, onOpen),
+      semEvoSQLService.subscribeRun(runId, afterSequence, onEvent, onError, onOpen),
   });
   const transportNotice = runTransport.notice;
   const showTransportNotice = computed(() =>
@@ -907,7 +907,7 @@
     }
     clarificationLoading.value = true;
     try {
-      clarification.value = await queryWeaverService.clarification(runId);
+      clarification.value = await semEvoSQLService.clarification(runId);
       selectedClarificationOption.value = clarification.value.recommendedOption || '';
       selectedClarificationScope.value = clarification.value.selectedScope || 'QUERY';
       clarificationCustomAnswer.value = '';
@@ -932,7 +932,7 @@
   const replayMissingEvents = async (runId: string, afterSequence: number) => {
     let cursor = Math.max(0, afterSequence);
     for (let page = 0; page < 20; page += 1) {
-      const batch = await queryWeaverService.runEvents(runId, cursor, 500);
+      const batch = await semEvoSQLService.runEvents(runId, cursor, 500);
       mergeRunEvents(batch);
       if (batch.length < 500) return;
       const nextCursor = nextReplayCursor(batch, cursor);
@@ -944,12 +944,12 @@
   const syncMessage = async (runId: string, quiet = false) => {
     if (!selectedProjectId.value || !activeConversationId.value) return;
     try {
-      await queryWeaverService.syncProjectMessage(
+      await semEvoSQLService.syncProjectMessage(
         selectedProjectId.value,
         activeConversationId.value,
         runId,
       );
-      const view = await queryWeaverService.projectConversation(
+      const view = await semEvoSQLService.projectConversation(
         selectedProjectId.value,
         activeConversationId.value,
       );
@@ -964,7 +964,7 @@
   const refreshRun = async (runId: string, quiet = false) => {
     if (!runTransport.isFollowing(runId)) return;
     try {
-      activeRun.value = await queryWeaverService.run(runId);
+      activeRun.value = await semEvoSQLService.run(runId);
       await loadClarification(runId);
       if (terminalRun.value) {
         runTransport.stop(false);
@@ -986,7 +986,7 @@
     welcomeExamples.value = [];
     if (!selectedProjectId.value || !activeVersion.value) return;
     try {
-      const catalog = await queryWeaverService.semanticCatalog(
+      const catalog = await semEvoSQLService.semanticCatalog(
         selectedProjectId.value,
         activeVersion.value.id,
       );
@@ -1017,7 +1017,7 @@
       return;
     }
     try {
-      selectedProjectHealth.value = await queryWeaverService.projectHealth(selectedProjectId.value);
+      selectedProjectHealth.value = await semEvoSQLService.projectHealth(selectedProjectId.value);
     } catch (error) {
       selectedProjectHealth.value = undefined;
       selectedProjectHealthError.value =
@@ -1045,10 +1045,10 @@
       const healthPromise = reloadSelectedProjectHealth();
       [selectedProject.value, selectedProjectAccess.value, versions.value, conversations.value] =
         await Promise.all([
-          queryWeaverService.project(selectedProjectId.value),
-          queryWeaverService.projectAccess(selectedProjectId.value),
-          queryWeaverService.projectVersions(selectedProjectId.value),
-          queryWeaverService.projectConversations(selectedProjectId.value),
+          semEvoSQLService.project(selectedProjectId.value),
+          semEvoSQLService.projectAccess(selectedProjectId.value),
+          semEvoSQLService.projectVersions(selectedProjectId.value),
+          semEvoSQLService.projectConversations(selectedProjectId.value),
         ]);
       await healthPromise;
       await loadWelcomeExamples();
@@ -1081,7 +1081,7 @@
     }
     if (!selectedProjectId.value || !canCreateConversation.value) return;
     try {
-      const created = await queryWeaverService.createProjectConversation(
+      const created = await semEvoSQLService.createProjectConversation(
         selectedProjectId.value,
         '新对话',
       );
@@ -1110,7 +1110,7 @@
     activeRun.value = undefined;
     messageLoading.value = true;
     try {
-      const view = await queryWeaverService.projectConversation(
+      const view = await semEvoSQLService.projectConversation(
         selectedProjectId.value,
         conversationId,
       );
@@ -1143,7 +1143,7 @@
     const content = message.value.trim();
     sending.value = true;
     try {
-      await queryWeaverService.sendProjectMessage(
+      await semEvoSQLService.sendProjectMessage(
         selectedProjectId.value,
         activeConversationId.value,
         content,
@@ -1164,7 +1164,7 @@
     runEvents.value = [];
     lastSequence.value = Math.max(0, restoredSequence);
     try {
-      activeRun.value = await queryWeaverService.run(runId);
+      activeRun.value = await semEvoSQLService.run(runId);
       await replayMissingEvents(runId, 0);
       await loadClarification(runId);
       persistRunCursor();
@@ -1206,10 +1206,10 @@
   ) => {
     preferenceActionId.value = preferenceId;
     try {
-      if (action === 'PROMOTE') await queryWeaverService.promoteSemanticPreference(preferenceId);
+      if (action === 'PROMOTE') await semEvoSQLService.promoteSemanticPreference(preferenceId);
       else if (action === 'CONTINUE')
-        await queryWeaverService.continueSemanticPreference(preferenceId);
-      else await queryWeaverService.dismissSemanticPreferenceUpgrade(preferenceId);
+        await semEvoSQLService.continueSemanticPreference(preferenceId);
+      else await semEvoSQLService.dismissSemanticPreferenceUpgrade(preferenceId);
       hiddenUpgradePromptIds.value = new Set([...hiddenUpgradePromptIds.value, preferenceId]);
       ElMessage.success(
         action === 'PROMOTE'
@@ -1242,7 +1242,7 @@
     if (existing?.loading || existing?.artifact) return;
     artifactViews.value[item.messageId] = { columns: [], rows: [], loading: true };
     try {
-      const result = await queryWeaverService.resultArtifact(item.runId, artifactId);
+      const result = await semEvoSQLService.resultArtifact(item.runId, artifactId);
       artifactViews.value[item.messageId] = {
         artifact: result,
         columns: JSON.parse(result.schemaJson) as string[],
@@ -1270,8 +1270,8 @@
     detailsEvents.value = [];
     try {
       const [run, events] = await Promise.all([
-        queryWeaverService.run(runId),
-        queryWeaverService.runEvents(runId, 0, 500),
+        semEvoSQLService.run(runId),
+        semEvoSQLService.runEvents(runId, 0, 500),
       ]);
       detailsRun.value = run;
       detailsEvents.value = events;
@@ -1330,7 +1330,7 @@
       : 'QUERY';
     answeringClarification.value = true;
     try {
-      await queryWeaverService.answerClarification(
+      await semEvoSQLService.answerClarification(
         runId,
         clarification.value,
         selectedOption,
@@ -1341,8 +1341,8 @@
       clearClarification();
       activeRun.value =
         selectedOption === 'CANCEL'
-          ? await queryWeaverService.run(runId)
-          : await queryWeaverService.resumeRun(runId);
+          ? await semEvoSQLService.run(runId)
+          : await semEvoSQLService.resumeRun(runId);
       await followRun(runId);
       await syncMessage(runId);
       const scopeText =
@@ -1369,7 +1369,7 @@
     const runId = activeRun.value.runId;
     submittingHumanReview.value = true;
     try {
-      activeRun.value = await queryWeaverService.submitProjectHumanReview(
+      activeRun.value = await semEvoSQLService.submitProjectHumanReview(
         selectedProjectId.value,
         activeConversationId.value,
         runId,
@@ -1408,7 +1408,7 @@
   const startCorrection = async (runId: string) => {
     try {
       const run =
-        activeRun.value?.runId === runId ? activeRun.value : await queryWeaverService.run(runId);
+        activeRun.value?.runId === runId ? activeRun.value : await semEvoSQLService.run(runId);
       if (run.status !== 'SUCCEEDED' || !run.episodeId) {
         ElMessage.warning('这条答案当前不能提交纠错');
         return;
@@ -1461,7 +1461,7 @@
     }
     correctionOptionsLoading.value = true;
     try {
-      const result = await queryWeaverService.correctionOptions(
+      const result = await semEvoSQLService.correctionOptions(
         correctionRun.value.runId,
         assetType,
       );
@@ -1481,7 +1481,7 @@
     submittingAnswerFeedback.value = true;
     try {
       const detail = answerFeedbackComment.value.trim();
-      await queryWeaverService.submitEpisodeFeedback(
+      await semEvoSQLService.submitEpisodeFeedback(
         episodeId,
         currentOperatorId.value,
         1,
@@ -1498,7 +1498,7 @@
         }
         const rawExpression = correctionRawExpression.value.trim();
         const selectedScope = correctionScope.value;
-        const result = await queryWeaverService.correctBinding(
+        const result = await semEvoSQLService.correctBinding(
           selectedProjectId.value,
           activeConversationId.value,
           runId,
@@ -1525,7 +1525,7 @@
             correctionCategory.value,
           )
         ) {
-          await queryWeaverService.proposeDefinitionCorrection(
+          await semEvoSQLService.proposeDefinitionCorrection(
             selectedProjectId.value,
             activeConversationId.value,
             runId,
@@ -1565,11 +1565,11 @@
     submittingAnswerFeedback.value = true;
     try {
       const run =
-        activeRun.value?.runId === runId ? activeRun.value : await queryWeaverService.run(runId);
+        activeRun.value?.runId === runId ? activeRun.value : await semEvoSQLService.run(runId);
       if (run.status !== 'SUCCEEDED' || !run.episodeId) {
         throw new Error('这条答案当前不能提交反馈');
       }
-      await queryWeaverService.submitEpisodeFeedback(
+      await semEvoSQLService.submitEpisodeFeedback(
         run.episodeId,
         currentOperatorId.value,
         adopted ? 5 : 1,
@@ -1592,7 +1592,7 @@
     if (!activeRun.value) return;
     const runId = activeRun.value.runId;
     try {
-      activeRun.value = await queryWeaverService.resumeRun(runId);
+      activeRun.value = await semEvoSQLService.resumeRun(runId);
       await followRun(runId);
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '查询恢复失败');
@@ -1603,7 +1603,7 @@
     if (!activeRun.value) return;
     const runId = activeRun.value.runId;
     try {
-      activeRun.value = await queryWeaverService.cancelRun(runId);
+      activeRun.value = await semEvoSQLService.cancelRun(runId);
       clearClarification();
       humanReviewFeedback.value = '';
       await followRun(runId);
@@ -1638,7 +1638,7 @@
     try {
       const [operator, projectList] = await Promise.all([
         platformContext.operator(),
-        queryWeaverService.listProjects(),
+        semEvoSQLService.listProjects(),
       ]);
       currentOperatorId.value = operator.operator;
       currentOperatorRole.value = operator.role;

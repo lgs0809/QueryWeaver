@@ -436,13 +436,13 @@
   import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
   import { ElMessage, ElMessageBox } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type SemanticEvolutionCandidate,
     type SemanticPatch,
     type SemanticPatchOperation,
     type SemanticPatchValidationReport,
     type SemanticReplayRun,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -673,7 +673,7 @@
   const load = async () => {
     loading.value = true;
     try {
-      candidates.value = await queryWeaverService.semanticEvolutionCandidates(
+      candidates.value = await semEvoSQLService.semanticEvolutionCandidates(
         props.projectId,
         status.value,
       );
@@ -694,15 +694,15 @@
   const loadReplayGovernance = async (candidateId: string) => {
     [automatedReplayResults.value, manualAttestations.value, releaseDecisions.value] =
       await Promise.all([
-        queryWeaverService.semanticEvolutionReplayResults(candidateId),
-        queryWeaverService.semanticEvolutionAttestations(candidateId),
-        queryWeaverService.semanticEvolutionReleaseDecisions(candidateId),
+        semEvoSQLService.semanticEvolutionReplayResults(candidateId),
+        semEvoSQLService.semanticEvolutionAttestations(candidateId),
+        semEvoSQLService.semanticEvolutionReleaseDecisions(candidateId),
       ]);
   };
   const open = async (candidate: SemanticEvolutionCandidate) => {
     drawerVisible.value = true;
     try {
-      selected.value = await queryWeaverService.semanticEvolutionCandidate(candidate.id);
+      selected.value = await semEvoSQLService.semanticEvolutionCandidate(candidate.id);
       hydratePatch(selected.value);
       await Promise.all([refreshReplay(candidate.id), loadReplayGovernance(candidate.id)]);
     } catch (error) {
@@ -711,7 +711,7 @@
   };
   const reloadSelected = async () => {
     if (!selected.value) return;
-    selected.value = await queryWeaverService.semanticEvolutionCandidate(selected.value.id);
+    selected.value = await semEvoSQLService.semanticEvolutionCandidate(selected.value.id);
     hydratePatch(selected.value);
     await loadReplayGovernance(selected.value.id);
   };
@@ -726,8 +726,8 @@
       return false;
     }
     preflight.value = isPolicyCandidate(selected.value!)
-      ? await queryWeaverService.preflightMultiSourcePolicyPatch(selected.value!.id, patch.value)
-      : await queryWeaverService.preflightSemanticEvolutionPatch(selected.value!.id, patch.value);
+      ? await semEvoSQLService.preflightMultiSourcePolicyPatch(selected.value!.id, patch.value)
+      : await semEvoSQLService.preflightSemanticEvolutionPatch(selected.value!.id, patch.value);
     if (!preflight.value.valid) ElMessage.error('服务端 Preflight 未通过');
     else ElMessage.success('Preflight 通过');
     return preflight.value.valid;
@@ -737,9 +737,9 @@
     savingPatch.value = true;
     try {
       if (isPolicyCandidate(selected.value)) {
-        await queryWeaverService.updateMultiSourcePolicyPatch(selected.value.id, patch.value);
+        await semEvoSQLService.updateMultiSourcePolicyPatch(selected.value.id, patch.value);
       } else {
-        await queryWeaverService.updateSemanticEvolutionPatch(selected.value.id, patch.value);
+        await semEvoSQLService.updateSemanticEvolutionPatch(selected.value.id, patch.value);
       }
       await reloadSelected();
       await load();
@@ -764,7 +764,7 @@
         });
         comment = response.value;
       } else {
-        selected.value = await queryWeaverService.semanticEvolutionCandidate(candidate.id);
+        selected.value = await semEvoSQLService.semanticEvolutionCandidate(candidate.id);
         hydratePatch(selected.value);
         if (!(await runPreflight())) return;
         await ElMessageBox.confirm(
@@ -773,7 +773,7 @@
           { type: 'warning' },
         );
       }
-      await queryWeaverService.reviewSemanticEvolution(candidate.id, approved, comment);
+      await semEvoSQLService.reviewSemanticEvolution(candidate.id, approved, comment);
       ElMessage.success(approved ? '候选已批准' : '候选已拒绝');
       await load();
     } catch (error) {
@@ -791,7 +791,7 @@
         '创建并应用 Clone Draft',
         { inputValidator: value => Boolean(value.trim()) || '版本号不能为空' },
       );
-      await queryWeaverService.createSemanticEvolutionDraft(candidate.id, response.value.trim());
+      await semEvoSQLService.createSemanticEvolutionDraft(candidate.id, response.value.trim());
       ElMessage.success('Clone Draft 已创建，Patch 已自动原子应用');
       await load();
     } catch (error) {
@@ -800,7 +800,7 @@
   };
   const startReplay = async (candidate: SemanticEvolutionCandidate) => {
     try {
-      const run = await queryWeaverService.replaySemanticEvolution(candidate.id);
+      const run = await semEvoSQLService.replaySemanticEvolution(candidate.id);
       replayRuns.value[candidate.id] = run;
       localStorage.setItem(replayStorageKey(candidate.id), run.replayRunId);
       ElMessage.success(`系统 Replay 已进入后台：${run.replayRunId}`);
@@ -822,7 +822,7 @@
         type: 'warning',
       },
     );
-    replayRuns.value[candidate.id] = await queryWeaverService.cancelSemanticEvolutionReplay(
+    replayRuns.value[candidate.id] = await semEvoSQLService.cancelSemanticEvolutionReplay(
       run.replayRunId,
     );
     ElMessage.success('Replay 取消请求已提交');
@@ -833,7 +833,7 @@
       localStorage.getItem(replayStorageKey(candidateId));
     if (!replayRunId) return;
     try {
-      const run = await queryWeaverService.semanticEvolutionReplayRun(replayRunId);
+      const run = await semEvoSQLService.semanticEvolutionReplayRun(replayRunId);
       replayRuns.value[candidateId] = run;
       if (isReplayTerminal(run.status)) {
         localStorage.removeItem(replayStorageKey(candidateId));
@@ -874,7 +874,7 @@
           inputValidator: value => Boolean(value.trim()) || '必须填写审计摘要',
         },
       );
-      await queryWeaverService.recordSemanticEvolutionReplay(candidate.id, passed, response.value);
+      await semEvoSQLService.recordSemanticEvolutionReplay(candidate.id, passed, response.value);
       ElMessage.success('人工 Attestation 与 Release Decision 已独立登记');
       await Promise.all([load(), loadReplayGovernance(candidate.id)]);
     } catch (error) {
@@ -885,7 +885,7 @@
     recordReplay(candidate, command === 'pass');
   const ready = async (candidate: SemanticEvolutionCandidate) => {
     await action(
-      () => queryWeaverService.readySemanticEvolution(candidate.id),
+      () => semEvoSQLService.readySemanticEvolution(candidate.id),
       '学习建议已提交发布门禁，等待独立发布决定',
     );
   };
@@ -900,7 +900,7 @@
         },
       );
       await action(
-        () => queryWeaverService.staleSemanticEvolution(candidate.id, response.value),
+        () => semEvoSQLService.staleSemanticEvolution(candidate.id, response.value),
         '候选已标记过期',
       );
     } catch (error) {

@@ -6,8 +6,8 @@
  */
 import axios from 'axios';
 
-const operationsBase = '/api/queryweaver/operations';
-const apiBase = '/api/queryweaver';
+const operationsBase = '/api/semevosql/operations';
+const apiBase = '/api/semevosql';
 
 axios.interceptors.response.use(
   response => response,
@@ -35,7 +35,7 @@ export interface OperatorView {
   source: string;
 }
 
-interface QueryWeaverDashboard {
+interface SemEvoSQLDashboard {
   episodes: number;
   successfulEpisodes: number;
   guardRejected: number;
@@ -149,6 +149,13 @@ export interface SemanticProjectVersion {
   projectId: number;
   versionNo: number;
   versionNumber: string;
+  semanticMajor?: number;
+  semanticMinor?: number;
+  semanticPatch?: number;
+  versionLevel?: 'INITIAL' | 'PATCH' | 'MINOR' | 'MAJOR';
+  versionCause?: string;
+  semanticStateHash?: string;
+  corpusRevisionId?: number;
   parentVersionId?: number;
   creationMode: ProjectVersionCreationMode;
   initializationModelId?: number;
@@ -157,6 +164,8 @@ export interface SemanticProjectVersion {
   catalogHash?: string;
   createTime: string;
   publishedTime?: string;
+  activatedTime?: string;
+  deactivatedTime?: string;
 }
 
 export interface ProjectInitializationView {
@@ -1048,6 +1057,94 @@ export interface SemanticEvolutionCandidate {
   }>;
 }
 
+export interface SemanticVersionTimeline {
+  projectId: number;
+  activeVersionId?: number;
+  versions: SemanticProjectVersion[];
+  activationEvents: Array<Record<string, unknown>>;
+}
+
+export interface CorpusRevision {
+  id: number;
+  projectId: number;
+  revisionNo: number;
+  sourceType: string;
+  sourceRef?: string;
+  contentHash?: string;
+  idempotencyKey: string;
+  semanticDiffDetected: boolean;
+  semanticChangeSetId?: string;
+  createdBy: string;
+  createTime: string;
+}
+
+export interface SemanticChangeSet {
+  changeSetId: string;
+  projectId: number;
+  baseSemanticVersionId: number;
+  targetVersionLevel: 'PATCH' | 'MINOR' | 'MAJOR';
+  originType: 'EPISODE' | 'CORPUS' | 'MANUAL' | 'BASELINE_PROMOTION';
+  originRef?: string;
+  rootCause: string;
+  status: string;
+  riskLevel: string;
+  semanticDiffHash?: string;
+  replayRunId?: string;
+  replaySummaryJson?: string;
+  validationSummaryJson?: string;
+  affectedAssetCount: number;
+  materializedVersionId?: number;
+  idempotencyKey: string;
+  revision: number;
+  createdBy: string;
+  createTime: string;
+  updateTime: string;
+  completedTime?: string;
+}
+
+interface SemanticChangeItem {
+  id: number;
+  changeSetId: string;
+  assetType: string;
+  assetKey: string;
+  operation: string;
+  beforeHash?: string;
+  afterHash?: string;
+  patchJson: string;
+  evidenceJson: string;
+}
+
+export interface SemanticChangeSetDetail {
+  changeSet: SemanticChangeSet;
+  items: SemanticChangeItem[];
+  replayResults: Array<Record<string, unknown>>;
+}
+
+export interface EpisodeDiagnosis {
+  episode: Record<string, unknown>;
+  turns: Array<Record<string, unknown>>;
+  attempts: Array<Record<string, unknown>>;
+  signals: Array<Record<string, unknown>>;
+  queryCases: Array<Record<string, unknown>>;
+  changeSets: Array<Record<string, unknown>>;
+}
+
+export interface ProjectSemanticReadiness {
+  projectId: number;
+  queryReady: boolean;
+  activeVersion: {
+    semanticVersionId: number;
+    version: { major: number; minor: number; patch: number };
+    semanticStateHash: string;
+    corpusRevisionId?: number;
+    activatedTime?: string;
+  };
+  knowledgeUpdateInProgress: boolean;
+  knowledgeUpdateCount: number;
+  latestCorpusRevision: Record<string, unknown>;
+  knowledgeUpdates: Array<Record<string, unknown>>;
+}
+
 export interface RuntimeOptimizationCandidate {
   id: string;
   project_id: number;
@@ -1090,7 +1187,7 @@ interface CreateProjectPayload {
   }>;
 }
 
-export const queryWeaverService = {
+export const semEvoSQLService = {
   async currentOperator(): Promise<OperatorView> {
     return (await axios.get(`${apiBase}/operator-context`)).data;
   },
@@ -1422,7 +1519,7 @@ export const queryWeaverService = {
     return (await axios.post(`${apiBase}/projects/${projectId}/versions/${versionId}/activate`))
       .data;
   },
-  async dashboard(projectId: number): Promise<QueryWeaverDashboard> {
+  async dashboard(projectId: number): Promise<SemEvoSQLDashboard> {
     return (await axios.get(`${operationsBase}/projects/${projectId}/dashboard`)).data;
   },
   async episodes(projectId: number) {
@@ -1656,6 +1753,57 @@ export const queryWeaverService = {
         params: { reason },
         headers: governedMutationHeaders(`semantic-stale:${candidateId}`),
       })
+    ).data;
+  },
+  async semanticVersionTimeline(projectId: number): Promise<SemanticVersionTimeline> {
+    return (await axios.get(`${apiBase}/projects/${projectId}/semantic-versions/timeline`)).data;
+  },
+  async corpusRevisions(projectId: number): Promise<CorpusRevision[]> {
+    return (await axios.get(`${apiBase}/projects/${projectId}/corpus-revisions`)).data;
+  },
+  async semanticChangeSets(
+    projectId: number,
+    status?: string,
+    limit = 100,
+  ): Promise<SemanticChangeSet[]> {
+    return (
+      await axios.get(`${apiBase}/projects/${projectId}/semantic-change-sets`, {
+        params: { status: status || undefined, limit },
+      })
+    ).data;
+  },
+  async semanticChangeSet(changeSetId: string): Promise<SemanticChangeSetDetail> {
+    return (await axios.get(`${apiBase}/semantic-change-sets/${changeSetId}`)).data;
+  },
+  async episodeDiagnosis(episodeId: string): Promise<EpisodeDiagnosis> {
+    return (await axios.get(`${apiBase}/episodes/${episodeId}/diagnosis`)).data;
+  },
+  async semanticReadiness(projectId: number): Promise<ProjectSemanticReadiness> {
+    return (await axios.get(`${apiBase}/projects/${projectId}/semantic-readiness`)).data;
+  },
+  async promoteSemanticChangeSet(
+    changeSetId: string,
+    reason?: string,
+  ): Promise<Record<string, unknown>> {
+    return (
+      await axios.post(
+        `${apiBase}/semantic-change-sets/${changeSetId}/promote`,
+        { reason: reason?.trim() || undefined },
+        { headers: governedMutationHeaders(`semantic-major-promote:${changeSetId}`) },
+      )
+    ).data;
+  },
+  async rollbackSemanticVersion(
+    projectId: number,
+    versionId: number,
+    reason?: string,
+  ): Promise<Record<string, unknown>> {
+    return (
+      await axios.post(
+        `${apiBase}/projects/${projectId}/semantic-versions/${versionId}/rollback`,
+        { reason: reason?.trim() || undefined },
+        { headers: governedMutationHeaders(`semantic-version-rollback:${versionId}`) },
+      )
     ).data;
   },
   async runtimeOptimizationCandidates(

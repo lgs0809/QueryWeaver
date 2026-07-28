@@ -294,11 +294,11 @@
   import { onMounted, ref, watch } from 'vue';
   import { ElMessage, ElMessageBox } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type QueryCaseIndexReadiness,
     type SemanticProjectVersion,
     type ValidatedQueryExample,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -338,7 +338,7 @@
     if (!props.projectId) return;
     loading.value = true;
     try {
-      examples.value = await queryWeaverService.queryExamples(
+      examples.value = await semEvoSQLService.queryExamples(
         props.projectId,
         selectedVersionId.value,
         status.value,
@@ -354,7 +354,7 @@
   const loadIndexReadiness = async () => {
     if (!props.projectId) return;
     try {
-      indexReadiness.value = await queryWeaverService.queryCaseIndexReadiness(props.projectId);
+      indexReadiness.value = await semEvoSQLService.queryCaseIndexReadiness(props.projectId);
     } catch (error) {
       indexReadiness.value = undefined;
       ElMessage.warning(error instanceof Error ? error.message : 'Query Case 索引状态加载失败');
@@ -373,7 +373,7 @@
         { type: 'warning', confirmButtonText: '开始重建', cancelButtonText: '取消' },
       );
       reindexing.value = true;
-      const result = await queryWeaverService.reindexQueryCaseIndex(props.projectId);
+      const result = await semEvoSQLService.reindexQueryCaseIndex(props.projectId);
       ElMessage.success(`Query Case 向量索引已重建：${result.indexedEmbeddings} 条`);
       await loadIndexReadiness();
     } catch (error) {
@@ -386,7 +386,7 @@
   const openDetail = async (example: ValidatedQueryExample) => {
     drawerVisible.value = true;
     try {
-      selected.value = await queryWeaverService.queryExample(props.projectId, example.id);
+      selected.value = await semEvoSQLService.queryExample(props.projectId, example.id);
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : 'Query Case 详情加载失败');
     }
@@ -406,14 +406,14 @@
       );
       governingId.value = example.id;
       if (action === 'RESTORE') {
-        await queryWeaverService.restoreQuarantinedQueryExample(
+        await semEvoSQLService.restoreQuarantinedQueryExample(
           props.projectId,
           example.id,
           response.value,
         );
         ElMessage.success('Query Case 已从隔离状态恢复');
       } else {
-        await queryWeaverService.rejectQuarantinedQueryExample(
+        await semEvoSQLService.rejectQuarantinedQueryExample(
           props.projectId,
           example.id,
           response.value,

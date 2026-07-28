@@ -9,7 +9,7 @@
         <div>
           <el-button link :icon="ArrowLeft" @click="router.push('/projects')">返回项目</el-button>
           <h1>创建数据项目</h1>
-          <p>连接业务数据库，按需补充资料，QueryWeaver 会自动理解表结构并只追问必要的业务规则。</p>
+          <p>连接业务数据库，按需补充资料，SemEvoSQL 会自动理解表结构并只追问必要的业务规则。</p>
         </div>
       </div>
 
@@ -247,7 +247,7 @@
   import datasourceService, { type Datasource } from '@/services/datasource';
   import modelConfigService, { type ModelConfig } from '@/services/modelConfig';
   import { getApiErrorMessage } from '@/services/common';
-  import { queryWeaverService, type ProjectDocumentType } from '@/services/queryweaver';
+  import { semEvoSQLService, type ProjectDocumentType } from '@/services/semevosql';
 
   interface DatasourceBindingDraft {
     key: number;
@@ -457,7 +457,7 @@
     submitting.value = true;
     let createdProjectId: number | undefined;
     try {
-      const created = await queryWeaverService.createProject({
+      const created = await semEvoSQLService.createProject({
         projectCode: form.projectCode.trim(),
         name: form.name.trim(),
         businessDomain: form.businessDomain.trim(),
@@ -476,14 +476,14 @@
       if (!created.version) throw new Error('项目首个业务模型版本创建失败');
       createdProjectId = created.project.id;
 
-      await queryWeaverService.initializeProjectVersion(
+      await semEvoSQLService.initializeProjectVersion(
         created.project.id,
         created.version.id,
         form.initializationModelId,
       );
 
       for (const binding of datasourceBindings.value) {
-        await queryWeaverService.scanProjectDatasource(
+        await semEvoSQLService.scanProjectDatasource(
           created.project.id,
           created.version.id,
           binding.datasourceId as number,
@@ -492,7 +492,7 @@
       }
 
       for (const document of documents.value) {
-        await queryWeaverService.uploadProjectDocument(created.project.id, created.version.id, {
+        await semEvoSQLService.uploadProjectDocument(created.project.id, created.version.id, {
           documentType: document.documentType,
           datasourceId: document.datasourceId,
           sourceLocation: document.sourceLocation,
@@ -501,7 +501,7 @@
         });
       }
 
-      await queryWeaverService.startOnboarding(created.project.id, created.version.id);
+      await semEvoSQLService.startOnboarding(created.project.id, created.version.id);
 
       ElMessage.success('项目已创建，接下来只需确认系统无法安全推断的业务规则');
       await router.push({

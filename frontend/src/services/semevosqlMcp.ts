@@ -4,7 +4,7 @@
  */
 import axios from 'axios';
 
-const apiBase = '/api/queryweaver';
+const apiBase = '/api/semevosql';
 
 export interface ProjectMcpDeployment {
   deploymentId: string;

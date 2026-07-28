@@ -19,8 +19,10 @@ import { ElMessage } from 'element-plus';
 import routes from '@/router/routes';
 import { platformContext } from '@/services/platformContext';
 
+const routerBase = import.meta.env.VITE_SEMEVOSQL_BASE_PATH || '/semevosql/';
+
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(routerBase),
   routes,
   scrollBehavior(to, from, savedPosition) {
     return savedPosition || { top: 0 };
@@ -37,7 +39,7 @@ const ensureRole = async minimumRole => {
 };
 
 router.beforeEach(async (to, from, next) => {
-  document.title = to.meta?.title ? `${to.meta.title} - QueryWeaver` : 'QueryWeaver';
+  document.title = to.meta?.title ? `${to.meta.title} - SemEvoSQL` : 'SemEvoSQL';
 
   try {
     if (!(await ensureRole(to.meta?.minimumRole))) {

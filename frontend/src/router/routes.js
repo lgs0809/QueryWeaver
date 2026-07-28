@@ -12,10 +12,10 @@ const routes = [
     path: '/',
     name: 'Home',
     component: () => import('@/views/HomeRedirect.vue'),
-    meta: { title: 'QueryWeaver', module: 'home' },
+    meta: { title: 'SemEvoSQL', module: 'home' },
   },
   {
-    path: '/queryweaver',
+    path: '/semevosql',
     redirect: '/',
   },
   {

@@ -185,13 +185,13 @@
   import { computed, onMounted, ref, watch } from 'vue';
   import { ElMessage } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type DetourSignal,
     type QueryPattern,
     type QueryPatternDetail,
     type SemanticProjectVersion,
     type TrajectoryPath,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -224,8 +224,8 @@
     loading.value = true;
     try {
       [patterns.value, detours.value] = await Promise.all([
-        queryWeaverService.trajectoryPatterns(props.projectId, selectedVersionId.value),
-        queryWeaverService.detourSignals(props.projectId),
+        semEvoSQLService.trajectoryPatterns(props.projectId, selectedVersionId.value),
+        semEvoSQLService.detourSignals(props.projectId),
       ]);
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '轨迹加载失败');
@@ -237,8 +237,8 @@
     drawerVisible.value = true;
     try {
       [detail.value, paths.value] = await Promise.all([
-        queryWeaverService.trajectoryPattern(pattern.id),
-        queryWeaverService.trajectoryPaths(pattern.id),
+        semEvoSQLService.trajectoryPattern(pattern.id),
+        semEvoSQLService.trajectoryPaths(pattern.id),
       ]);
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '路径详情加载失败');
@@ -246,7 +246,7 @@
   };
   const recompute = async (patternId: string) => {
     try {
-      await queryWeaverService.recomputeTrajectoryPattern(patternId);
+      await semEvoSQLService.recomputeTrajectoryPattern(patternId);
       ElMessage.success('Pattern 路径画像已重算');
       await load();
     } catch (error) {

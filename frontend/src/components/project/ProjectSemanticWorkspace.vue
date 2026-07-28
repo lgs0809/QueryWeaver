@@ -644,12 +644,12 @@
   import { computed, onMounted, ref, watch } from 'vue';
   import { ElMessage, ElMessageBox } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type MultiSourcePolicySnapshot,
     type SemanticCatalogColumn,
     type SemanticCatalogSnapshot,
     type SemanticProjectVersion,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   type BusinessSection =
     | 'objects'
@@ -871,9 +871,9 @@
     errorMessage.value = '';
     try {
       [catalog.value, policy.value, violations.value] = await Promise.all([
-        queryWeaverService.semanticCatalog(props.projectId, selectedVersionId.value),
-        queryWeaverService.multiSourcePolicy(props.projectId, selectedVersionId.value),
-        queryWeaverService.multiSourcePolicyViolations(props.projectId, selectedVersionId.value),
+        semEvoSQLService.semanticCatalog(props.projectId, selectedVersionId.value),
+        semEvoSQLService.multiSourcePolicy(props.projectId, selectedVersionId.value),
+        semEvoSQLService.multiSourcePolicyViolations(props.projectId, selectedVersionId.value),
       ]);
       syncJsonEditors();
     } catch (error) {
@@ -905,13 +905,13 @@
     if (!selectedVersionId.value || !editable.value) return;
     savingCatalog.value = true;
     try {
-      catalog.value = await queryWeaverService.replaceSemanticCatalog(
+      catalog.value = await semEvoSQLService.replaceSemanticCatalog(
         props.projectId,
         selectedVersionId.value,
         nextCatalog,
       );
       catalogJson.value = JSON.stringify(catalog.value, null, 2);
-      violations.value = await queryWeaverService.multiSourcePolicyViolations(
+      violations.value = await semEvoSQLService.multiSourcePolicyViolations(
         props.projectId,
         selectedVersionId.value,
       );
@@ -940,13 +940,13 @@
     if (!selectedVersionId.value || !editable.value) return;
     savingPolicy.value = true;
     try {
-      policy.value = await queryWeaverService.replaceMultiSourcePolicy(
+      policy.value = await semEvoSQLService.replaceMultiSourcePolicy(
         props.projectId,
         selectedVersionId.value,
         parseJson<MultiSourcePolicySnapshot>(policyJson.value, '多数据源策略'),
       );
       policyJson.value = JSON.stringify(policy.value, null, 2);
-      violations.value = await queryWeaverService.multiSourcePolicyViolations(
+      violations.value = await semEvoSQLService.multiSourcePolicyViolations(
         props.projectId,
         selectedVersionId.value,
       );

@@ -83,12 +83,12 @@
 
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue';
-  import { queryWeaverService } from '@/services/queryweaver';
+  import { semEvoSQLService } from '@/services/semevosql';
   import type {
     RuntimeOptimizationCandidate,
     SemanticEvolutionCandidate,
     ValidatedQueryExample,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   type InboxTarget = 'semantic' | 'examples' | 'optimization';
   type InboxKind = 'PROJECT_RULE' | 'BUSINESS_MODEL' | 'QUERY_CASE' | 'RUNTIME';
@@ -136,9 +136,9 @@
     loading.value = true;
     error.value = '';
     const results = await Promise.allSettled([
-      queryWeaverService.semanticEvolutionCandidates(props.projectId),
-      queryWeaverService.queryExamples(props.projectId, undefined, 'QUARANTINED'),
-      queryWeaverService.runtimeOptimizationCandidates(props.projectId),
+      semEvoSQLService.semanticEvolutionCandidates(props.projectId),
+      semEvoSQLService.queryExamples(props.projectId, undefined, 'QUARANTINED'),
+      semEvoSQLService.runtimeOptimizationCandidates(props.projectId),
     ]);
     semanticCandidates.value = results[0].status === 'fulfilled' ? results[0].value : [];
     quarantinedCases.value = results[1].status === 'fulfilled' ? results[1].value : [];

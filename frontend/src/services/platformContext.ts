@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0.
  */
 import modelConfigService from '@/services/modelConfig';
-import { queryWeaverService, type OperatorView } from '@/services/queryweaver';
+import { semEvoSQLService, type OperatorView } from '@/services/semevosql';
 
 export interface PlatformReadiness {
   chatModelReady: boolean;
@@ -25,7 +25,7 @@ export const platformContext = {
     }
     if (operatorCache) return operatorCache;
     if (!operatorPromise) {
-      operatorPromise = queryWeaverService
+      operatorPromise = semEvoSQLService
         .currentOperator()
         .then(value => {
           operatorCache = value;

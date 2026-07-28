@@ -143,7 +143,7 @@
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue';
   import { ElMessage, ElMessageBox } from 'element-plus';
-  import { queryWeaverService, type RuntimeOptimizationCandidate } from '@/services/queryweaver';
+  import { semEvoSQLService, type RuntimeOptimizationCandidate } from '@/services/semevosql';
 
   const props = defineProps<{ projectId: number; canGovern?: boolean }>();
   const canGovern = computed(() => props.canGovern !== false);
@@ -166,14 +166,14 @@
   const load = async () => {
     loading.value = true;
     try {
-      const base = await queryWeaverService.runtimeOptimizationCandidates(
+      const base = await semEvoSQLService.runtimeOptimizationCandidates(
         props.projectId,
         status.value,
       );
       candidates.value = await Promise.all(
         base.map(async item => {
           try {
-            return await queryWeaverService.runtimeOptimizationCandidate(item.id);
+            return await semEvoSQLService.runtimeOptimizationCandidate(item.id);
           } catch {
             return item;
           }
@@ -188,7 +188,7 @@
   const open = async (candidate: RuntimeOptimizationCandidate) => {
     drawerVisible.value = true;
     try {
-      selected.value = await queryWeaverService.runtimeOptimizationCandidate(candidate.id);
+      selected.value = await semEvoSQLService.runtimeOptimizationCandidate(candidate.id);
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '详情加载失败');
     }
@@ -226,7 +226,7 @@
           },
         },
       );
-      await queryWeaverService.recordOptimizationShadow(candidate.id, JSON.parse(response.value));
+      await semEvoSQLService.recordOptimizationShadow(candidate.id, JSON.parse(response.value));
       ElMessage.success('Shadow 指标已记录并重新执行门禁');
       await load();
     } catch (error) {
@@ -238,7 +238,7 @@
       await ElMessageBox.confirm('批准前端操作不会绕过后端 Shadow Gate。', '批准运行优化', {
         type: 'warning',
       });
-      await queryWeaverService.approveRuntimeOptimization(candidate.id, 'Shadow gate reviewed');
+      await semEvoSQLService.approveRuntimeOptimization(candidate.id, 'Shadow gate reviewed');
       ElMessage.success('候选已批准');
       await load();
     } catch (error) {
@@ -251,7 +251,7 @@
         inputType: 'textarea',
         inputValidator: value => Boolean(value.trim()) || '必须填写原因',
       });
-      await queryWeaverService.rejectRuntimeOptimization(candidate.id, response.value);
+      await semEvoSQLService.rejectRuntimeOptimization(candidate.id, response.value);
       ElMessage.success('候选已拒绝');
       await load();
     } catch (error) {
@@ -265,7 +265,7 @@
         '启用 Preferred Plan',
         { type: 'warning' },
       );
-      await queryWeaverService.enableRuntimeOptimization(candidate.id);
+      await semEvoSQLService.enableRuntimeOptimization(candidate.id);
       ElMessage.success('Preferred Plan 已启用');
       await load();
     } catch (error) {
@@ -278,7 +278,7 @@
         inputType: 'textarea',
         inputValidator: value => Boolean(value.trim()) || '必须填写原因',
       });
-      await queryWeaverService.disableRuntimeOptimization(
+      await semEvoSQLService.disableRuntimeOptimization(
         candidate.id,
         response.value,
         candidate.status === 'ENABLED',

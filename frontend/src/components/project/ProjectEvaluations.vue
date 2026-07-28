@@ -115,7 +115,7 @@
 <script setup lang="ts">
   import { computed, onMounted, ref, watch } from 'vue';
   import { ElMessage } from 'element-plus';
-  import { queryWeaverService, type SemanticProjectVersion } from '@/services/queryweaver';
+  import { semEvoSQLService, type SemanticProjectVersion } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -164,8 +164,8 @@
     loading.value = true;
     try {
       [goldenCases.value, replayJobs.value] = await Promise.all([
-        queryWeaverService.goldenCases(props.projectId),
-        queryWeaverService.jobs(props.projectId),
+        semEvoSQLService.goldenCases(props.projectId),
+        semEvoSQLService.jobs(props.projectId),
       ]);
       replayJobs.value = replayJobs.value.filter(
         item => item.job_type === 'REPLAY' && item.project_version_id === selectedVersionId.value,
@@ -179,7 +179,7 @@
   const createReplay = async () => {
     if (!selectedVersionId.value) return;
     try {
-      await queryWeaverService.createReplay(props.projectId, selectedVersionId.value);
+      await semEvoSQLService.createReplay(props.projectId, selectedVersionId.value);
       ElMessage.success('自动回归任务已创建');
       tab.value = 'jobs';
       await load();

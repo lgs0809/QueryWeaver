@@ -18,7 +18,7 @@ import vue from '@vitejs/plugin-vue';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const backendTarget = process.env.QUERYWEAVER_BACKEND_URL || 'http://localhost:8065';
+const backendTarget = process.env.SEMEVOSQL_BACKEND_URL || 'http://localhost:8065';
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
