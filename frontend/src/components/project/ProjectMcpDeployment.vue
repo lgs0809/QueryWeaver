@@ -129,11 +129,8 @@
 
       <div class="tool-contract">
         <strong>Production MCP Tools</strong>
-        <el-tag effect="plain">search_semantics</el-tag>
-        <el-tag effect="plain">get_semantic_context</el-tag>
-        <el-tag effect="plain">validate_query_plan</el-tag>
-        <el-tag effect="plain">execute_query_plan</el-tag>
-        <el-tag effect="plain">get_query_result</el-tag>
+        <el-tag effect="plain">query</el-tag>
+        <el-tag effect="plain">query_status</el-tag>
       </div>
 
       <div class="actions">
@@ -175,7 +172,7 @@
     type ProjectMcpCredentialResponse,
     type ProjectMcpDeployment,
     type ProjectMcpOperations,
-  } from '@/services/queryweaverMcp';
+  } from '@/services/semevosqlMcp';
 
   const props = defineProps<{
     projectId: number;

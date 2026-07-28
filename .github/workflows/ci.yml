@@ -45,12 +45,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
     env:
-      QUERYWEAVER_COMPOSE_PROJECT_NAME: queryweaver-ci-${{ github.run_id }}
-      QUERYWEAVER_METADATA_VOLUME: queryweaver-ci-${{ github.run_id }}-metadata
-      QUERYWEAVER_UPLOADS_VOLUME: queryweaver-ci-${{ github.run_id }}-uploads
-      QUERYWEAVER_NETWORK_NAME: queryweaver-ci-${{ github.run_id }}-network
-      QUERYWEAVER_BACKEND_PORT: '28065'
-      QUERYWEAVER_FRONTEND_PORT: '23000'
+      SEMEVOSQL_COMPOSE_PROJECT_NAME: semevosql-ci-${{ github.run_id }}
+      SEMEVOSQL_METADATA_VOLUME: semevosql-ci-${{ github.run_id }}-metadata
+      SEMEVOSQL_UPLOADS_VOLUME: semevosql-ci-${{ github.run_id }}-uploads
+      SEMEVOSQL_NETWORK_NAME: semevosql-ci-${{ github.run_id }}-network
+      SEMEVOSQL_BACKEND_PORT: '28065'
+      SEMEVOSQL_FRONTEND_PORT: '23000'
     steps:
       - uses: actions/checkout@v4
       - name: Create ephemeral deployment environment
@@ -58,29 +58,29 @@ jobs:
       - name: Validate Compose
         run: >-
           docker compose
-          --env-file deploy/queryweaver/.env
-          -f deploy/queryweaver/docker-compose.yml
+          --env-file deploy/semevosql/.env
+          -f deploy/semevosql/docker-compose.yml
           --profile app config --quiet
       - name: Build and start portable deployment
         env:
-          QUERYWEAVER_BUILD: 'true'
-          QUERYWEAVER_STARTUP_TIMEOUT: '240'
-        run: ./scripts/start-queryweaver.sh
+          SEMEVOSQL_BUILD: 'true'
+          SEMEVOSQL_STARTUP_TIMEOUT: '240'
+        run: ./scripts/start-semevosql.sh
       - name: Verify backend and frontend
         run: |
           curl -fsS http://127.0.0.1:28065/actuator/health
-          curl -fsS http://127.0.0.1:23000/queryweaver/ >/dev/null
+          curl -fsS http://127.0.0.1:23000/semevosql/ >/dev/null
       - name: Show container logs on failure
         if: failure()
         run: >-
           docker compose
-          --env-file deploy/queryweaver/.env
-          -f deploy/queryweaver/docker-compose.yml
+          --env-file deploy/semevosql/.env
+          -f deploy/semevosql/docker-compose.yml
           --profile app logs --no-color --tail=200
       - name: Stop deployment
         if: always()
         run: >-
           docker compose
-          --env-file deploy/queryweaver/.env
-          -f deploy/queryweaver/docker-compose.yml
+          --env-file deploy/semevosql/.env
+          -f deploy/semevosql/docker-compose.yml
           --profile app down -v --remove-orphans

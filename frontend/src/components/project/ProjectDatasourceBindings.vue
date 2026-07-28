@@ -138,10 +138,10 @@
   import { ElMessage, ElMessageBox } from 'element-plus';
   import datasourceService, { type Datasource } from '@/services/datasource';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type ProjectDatasourceBinding,
     type SemanticProjectVersion,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -199,7 +199,7 @@
     }
     loading.value = true;
     try {
-      bindings.value = await queryWeaverService.projectDatasourceBindings(
+      bindings.value = await semEvoSQLService.projectDatasourceBindings(
         props.projectId,
         selectedVersionId.value,
       );
@@ -274,7 +274,7 @@
     }
     saving.value = true;
     try {
-      await queryWeaverService.saveProjectDatasourceBinding(
+      await semEvoSQLService.saveProjectDatasourceBinding(
         props.projectId,
         selectedVersionId.value,
         form.datasourceId,
@@ -304,7 +304,7 @@
         '移除数据源绑定',
         { type: 'warning' },
       );
-      await queryWeaverService.deleteProjectDatasourceBinding(
+      await semEvoSQLService.deleteProjectDatasourceBinding(
         props.projectId,
         selectedVersionId.value,
         binding.datasourceId,

@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0.
  -->
 <template>
-  <div class="home-redirect" v-loading="true" aria-label="正在进入 QueryWeaver"></div>
+  <div class="home-redirect" v-loading="true" aria-label="正在进入 SemEvoSQL"></div>
 </template>
 
 <script setup lang="ts">

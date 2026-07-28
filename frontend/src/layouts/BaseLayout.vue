@@ -8,7 +8,7 @@
       <div class="header-content">
         <button class="brand-logo" @click="router.push('/')">
           <i class="bi bi-diagram-3"></i>
-          <span>QueryWeaver</span>
+          <span>SemEvoSQL</span>
         </button>
         <div class="header-actions">
           <nav class="header-nav" aria-label="主导航">

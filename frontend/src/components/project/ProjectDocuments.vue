@@ -31,7 +31,7 @@
       :title="
         selectedVersion?.status !== 'DRAFT'
           ? '正式或已验证的业务模型保持只读；请创建新草稿后上传、重解析或删除资料。'
-          : '当前账号只有查看权限，不能修改业务资料。'
+          : '当前运行权限仅允许查看，不能修改业务资料。'
       "
     />
 
@@ -194,16 +194,15 @@
         <el-descriptions-item label="文档">
           {{ attemptDocument.originalFilename || attemptDocument.sourceName }}
         </el-descriptions-item>
-        <el-descriptions-item label="内容哈希">
-          {{ attemptDocument.contentHash }}
-        </el-descriptions-item>
         <el-descriptions-item label="来源位置">
           {{ attemptDocument.sourceLocation || '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="当前状态">{{ attemptDocument.status }}</el-descriptions-item>
+        <el-descriptions-item label="当前状态">
+          {{ documentStatusLabel(attemptDocument.status) }}
+        </el-descriptions-item>
       </el-descriptions>
       <el-table v-loading="attemptsLoading" :data="attempts" empty-text="暂无解析历史">
-        <el-table-column prop="attemptNo" label="Attempt" width="90" />
+        <el-table-column prop="attemptNo" label="解析批次" width="100" />
         <el-table-column label="状态" width="140">
           <template #default="scope">
             <el-tag :type="statusTagType(scope.row.status)">
@@ -239,7 +238,7 @@
         class="evidence-alert"
         type="info"
         :closable="false"
-        title="APPLIED 表示该定义已进入当前草稿 Catalog；CONFLICT 表示定义与已有资产不一致，未覆盖 Catalog，并已生成阻塞缺口。"
+        title="已应用表示该定义已进入当前业务模型草稿；冲突表示定义与已有资产不一致，系统不会覆盖现有内容，并会生成待处理缺口。"
       />
       <el-table
         v-loading="provenanceLoading"
@@ -275,7 +274,7 @@
   import { computed, onMounted, reactive, ref, watch } from 'vue';
   import { ElMessage, ElMessageBox, type UploadFile, type UploadRawFile } from 'element-plus';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type MaterialCategory,
     type MaterialLifecycle,
     type ProjectDatasourceBinding,
@@ -284,7 +283,7 @@
     type ProjectDocumentProvenance,
     type ProjectDocumentType,
     type SemanticProjectVersion,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const props = defineProps<{
     projectId: number;
@@ -375,8 +374,8 @@
     loading.value = true;
     try {
       [documents.value, datasourceBindings.value] = await Promise.all([
-        queryWeaverService.projectDocuments(props.projectId, selectedVersionId.value),
-        queryWeaverService.projectDatasourceBindings(props.projectId, selectedVersionId.value),
+        semEvoSQLService.projectDocuments(props.projectId, selectedVersionId.value),
+        semEvoSQLService.projectDatasourceBindings(props.projectId, selectedVersionId.value),
       ]);
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '项目文档加载失败');
@@ -428,7 +427,7 @@
       for (const material of selectedMaterials.value) {
         const { file, category } = material;
         if (file.name.toLowerCase().endsWith('.zip')) {
-          const result = await queryWeaverService.uploadProjectBundle(
+          const result = await semEvoSQLService.uploadProjectBundle(
             props.projectId,
             selectedVersionId.value,
             {
@@ -444,7 +443,7 @@
           duplicates += result.duplicateCount;
           continue;
         }
-        const result = await queryWeaverService.uploadProjectDocument(
+        const result = await semEvoSQLService.uploadProjectDocument(
           props.projectId,
           selectedVersionId.value,
           {
@@ -478,7 +477,7 @@
     attemptDialogVisible.value = true;
     attemptsLoading.value = true;
     try {
-      attempts.value = await queryWeaverService.projectDocumentAttempts(
+      attempts.value = await semEvoSQLService.projectDocumentAttempts(
         props.projectId,
         selectedVersionId.value,
         document.id,
@@ -496,7 +495,7 @@
     provenanceDialogVisible.value = true;
     provenanceLoading.value = true;
     try {
-      provenance.value = await queryWeaverService.projectDocumentProvenance(
+      provenance.value = await semEvoSQLService.projectDocumentProvenance(
         props.projectId,
         selectedVersionId.value,
         document.id,
@@ -512,16 +511,16 @@
     if (!selectedVersionId.value) return;
     try {
       await ElMessageBox.confirm(
-        `确认重新解析“${document.originalFilename || document.sourceName || document.id}”？旧 Attempt 历史会保留。`,
+        `确认重新解析“${document.originalFilename || document.sourceName || document.id}”？历史解析批次会保留。`,
         '重解析项目文档',
         { type: 'warning' },
       );
-      await queryWeaverService.reparseProjectDocument(
+      await semEvoSQLService.reparseProjectDocument(
         props.projectId,
         selectedVersionId.value,
         document.id,
       );
-      ElMessage.success('文档已生成新的解析 Attempt');
+      ElMessage.success('文档已生成新的解析批次');
       await loadDocuments();
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
@@ -538,7 +537,7 @@
         '删除项目文档',
         { type: 'warning' },
       );
-      await queryWeaverService.deleteProjectDocument(
+      await semEvoSQLService.deleteProjectDocument(
         props.projectId,
         selectedVersionId.value,
         document.id,

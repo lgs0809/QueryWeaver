@@ -8,7 +8,7 @@
       <div class="heading">
         <div>
           <h1>系统设置</h1>
-          <p>只展示 QueryWeaver 能从后端确认的运行事实；“已配置”与“已验证可用”严格区分。</p>
+          <p>只展示 SemEvoSQL 能从后端确认的运行事实；“已配置”与“已验证可用”严格区分。</p>
         </div>
         <el-button @click="load">刷新</el-button>
       </div>

@@ -1,7 +1,7 @@
 {
-  "name": "queryweaver-web",
+  "name": "semevosql-web",
   "version": "1.0.0",
-  "description": "QueryWeaver web console",
+  "description": "SemEvoSQL web console",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"
@@ -17,7 +17,9 @@
     "format:check": "prettier --check .",
     "type-check": "vue-tsc --noEmit",
     "typecheck": "vue-tsc --noEmit",
-    "unused": "knip"
+    "unused": "knip",
+    "verify": "npm run lint:check && npm run typecheck && npm run unused && npm run build",
+    "browser:acceptance": "node scripts/browser-acceptance.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

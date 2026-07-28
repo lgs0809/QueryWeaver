@@ -206,21 +206,10 @@
                 />
               </el-tab-pane>
 
-              <el-tab-pane label="发布与版本" name="release" lazy>
-                <div class="tab-toolbar release-toolbar">
-                  <div>
-                    <h2>发布与版本</h2>
-                    <p>
-                      新修改进入草稿，通过验证和发布门禁后再成为正式业务模型；旧会话仍固定原版本。
-                    </p>
-                  </div>
-                  <el-button v-if="canEditProject" @click="versionDialogVisible = true">
-                    创建新版本
-                  </el-button>
-                </div>
-                <ProjectReleaseCenter
+              <el-tab-pane label="语义治理" name="release" lazy>
+                <ProjectSemanticGovernance
                   :project-id="projectId"
-                  :can-publish="canPublishProject"
+                  :can-manage="canManageMembers"
                   @changed="load"
                 />
               </el-tab-pane>
@@ -235,41 +224,12 @@
         :project-id="projectId"
       />
 
-      <el-dialog v-model="versionDialogVisible" title="创建业务模型草稿" width="520px">
-        <el-form label-position="top">
-          <el-form-item label="版本号" required>
-            <el-input v-model="versionForm.versionNumber" placeholder="2.1.0" />
-          </el-form-item>
-          <el-form-item label="创建方式" required>
-            <el-radio-group v-model="versionForm.creationMode">
-              <el-radio value="CLONE">基于历史版本继续修改</el-radio>
-              <el-radio value="BLANK">从空白业务模型开始</el-radio>
-            </el-radio-group>
-          </el-form-item>
-          <el-form-item v-if="versionForm.creationMode === 'CLONE'" label="基于版本" required>
-            <el-select v-model="versionForm.parentVersionId" placeholder="选择历史版本">
-              <el-option
-                v-for="item in versions"
-                :key="item.id"
-                :label="`v${item.versionNumber} · ${versionStatusLabel(item.status)}`"
-                :value="item.id"
-              />
-            </el-select>
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="versionDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="creatingVersion" @click="createVersion">
-            创建草稿
-          </el-button>
-        </template>
-      </el-dialog>
     </section>
   </BaseLayout>
 </template>
 
 <script setup lang="ts">
-  import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue';
+  import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
   import { useRoute, useRouter } from 'vue-router';
   import { ElMessage } from 'element-plus';
   import { ArrowLeft } from '@element-plus/icons-vue';
@@ -291,14 +251,13 @@
     type ProjectHealthAction,
   } from '@/services/projectExperience';
   import {
-    queryWeaverService,
+    semEvoSQLService,
     type OperatorView,
     type ProjectAccessView,
     type ProjectHealth,
     type ProjectInitializationView,
-    type ProjectVersionCreationMode,
     type SemanticProjectVersion,
-  } from '@/services/queryweaver';
+  } from '@/services/semevosql';
 
   const ProjectDatasourceBindings = defineAsyncComponent(
     () => import('@/components/project/ProjectDatasourceBindings.vue'),
@@ -321,8 +280,8 @@
   const ProjectQueryExamples = defineAsyncComponent(
     () => import('@/components/project/ProjectQueryExamples.vue'),
   );
-  const ProjectReleaseCenter = defineAsyncComponent(
-    () => import('@/components/project/ProjectReleaseCenter.vue'),
+  const ProjectSemanticGovernance = defineAsyncComponent(
+    () => import('@/components/project/ProjectSemanticGovernance.vue'),
   );
   const ProjectRuntimeOptimization = defineAsyncComponent(
     () => import('@/components/project/ProjectRuntimeOptimization.vue'),
@@ -398,14 +357,6 @@
   const governanceTab = ref(
     ['release', 'versions', 'releases'].includes(requestedSection) ? 'release' : 'test',
   );
-  const versionDialogVisible = ref(route.query.action === 'create-version');
-  const creatingVersion = ref(false);
-  const versionForm = reactive({
-    versionNumber: '',
-    creationMode: 'CLONE' as ProjectVersionCreationMode,
-    parentVersionId: undefined as number | undefined,
-  });
-  const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
   const membersDialogVisible = ref(false);
   const canEditProject = computed(() =>
     canEditProjectCapability(
@@ -514,7 +465,7 @@
     healthLoading.value = true;
     healthError.value = '';
     try {
-      health.value = await queryWeaverService.projectHealth(projectId);
+      health.value = await semEvoSQLService.projectHealth(projectId);
     } catch (error) {
       healthError.value = error instanceof Error ? error.message : '项目健康信息加载失败';
     } finally {
@@ -526,10 +477,10 @@
     loading.value = true;
     try {
       const [nextProjectView, nextProjectAccess, nextOperator, nextVersions] = await Promise.all([
-        queryWeaverService.project(projectId),
-        queryWeaverService.projectAccess(projectId),
+        semEvoSQLService.project(projectId),
+        semEvoSQLService.projectAccess(projectId),
         platformContext.operator(),
-        queryWeaverService.projectVersions(projectId),
+        semEvoSQLService.projectVersions(projectId),
       ]);
       projectView.value = nextProjectView;
       projectAccess.value = nextProjectAccess;
@@ -539,8 +490,6 @@
         activeSection.value = 'overview';
         void router.replace({ query: { ...route.query, section: 'overview', tab: undefined } });
       }
-      versionForm.parentVersionId =
-        projectView.value.project.activePublishedVersionId || versions.value[0]?.id;
       await loadHealth();
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '项目详情加载失败');
@@ -625,13 +574,13 @@
     firstRunSubmitting.value = true;
     try {
       if (working.status === 'DRAFT') {
-        await queryWeaverService.validateProjectVersion(projectId, working.id);
+        await semEvoSQLService.validateProjectVersion(projectId, working.id);
         ElMessage.success('业务模型验证通过');
         await load();
         return;
       }
       if (working.status === 'VALIDATED' || working.status === 'READY') {
-        await queryWeaverService.publishProjectVersion(projectId, working.id);
+        await semEvoSQLService.publishProjectVersion(projectId, working.id);
         await load();
         if (health.value?.queryReady) {
           ElMessage.success('业务模型已发布并激活，可以开始第一次问数');
@@ -642,7 +591,7 @@
         return;
       }
       if (working.status === 'PUBLISHED') {
-        await queryWeaverService.activateProjectVersion(projectId, working.id);
+        await semEvoSQLService.activateProjectVersion(projectId, working.id);
         ElMessage.success('业务模型已激活，可以开始问数');
         await openChat();
         return;
@@ -657,44 +606,6 @@
     }
   };
 
-  const createVersion = async () => {
-    if (!versionPattern.test(versionForm.versionNumber)) {
-      ElMessage.warning('版本号必须使用 x.x.x 格式');
-      return;
-    }
-    if (versionForm.creationMode === 'CLONE' && !versionForm.parentVersionId) {
-      ElMessage.warning('请选择要继承的历史版本');
-      return;
-    }
-    creatingVersion.value = true;
-    try {
-      await queryWeaverService.createProjectVersion(projectId, {
-        versionNumber: versionForm.versionNumber,
-        creationMode: versionForm.creationMode,
-        parentVersionId:
-          versionForm.creationMode === 'CLONE' ? versionForm.parentVersionId : undefined,
-        source: 'project-detail',
-      });
-      ElMessage.success('业务模型草稿已创建');
-      versionDialogVisible.value = false;
-      await load();
-      activeSection.value = 'governance';
-      governanceTab.value = 'release';
-      syncSectionRoute('release');
-    } catch (error) {
-      ElMessage.error(error instanceof Error ? error.message : '版本创建失败');
-    } finally {
-      creatingVersion.value = false;
-    }
-  };
-
-  const versionStatusLabel = (status: string) => {
-    if (status === 'DRAFT') return '草稿';
-    if (status === 'VALIDATED' || status === 'READY') return '验证通过';
-    if (status === 'PUBLISHED') return '已发布';
-    if (status === 'ARCHIVED') return '已归档';
-    return status;
-  };
   onMounted(load);
 </script>
 

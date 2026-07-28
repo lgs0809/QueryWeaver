@@ -8,7 +8,7 @@ import skipFormatting from '@vue/eslint-config-prettier/skip-formatting'
 
 export default defineConfigWithVueTs(
   {
-    name: 'queryweaver/files-to-lint',
+    name: 'semevosql/files-to-lint',
     files: ['**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx,vue}'],
   },
   globalIgnores(['dist/**', 'node_modules/**']),

@@ -10,6 +10,6 @@ RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine
 COPY --from=build /workspace/frontend/dist /usr/share/nginx/html
-COPY deploy/queryweaver/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/semevosql/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

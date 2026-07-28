@@ -4,7 +4,7 @@
  */
 import { computed, ref } from 'vue';
 import { reconnectDelay } from '@/services/runRecoveryState.mjs';
-import type { RunEvent } from '@/services/queryweaver';
+import type { RunEvent } from '@/services/semevosql';
 
 type RunTransportStatus =
   | 'IDLE'
