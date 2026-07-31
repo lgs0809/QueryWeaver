@@ -21,8 +21,8 @@ import cn.lgs.semevosql.conversation.ProjectConversationService.HumanReviewComma
 import cn.lgs.semevosql.conversation.ProjectConversationService.ProjectConversation;
 import cn.lgs.semevosql.conversation.ProjectConversationService.ProjectMessage;
 import cn.lgs.semevosql.conversation.ProjectConversationService.SendMessageCommand;
-import cn.lgs.semevosql.conversation.ProjectConversationService.SendMessageResult;
-import cn.lgs.semevosql.run.QueryRun;
+import cn.lgs.semevosql.run.QueryRunPublicPresenter;
+import cn.lgs.semevosql.run.QueryRunPublicView;
 import cn.lgs.semevosql.run.RuntimeMutationAuthorizationService;
 import java.security.Principal;
 import java.util.List;
@@ -45,6 +45,8 @@ import reactor.core.scheduler.Schedulers;
 public class ProjectConversationController {
 
 	private final ProjectConversationService service;
+
+	private final QueryRunPublicPresenter publicPresenter;
 
 	private final OperatorContext.Resolver operatorResolver;
 
@@ -80,21 +82,22 @@ public class ProjectConversationController {
 	}
 
 	@PostMapping("/{conversationId}/messages")
-	public Mono<SendMessageResult> send(@PathVariable Long projectId, @PathVariable String conversationId,
+	public Mono<SendMessagePublicResult> send(@PathVariable Long projectId, @PathVariable String conversationId,
 			@RequestBody SendMessageCommand command, @RequestHeader HttpHeaders headers, Principal principal) {
 		return Mono.fromCallable(() -> {
 			OperatorContext operator = operatorResolver.resolve(headers, principal, "project-conversation-send");
-			return service.send(projectId, conversationId, command, operator.operator());
+			var result = service.send(projectId, conversationId, command, operator.operator());
+			return new SendMessagePublicResult(result.userMessage(), publicPresenter.present(result.run()));
 		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	@PostMapping("/{conversationId}/runs/{runId}/human-review")
-	public QueryRun humanReview(@PathVariable Long projectId, @PathVariable String conversationId,
+	public QueryRunPublicView humanReview(@PathVariable Long projectId, @PathVariable String conversationId,
 			@PathVariable String runId, @RequestBody HumanReviewCommand command, @RequestHeader HttpHeaders headers,
 			Principal principal) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, "project-conversation-review:" + runId);
 		runtimeMutationAuthorizationService.requireRunOwnerOrAdmin(runId, operator);
-		return service.submitHumanReview(projectId, conversationId, runId, command);
+		return publicPresenter.present(service.submitHumanReview(projectId, conversationId, runId, command));
 	}
 
 	@PostMapping("/{conversationId}/runs/{runId}/sync")
@@ -112,6 +115,9 @@ public class ProjectConversationController {
 	}
 
 	public record ConversationRevisionRequest(long revision) {
+	}
+
+	public record SendMessagePublicResult(ProjectMessage userMessage, QueryRunPublicView run) {
 	}
 
 }

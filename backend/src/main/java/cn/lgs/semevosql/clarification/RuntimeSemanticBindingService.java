@@ -55,7 +55,7 @@ public class RuntimeSemanticBindingService {
 		Map<String, ResolvedRuntimeBinding> byPhrase = new LinkedHashMap<>();
 		for (ProjectSemanticAlias alias : projectAliasService.applicable(projectId, projectVersionId, query)) {
 			ResolvedRuntimeBinding binding = validate(catalog, alias.normalizedPhrase(), alias.displayPhrase(),
-					alias.assetType(), alias.assetKey(), alias.businessLabel(), "PROJECT", alias.id());
+					alias.assetType(), alias.assetKey(), alias.businessLabel(), "PROJECT", alias.id(), null);
 			if (binding != null && !shadowedByMoreSpecificExplicitAsset(catalog, query, binding)) {
 				byPhrase.put(alias.normalizedPhrase(), binding);
 			}
@@ -64,7 +64,7 @@ public class RuntimeSemanticBindingService {
 			for (UserSemanticPreference preference : preferenceService.applicable(projectId, userId, query)) {
 				ResolvedRuntimeBinding binding = validate(catalog, preference.normalizedPhrase(),
 						preference.displayPhrase(), preference.assetType(), preference.assetKey(),
-						preference.businessLabel(), "USER", preference.id());
+						preference.businessLabel(), "USER", preference.id(), userId);
 				if (binding != null && !shadowedByMoreSpecificExplicitAsset(catalog, query, binding)) {
 					// Personal language intentionally overrides the project alias for
 					// this user's same phrase, unless the current query explicitly uses a
@@ -79,10 +79,15 @@ public class RuntimeSemanticBindingService {
 
 	public BindingContext explicit(Long projectId, Long projectVersionId, String rawPhrase, String assetType,
 			String assetKey, String businessLabel) {
+		return explicit(projectId, projectVersionId, rawPhrase, assetType, assetKey, businessLabel, "QUERY", null, null);
+	}
+
+	public BindingContext explicit(Long projectId, Long projectVersionId, String rawPhrase, String assetType,
+			String assetKey, String businessLabel, String source, Long sourceRecordId, String principalId) {
 		SemanticCatalogSnapshot catalog = catalogCache.get(projectId, projectVersionId);
 		String normalizedPhrase = UserSemanticPreferenceService.normalizePhrase(rawPhrase);
 		ResolvedRuntimeBinding binding = validate(catalog, normalizedPhrase, rawPhrase, assetType, assetKey,
-				businessLabel, "QUERY", null);
+				businessLabel, source, sourceRecordId, principalId);
 		if (binding == null) {
 			throw new IllegalArgumentException(
 					"Correction target is not an enabled semantic asset: " + assetType + ":" + assetKey);
@@ -209,7 +214,7 @@ public class RuntimeSemanticBindingService {
 
 	private ResolvedRuntimeBinding validate(SemanticCatalogSnapshot catalog, String normalizedPhrase,
 			String displayPhrase, String assetType, String assetKey, String businessLabel, String source,
-			Long sourceRecordId) {
+			Long sourceRecordId, String principalId) {
 		if (!hasText(assetType) || !hasText(assetKey)) {
 			return null;
 		}
@@ -220,7 +225,7 @@ public class RuntimeSemanticBindingService {
 				.filter(value -> Objects.equals(value.getMetricCode(), assetKey))
 				.findFirst()
 				.map(value -> new ResolvedRuntimeBinding(normalizedPhrase, displayPhrase, assetType, assetKey,
-						businessLabel, value.getModelCode(), source, sourceRecordId))
+						businessLabel, value.getModelCode(), source, sourceRecordId, principalId))
 				.orElse(null);
 			case "DIMENSION" -> catalog.getDimensions()
 				.stream()
@@ -228,18 +233,19 @@ public class RuntimeSemanticBindingService {
 				.filter(value -> Objects.equals(value.getDimensionCode(), assetKey))
 				.findFirst()
 				.map(value -> new ResolvedRuntimeBinding(normalizedPhrase, displayPhrase, assetType, assetKey,
-						businessLabel, value.getModelCode(), source, sourceRecordId))
+						businessLabel, value.getModelCode(), source, sourceRecordId, principalId))
 				.orElse(null);
-			case "ENUM_VALUE" ->
-				enumBinding(catalog, normalizedPhrase, displayPhrase, assetKey, businessLabel, source, sourceRecordId);
-			case "TIME_COLUMN" ->
-				timeBinding(catalog, normalizedPhrase, displayPhrase, assetKey, businessLabel, source, sourceRecordId);
+			case "ENUM_VALUE" -> enumBinding(catalog, normalizedPhrase, displayPhrase, assetKey, businessLabel, source,
+					sourceRecordId, principalId);
+			case "TIME_COLUMN" -> timeBinding(catalog, normalizedPhrase, displayPhrase, assetKey, businessLabel, source,
+					sourceRecordId, principalId);
 			default -> null;
 		};
 	}
 
 	private ResolvedRuntimeBinding timeBinding(SemanticCatalogSnapshot catalog, String normalizedPhrase,
-			String displayPhrase, String assetKey, String businessLabel, String source, Long sourceRecordId) {
+			String displayPhrase, String assetKey, String businessLabel, String source, Long sourceRecordId,
+			String principalId) {
 		String[] parts = assetKey.split(":", 2);
 		if (parts.length != 2) {
 			return null;
@@ -253,12 +259,13 @@ public class RuntimeSemanticBindingService {
 				.getRole() == cn.lgs.semevosql.semantic.domain.SemanticColumnRole.TIME)
 			.findFirst()
 			.map(value -> new ResolvedRuntimeBinding(normalizedPhrase, displayPhrase, "TIME_COLUMN", assetKey,
-					businessLabel, parts[0], source, sourceRecordId))
+					businessLabel, parts[0], source, sourceRecordId, principalId))
 			.orElse(null);
 	}
 
 	private ResolvedRuntimeBinding enumBinding(SemanticCatalogSnapshot catalog, String normalizedPhrase,
-			String displayPhrase, String assetKey, String businessLabel, String source, Long sourceRecordId) {
+			String displayPhrase, String assetKey, String businessLabel, String source, Long sourceRecordId,
+			String principalId) {
 		String[] parts = assetKey.split(":", 3);
 		if (parts.length != 3) {
 			return null;
@@ -271,7 +278,7 @@ public class RuntimeSemanticBindingService {
 					&& Objects.equals(value.getValueCode(), parts[2]))
 			.findFirst()
 			.map(value -> new ResolvedRuntimeBinding(normalizedPhrase, displayPhrase, "ENUM_VALUE", assetKey,
-					businessLabel, parts[0], source, sourceRecordId))
+					businessLabel, parts[0], source, sourceRecordId, principalId))
 			.orElse(null);
 	}
 
@@ -331,7 +338,8 @@ public class RuntimeSemanticBindingService {
 	}
 
 	public record ResolvedRuntimeBinding(String normalizedPhrase, String displayPhrase, String assetType,
-			String assetKey, String businessLabel, String modelCode, String source, Long sourceRecordId) {
+			String assetKey, String businessLabel, String modelCode, String source, Long sourceRecordId,
+			String principalId) {
 	}
 
 }

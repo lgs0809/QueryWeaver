@@ -65,15 +65,6 @@ public class SemanticSqlCompiler {
 			"bigint", "double", "float", "round", "floor", "ceil", "abs", "lower", "upper", "trim", "substring",
 			"concat", "and", "or", "not", "in", "between", "like", "is", "null", "true", "false");
 
-	/**
-	 * Query intents that this deterministic compiler cannot faithfully express yet. This belongs to compiler capability
-	 * probing rather than semantic binding: a match means "planner required", not "complex query". The Planner may still
-	 * choose a single physical SQL step using CTE/window/subquery constructs.
-	 */
-	private static final Set<String> PLANNER_REQUIRED_QUERY_TERMS = Set.of("window", "lag", "lead", "cohort",
-			"retention", "rolling", "weekly", "week", "quarter", "按周", "每周", "季度", "同比", "环比", "留存",
-			"复购", "窗口", "移动平均", "同期");
-
 	public CompiledSemanticQuery compile(SemanticBlueprint plan, SemanticCatalogSnapshot catalog,
 			Map<Integer, SqlDialect> dialects, Clock clock, ZoneId defaultZone) {
 		Objects.requireNonNull(plan, "semantic blueprint is required");
@@ -81,9 +72,6 @@ public class SemanticSqlCompiler {
 		if (!plan.isExecutable()) {
 			throw new IllegalArgumentException(
 					"Semantic Blueprint is not executable: " + String.join("; ", plan.getValidationErrors()));
-		}
-		if (!"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())) {
-			throw new ConstrainedGenerationRequiredException("Semantic Blueprint requires constrained generation mode");
 		}
 		assertDeterministicCapability(plan);
 		if (plan.getProjections() == null || plan.getProjections().isEmpty()) {
@@ -121,9 +109,6 @@ public class SemanticSqlCompiler {
 			throw new IllegalArgumentException(
 					"Semantic Blueprint is not executable: " + String.join("; ", plan.getValidationErrors()));
 		}
-		if (!"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())) {
-			throw new ConstrainedGenerationRequiredException("Semantic Blueprint requires constrained generation mode");
-		}
 		assertDeterministicCapability(plan);
 		CompileContext context = context(plan, catalog);
 		SemanticBlueprint.SourceSubPlan source = sourcePlans(plan, context).stream()
@@ -136,11 +121,12 @@ public class SemanticSqlCompiler {
 	}
 
 	private void assertDeterministicCapability(SemanticBlueprint plan) {
-		String query = Objects.toString(plan.getCanonicalQuery(), "").toLowerCase(Locale.ROOT);
-		String unsupported = PLANNER_REQUIRED_QUERY_TERMS.stream().filter(query::contains).findFirst().orElse(null);
-		if (unsupported != null) {
-			throw new ConstrainedGenerationRequiredException(
-					"Deterministic compiler does not represent query intent '" + unsupported + "'; execution planning is required");
+		LoweringCapabilityProbe.Decision decision = LoweringCapabilityProbe.probe(plan);
+		if (decision.status() == LoweringCapabilityProbe.Status.INVALID) {
+			throw new IllegalArgumentException(decision.reason());
+		}
+		if (decision.status() == LoweringCapabilityProbe.Status.REQUIRES_GENERATION) {
+			throw new ConstrainedGenerationRequiredException(decision.reason());
 		}
 	}
 

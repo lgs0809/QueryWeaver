@@ -56,8 +56,20 @@ if (projectId) {
     {
       name: 'semantic governance',
       path: `/projects/${encodeURIComponent(projectId)}?section=release`,
-      includes: ['语义版本与知识更新', 'Semantic Versions', 'Corpus Revisions', 'ChangeSets'],
-      excludes: ['项目详情加载失败'],
+      includes: ['业务模型版本与资料更新', '业务模型版本', '资料修订', '变更记录'],
+      excludes: ['项目详情加载失败', 'Semantic Versions', 'Corpus Revisions'],
+    },
+    {
+      name: 'external agent integration',
+      path: `/projects/${encodeURIComponent(projectId)}?section=external`,
+      includes: ['外部 Agent 接入'],
+      excludes: ['绑定版本', 'Service Principal', 'Production MCP Tools', 'Project 必须处于 READY'],
+    },
+    {
+      name: 'semantic improvement',
+      path: `/projects/${encodeURIComponent(projectId)}?section=evolution`,
+      includes: ['业务模型建议'],
+      excludes: ['语义演进候选'],
     },
     {
       name: 'project chat',
@@ -98,7 +110,7 @@ const devtoolsUrl = new Promise((resolve, reject) => {
 
 const startupTimer = setTimeout(() => {
   devtoolsReject(new Error(`Chrome DevTools did not start. ${chromeStderr.trim()}`));
-}, 10_000);
+}, 20_000);
 
 chrome.stderr.on('data', (chunk) => {
   chromeStderr += chunk;
@@ -127,14 +139,20 @@ const closeResources = () => {
     // Best-effort cleanup only.
   }
   if (!chrome.killed) chrome.kill('SIGTERM');
-  rmSync(profileDirectory, { recursive: true, force: true });
+  try {
+    rmSync(profileDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    console.warn(
+      `[browser-acceptance] temporary Chrome profile cleanup skipped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 };
 
 try {
   const websocketUrl = await devtoolsUrl;
   socket = new WebSocket(websocketUrl);
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Timed out connecting to Chrome DevTools.')), 5000);
+    const timer = setTimeout(() => reject(new Error('Timed out connecting to Chrome DevTools.')), 10_000);
     socket.addEventListener('open', () => {
       clearTimeout(timer);
       resolve();
@@ -169,7 +187,7 @@ try {
     }
   });
 
-  const command = (method, params = {}, sessionId, timeoutMs = 10_000) => {
+  const command = (method, params = {}, sessionId, timeoutMs = 15_000) => {
     const id = ++messageId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -181,7 +199,7 @@ try {
     });
   };
 
-  const waitForEvent = (method, sessionId, timeoutMs = 10_000) =>
+  const waitForEvent = (method, sessionId, timeoutMs = 15_000) =>
     new Promise((resolve, reject) => {
       const waiter = { method, sessionId, resolve, reject, timer: undefined };
       waiter.timer = setTimeout(() => {
@@ -203,20 +221,25 @@ try {
     await command('Page.navigate', { url }, sessionId);
     await loaded;
 
-    const evaluation = await command(
-      'Runtime.evaluate',
-      {
-        expression:
-          '(async () => { await new Promise((resolve) => setTimeout(resolve, 2500)); return document.body.innerText; })()',
-        awaitPromise: true,
-        returnByValue: true,
-      },
-      sessionId,
-      10_000,
-    );
-    const bodyText = evaluation.result?.value || '';
-    const missing = testCase.includes.filter((text) => !bodyText.includes(text));
-    const forbidden = testCase.excludes.filter((text) => bodyText.includes(text));
+    const readinessDeadline = Date.now() + 12_000;
+    let bodyText = '';
+    let missing = [...testCase.includes];
+    let forbidden = [];
+    do {
+      const evaluation = await command(
+        'Runtime.evaluate',
+        {
+          expression: "document.body?.innerText || ''",
+          returnByValue: true,
+        },
+        sessionId,
+      );
+      bodyText = evaluation.result?.value || '';
+      missing = testCase.includes.filter((text) => !bodyText.includes(text));
+      forbidden = testCase.excludes.filter((text) => bodyText.includes(text));
+      if (!missing.length && !forbidden.length) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } while (Date.now() < readinessDeadline);
 
     if (missing.length || forbidden.length) {
       throw new Error(

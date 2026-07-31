@@ -176,6 +176,8 @@ public class VerifiedQueryExecutionService {
 			.projectVersionId(plan.getProjectVersionId())
 			.canonicalQuery(plan.getCanonicalQuery())
 			.compilerMode(plan.getCompilerMode())
+			.computationIntent(plan.getComputationIntent())
+			.bindingDependencies(plan.getBindingDependencies())
 			.models(plan.getModels().stream().filter(item -> modelCodes.contains(item.getModelCode())).toList())
 			.metrics(plan.getMetrics().stream().filter(item -> modelCodes.contains(item.getModelCode())).toList())
 			.dimensions(plan.getDimensions().stream().filter(item -> modelCodes.contains(item.getModelCode())).toList())

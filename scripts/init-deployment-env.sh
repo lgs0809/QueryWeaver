@@ -40,11 +40,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     SEMEVOSQL_MCP_PUBLIC_BASE_URL=*)
       printf 'SEMEVOSQL_MCP_PUBLIC_BASE_URL=\n' >>"$tmp"
       ;;
-    SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE=*)
-      # The generated environment targets the standalone/local-evaluation profile.
-      # ProductionConfigurationGuard requires this to be false when prod is enabled.
-      printf 'SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE=true\n' >>"$tmp"
-      ;;
     SEMEVOSQL_METADATA_PORT=*)
       ;;
     *)

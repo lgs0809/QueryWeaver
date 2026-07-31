@@ -35,6 +35,7 @@ import cn.lgs.semevosql.project.domain.SemanticProjectRepository;
 import cn.lgs.semevosql.run.ExecutionSnapshotService;
 import cn.lgs.semevosql.run.QueryExecutionExplanationService;
 import cn.lgs.semevosql.run.QueryRun;
+import cn.lgs.semevosql.run.QueryRunErrorPresenter;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService;
 import cn.lgs.semevosql.run.RunEvent;
@@ -85,6 +86,8 @@ public class ProjectConversationService {
 	private final GraphService graphService;
 
 	private final QueryRunService runService;
+
+	private final QueryRunErrorPresenter runErrorPresenter;
 
 	private final SemEvoSQLProductionService productionService;
 
@@ -563,7 +566,7 @@ public class ProjectConversationService {
 		if (run.status() == QueryRun.RunStatus.CANCELLED) {
 			return "任务已取消。";
 		}
-		return "任务结束：" + run.status() + (run.errorMessage() == null ? "" : "，" + run.errorMessage());
+		return runErrorPresenter.present(run).message();
 	}
 
 	private void startGraphAfterCommit(GraphRequest request) {

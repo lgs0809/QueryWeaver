@@ -12,9 +12,6 @@
           <p>{{ projectView?.project.description || projectView?.project.businessDomain }}</p>
         </div>
         <div class="heading-actions">
-          <el-button v-if="canManageMembers" @click="membersDialogVisible = true">
-            项目成员
-          </el-button>
           <el-tag v-if="health" :type="health.queryReady ? 'success' : 'warning'" effect="plain">
             {{ health.queryReady ? '可以问数' : '准备中' }}
           </el-tag>
@@ -92,10 +89,10 @@
             />
           </el-tab-pane>
 
-          <el-tab-pane v-if="canManageMembers" label="外部 Agent" name="external" lazy>
+          <el-tab-pane v-if="canManageProject" label="外部 Agent" name="external" lazy>
             <ProjectMcpDeployment
               :project-id="projectId"
-              :can-manage="canManageMembers"
+              :can-manage="canManageProject"
               :query-ready="Boolean(health?.queryReady)"
             />
           </el-tab-pane>
@@ -195,7 +192,7 @@
                 <div class="section-copy">
                   <h2>验证业务模型</h2>
                   <p>
-                    使用现有评估与 Replay 事实验证业务模型变更，不把自动回归结果等同于人工发布决策。
+                    使用现有评估与自动回归记录验证业务模型变更，并将自动验证结果与人工发布决策明确区分。
                   </p>
                 </div>
                 <ProjectEvaluations
@@ -209,7 +206,7 @@
               <el-tab-pane label="语义治理" name="release" lazy>
                 <ProjectSemanticGovernance
                   :project-id="projectId"
-                  :can-manage="canManageMembers"
+                  :can-manage="canManageProject"
                   @changed="load"
                 />
               </el-tab-pane>
@@ -217,12 +214,6 @@
           </el-tab-pane>
         </el-tabs>
       </el-card>
-
-      <ProjectMembersDialog
-        v-if="canManageMembers"
-        v-model="membersDialogVisible"
-        :project-id="projectId"
-      />
 
     </section>
   </BaseLayout>
@@ -242,7 +233,6 @@
     canReviewProject as canReviewProjectCapability,
     projectSectionVisible,
   } from '@/services/projectCapabilities.mjs';
-  import ProjectMembersDialog from '@/components/project/ProjectMembersDialog.vue';
   import ProjectOverview from '@/components/project/ProjectOverview.vue';
   import {
     projectDetailSectionForTarget,
@@ -357,7 +347,6 @@
   const governanceTab = ref(
     ['release', 'versions', 'releases'].includes(requestedSection) ? 'release' : 'test',
   );
-  const membersDialogVisible = ref(false);
   const canEditProject = computed(() =>
     canEditProjectCapability(
       projectAccess.value?.accessRole,
@@ -381,7 +370,7 @@
   const canAdminOperations = computed(
     () => Boolean(projectAccess.value?.globalAdmin) || operator.value?.role === 'ADMIN',
   );
-  const canManageMembers = computed(() =>
+  const canManageProject = computed(() =>
     canManageProjectCapability(
       projectAccess.value?.accessRole,
       operator.value?.role,
@@ -392,7 +381,7 @@
     projectSectionVisible(section, {
       edit: canEditProject.value,
       review: canReviewProject.value,
-      manage: canManageMembers.value,
+      manage: canManageProject.value,
     });
   const primaryAction = computed(() => projectPrimaryAction(health.value));
   const primaryActionLabel = computed(() => {
@@ -456,7 +445,7 @@
       ) {
         return '需要项目编辑权限和 Publisher 以上全局角色才能发布或激活业务模型。';
       }
-      return '当前账号只有查看权限，业务规则确认需要项目编辑权限。';
+      return '当前运行权限仅允许查看，业务规则确认需要项目编辑权限。';
     }
     return health.value?.nextActions[0]?.description || '系统只会执行当前事实允许的下一步。';
   });

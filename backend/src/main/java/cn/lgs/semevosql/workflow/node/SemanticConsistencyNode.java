@@ -125,7 +125,7 @@ public class SemanticConsistencyNode implements NodeAction {
 		String executionDescription = getCurrentExecutionStepInstruction(state);
 		SemanticConsistencyDTO semanticConsistencyDTO = SemanticConsistencyDTO.builder()
 			.dialect(dialect)
-			.sql(physicalSql)
+			.sql(consistencyReviewSql(compilerMode, semanticSql, physicalSql))
 			.executionDescription(executionDescription)
 			.schemaInfo(buildMixMacSqlDbPrompt(schemaDTO, true))
 			.semanticModel(semanticModel)
@@ -176,6 +176,13 @@ public class SemanticConsistencyNode implements NodeAction {
 				}, validationResultFlux);
 
 		return Map.of(SEMANTIC_CONSISTENCY_NODE_OUTPUT, generator);
+	}
+
+	static String consistencyReviewSql(String compilerMode, String semanticSql, String physicalSql) {
+		// Query Preflight may inject system-owned model-materialization CTEs and supporting columns. Semantic
+		// consistency judges the model-authored query against the Blueprint; physical SQL is governed separately by
+		// Preflight/AST/safety/cost gates and must not be mistaken for model-authored field selection.
+		return "SEMANTIC_SQL".equalsIgnoreCase(compilerMode) ? semanticSql : physicalSql;
 	}
 
 	static List<String> advancedExecutionStructureErrors(String executionDescription, String semanticSql) {

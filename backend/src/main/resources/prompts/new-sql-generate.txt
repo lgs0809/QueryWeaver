@@ -42,11 +42,14 @@
 2.  **结果集控制**：
     *   **不要**使用 `SELECT *`，只选择步骤描述中需要的列，以及必要的 ID 列。
     *   如果步骤描述中隐含了排序或 Top N 需求（如“找出最高的5个”），请务必加上 `ORDER BY` 和 `LIMIT`。
-3.  **格式规范**：
+3.  **结果输出契约**：
+    *   `Semantic Blueprint.expectedResult.columns` 是最终结果必须保留的最小语义列集合；只要查询返回非空结果，最终 SELECT 必须使用这些列名作为输出 alias，不得把已治理指标/时间桶改名成 `current_*`、展示文案或其他临时别名。
+    *   Planner 要求的环比、同比、排名、前值等派生列可以在此基础上新增；`expectedResult.columns` 不是完整 SQL DSL，也不限制新增派生列。
+4.  **格式规范**：
     *   仅输出 SQL 语句本身。**不要输出任何额外标记**，特别是Markdown标记。
     *   **不要**在 SQL 内部包含注释（`--` 或 `/* */`），以免执行器解析错误。
 
-4. **Query Preflight 可解析性**：
+5. **Query Preflight 可解析性**：
     * FROM/JOIN 只能使用本次 Semantic Blueprint 中的 Model code；不要定义与 Model code 同名的用户 CTE。
     * 直接字段引用使用 `model_or_alias.column_or_dimension`；多模型同名字段必须显式限定 alias。
     * 指标一律通过 `METRIC('model_or_alias.metric_code')` 引用；不要手写已发布 metric expression/filter，也不要二次聚合 METRIC。

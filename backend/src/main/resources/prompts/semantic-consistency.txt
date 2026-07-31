@@ -12,7 +12,7 @@
 ```sql
 {sql}
 ```
-*这里审计的是 Query Preflight 后的 Physical SQL。Semantic SQL 中的 `METRIC(...)` / `RELATIONSHIP(...)` 已由系统确定性展开；不要要求 Physical SQL 保留这些编译原语。*
+*Advanced execution 审计的是模型生成的 Semantic SQL，而不是 Query Preflight 注入系统物化 CTE 后的 Physical SQL。`METRIC(...)` / `RELATIONSHIP(...)` 是受治理的 Semantic SQL 编译原语，只要其引用与 Semantic Blueprint 一致，就视为合法表达式；不要把它们当成数据库原生函数做语法报错。Physical SQL 的原语展开、系统物化 CTE、额外支撑列由 Query Preflight、AST/Safety Guard 与 EXPLAIN/Cost Guard 单独验证。*
 
 ## 3. 数据库 Schema (事实标准)
 {schema_info}

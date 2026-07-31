@@ -26,6 +26,8 @@ import cn.lgs.semevosql.learning.QueryCaseHints.EnumBindingHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.FilterBindingHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.ResultCompositionHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.TimeBindingHint;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
 import cn.lgs.semevosql.semantic.domain.SemanticCandidateSet;
 import cn.lgs.semevosql.semantic.domain.SemanticCandidateSet.RetrievalEvidence;
@@ -141,6 +143,19 @@ public class SemanticBlueprintGenerationService {
 			    empty, a RESOLVED response is valid only when the request is for independent scalar aggregates and
 			    resultComposition.type=SCALAR. Never return a relationship-free multi-model RESOLVED selection with
 			    resultComposition=null. Conversely, never invent a row-level relationship merely to satisfy this check.
+			16. computationCapabilities describes WHAT COMPUTATION the requested answer requires, never HOW SQL should be written.
+			    TIME_FILTER means the user's requested observation/output rows are explicitly bounded by a time predicate.
+			    A reference period used only as the baseline of PERIOD_COMPARISON is not itself a TIME_FILTER. If the user asks
+			    for one bounded period and also compares it with another period, include both TIME_FILTER and PERIOD_COMPARISON;
+			    if the user asks for a sequence of periods each compared with its predecessor, use PERIOD_COMPARISON without
+			    inventing a relative observation filter merely from the comparison baseline.
+			    Use only these capability names when required by the current request:
+			    PROJECTION, FILTER, AGGREGATION, GROUPING, ORDERING, LIMIT, JOIN, TIME_FILTER, TIME_BUCKET,
+			    CONDITIONAL_AGGREGATION, PERIOD_COMPARISON, WINDOW_ANALYTICS, PARTITION_RANKING,
+			    MULTI_STAGE_AGGREGATION, SET_OPERATION, RECURSIVE_QUERY, COHORT_ANALYSIS, MULTI_SOURCE,
+			    CROSS_SOURCE_MERGE, SCALAR_COMPOSITION. Do not encode CTEs, LAG/LEAD calls, window frames, subqueries,
+			    expressions or other SQL AST structure. Include all capabilities materially required by the answer even when
+			    the deterministic SQL generator may not implement them; generator capability is an execution concern.
 
 			For a resolved request return exactly one JSON object and no Markdown:
 			{
@@ -150,6 +165,7 @@ public class SemanticBlueprintGenerationService {
 			  "ruleCodes": ["published_rule_code"],
 			  "relationshipCodes": ["published_relationship_code"],
 			  "grainCodes": ["published_grain_code"],
+			  "computationCapabilities": ["AGGREGATION","TIME_BUCKET"],
 			  "enumBindings": [
 			    {"modelCode":"published_model_code","columnName":"published_column","valueCode":"published_value"}
 			  ],
@@ -271,9 +287,10 @@ public class SemanticBlueprintGenerationService {
 			return new PlanningDecision(explicit, calls);
 		}
 		try {
-			QueryCaseHints binding = parseAndValidate(query, response, candidates, requiredHints);
-			SemanticPlanningOutcome ambiguity = unresolvedGenericTimeAxis(query, candidates, binding);
-			return new PlanningDecision(ambiguity == null ? new SemanticPlanningOutcome.Resolved(binding) : ambiguity, calls);
+			ParsedPlanningSelection selection = parseAndValidate(query, response, candidates, requiredHints);
+			SemanticPlanningOutcome ambiguity = unresolvedTimeAxis(candidates, selection.binding(), selection.computationIntent());
+			return new PlanningDecision(ambiguity == null
+					? new SemanticPlanningOutcome.Resolved(selection.binding(), selection.computationIntent()) : ambiguity, calls);
 		}
 		catch (IllegalArgumentException firstFailure) {
 			String repairPrompt = userPrompt + "\n\nYour previous response was rejected by SemEvoSQL: "
@@ -287,9 +304,10 @@ public class SemanticBlueprintGenerationService {
 				return new PlanningDecision(repairedExplicit, calls);
 			}
 			try {
-				QueryCaseHints binding = parseAndValidate(query, repaired, candidates, requiredHints);
-				SemanticPlanningOutcome ambiguity = unresolvedGenericTimeAxis(query, candidates, binding);
-				return new PlanningDecision(ambiguity == null ? new SemanticPlanningOutcome.Resolved(binding) : ambiguity, calls);
+				ParsedPlanningSelection selection = parseAndValidate(query, repaired, candidates, requiredHints);
+				SemanticPlanningOutcome ambiguity = unresolvedTimeAxis(candidates, selection.binding(), selection.computationIntent());
+				return new PlanningDecision(ambiguity == null
+						? new SemanticPlanningOutcome.Resolved(selection.binding(), selection.computationIntent()) : ambiguity, calls);
 			}
 			catch (IllegalArgumentException finalFailure) {
 				return new PlanningDecision(new SemanticPlanningOutcome.Rejected("INVALID_GOVERNED_SELECTION",
@@ -320,9 +338,10 @@ public class SemanticBlueprintGenerationService {
 			return new PlanningDecision(explicit, calls);
 		}
 		try {
-			QueryCaseHints binding = parseAndValidate(query, response, candidates, requiredHints);
-			SemanticPlanningOutcome ambiguity = unresolvedGenericTimeAxis(query, candidates, binding);
-			return new PlanningDecision(ambiguity == null ? new SemanticPlanningOutcome.Resolved(binding) : ambiguity, calls);
+			ParsedPlanningSelection selection = parseAndValidate(query, response, candidates, requiredHints);
+			SemanticPlanningOutcome ambiguity = unresolvedTimeAxis(candidates, selection.binding(), selection.computationIntent());
+			return new PlanningDecision(ambiguity == null
+					? new SemanticPlanningOutcome.Resolved(selection.binding(), selection.computationIntent()) : ambiguity, calls);
 		}
 		catch (IllegalArgumentException failure) {
 			return new PlanningDecision(new SemanticPlanningOutcome.Rejected("INVALID_GOVERNED_SELECTION",
@@ -330,9 +349,22 @@ public class SemanticBlueprintGenerationService {
 		}
 	}
 
-	static SemanticPlanningOutcome unresolvedGenericTimeAxis(String query, SemanticCandidateSet candidates,
-			QueryCaseHints binding) {
-		if (!requestsGenericTemporalGrouping(query) || candidates == null || binding == null) {
+	static SemanticPlanningOutcome unresolvedTimeAxis(SemanticCandidateSet candidates, QueryCaseHints binding,
+			ComputationIntent computationIntent) {
+		if (candidates == null || binding == null || computationIntent == null
+				|| !computationIntent.requiresExplicitTimeAxis()) {
+			return null;
+		}
+		if (binding.timeBinding() != null) {
+			return null;
+		}
+		Set<String> governedMetricTimeAxes = candidates.metrics()
+			.stream()
+			.filter(metric -> binding.metricCodes().contains(metric.getMetricCode()))
+			.filter(metric -> StringUtils.hasText(metric.getTimeColumn()))
+			.map(metric -> metric.getModelCode() + "::" + metric.getTimeColumn())
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		if (governedMetricTimeAxes.size() == 1) {
 			return null;
 		}
 		List<SemanticCatalogSnapshot.Dimension> plausible = candidates.dimensions()
@@ -351,21 +383,8 @@ public class SemanticBlueprintGenerationService {
 			.map(dimension -> new SemanticPlanningOutcome.Option("time-axis:" + dimension.getDimensionCode(),
 					timeAxisLabel(dimension), "DIMENSION", dimension.getDimensionCode()))
 			.toList();
-		return new SemanticPlanningOutcome.ClarificationRequired("SEMANTIC_AMBIGUITY", "你希望按哪个业务时间字段统计？", options,
-				"The request asks for a generic temporal grouping but multiple governed business time axes are plausible.");
-	}
-
-	private static boolean requestsGenericTemporalGrouping(String query) {
-		if (!StringUtils.hasText(query)) {
-			return false;
-		}
-		String normalized = query.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
-		return normalized.contains("按时间统计") || normalized.contains("按时间分组") || normalized.contains("按时间汇总")
-				|| normalized.contains("按时间趋势") || normalized.contains("按日期统计") || normalized.contains("按日期分组")
-				|| normalized.contains("按日期汇总") || normalized.contains("按日期趋势") || normalized.contains("随时间")
-				|| normalized.contains("时间趋势") || normalized.contains("日期趋势") || normalized.contains("by time")
-				|| normalized.contains("by date") || normalized.contains("over time") || normalized.contains("time trend")
-				|| normalized.contains("date trend");
+		return new SemanticPlanningOutcome.ClarificationRequired("SEMANTIC_AMBIGUITY", "你希望使用哪个业务时间字段？", options,
+				"The requested computation requires a business time axis, but multiple governed time dimensions are plausible.");
 	}
 
 	private static String timeAxisLabel(SemanticCatalogSnapshot.Dimension dimension) {
@@ -645,7 +664,7 @@ public class SemanticBlueprintGenerationService {
 		return result;
 	}
 
-	private QueryCaseHints parseAndValidate(String query, String response, SemanticCandidateSet candidates,
+	private ParsedPlanningSelection parseAndValidate(String query, String response, SemanticCandidateSet candidates,
 			QueryCaseHints priorHints) {
 		JsonNode root = parseObject(response);
 		Set<String> metricCodes = stringSet(root.path("metricCodes"));
@@ -653,6 +672,7 @@ public class SemanticBlueprintGenerationService {
 		Set<String> ruleCodes = stringSet(root.path("ruleCodes"));
 		Set<String> relationshipCodes = stringSet(root.path("relationshipCodes"));
 		Set<String> grainCodes = stringSet(root.path("grainCodes"));
+		ComputationIntent computationIntent = computationIntent(root.path("computationCapabilities"));
 
 		Map<String, SemanticCatalogSnapshot.Metric> metrics = candidates.metrics().stream()
 			.collect(Collectors.toMap(SemanticCatalogSnapshot.Metric::getMetricCode, Function.identity()));
@@ -724,7 +744,7 @@ public class SemanticBlueprintGenerationService {
 				relationshipCodes, ruleCodes, enumBindings, filterBindings, List.of(), timeBinding, true,
 				"LLM_SEMANTIC_PLANNER", List.of(), confidence, Map.of("semanticPlanner", confidence), resultComposition);
 		assertRequiredPriorBindings(result, priorHints);
-		return result;
+		return new ParsedPlanningSelection(result, computationIntent);
 	}
 
 	private void assertRequiredPriorBindings(QueryCaseHints result, QueryCaseHints priorHints) {
@@ -1148,6 +1168,20 @@ public class SemanticBlueprintGenerationService {
 		}
 	}
 
+	private ComputationIntent computationIntent(JsonNode node) {
+		Set<String> names = stringSet(node);
+		LinkedHashSet<Capability> capabilities = new LinkedHashSet<>();
+		for (String name : names) {
+			try {
+				capabilities.add(Capability.valueOf(name.trim().toUpperCase(Locale.ROOT)));
+			}
+			catch (IllegalArgumentException invalid) {
+				throw new IllegalArgumentException("Unsupported computation capability: " + name);
+			}
+		}
+		return new ComputationIntent(capabilities);
+	}
+
 	private double confidence(JsonNode node) {
 		if (node == null || !node.isNumber()) {
 			return 0.90d;
@@ -1208,6 +1242,9 @@ public class SemanticBlueprintGenerationService {
 
 	private List<RetrievalHit> safeHits(Collection<RetrievalHit> values) {
 		return values == null ? List.of() : List.copyOf(values);
+	}
+
+	private record ParsedPlanningSelection(QueryCaseHints binding, ComputationIntent computationIntent) {
 	}
 
 	public enum PlannerProfile {

@@ -95,7 +95,11 @@
             <el-button v-if="activeRun" link type="primary" @click="openDiagnosis(activeRun.runId)">
               查询诊断
             </el-button>
-            <el-button v-if="activeRun" link @click="openRunDetails(activeRun.runId)">
+            <el-button
+              v-if="activeRun && canViewTechnicalDetails"
+              link
+              @click="openRunDetails(activeRun.runId)"
+            >
               运行详情
             </el-button>
             <el-button v-if="activeRun && !terminalRun" type="danger" plain @click="cancelRun">
@@ -277,9 +281,9 @@
                 <span>这次选择：</span>
                 <el-radio-group v-model="selectedClarificationScope" size="small">
                   <el-radio-button value="QUERY">仅本次</el-radio-button>
-                  <el-radio-button value="USER">记住我的选择</el-radio-button>
+                  <el-radio-button value="USER">记住我的习惯</el-radio-button>
                   <el-radio-button v-if="canSubmitProjectRule" value="PROJECT">
-                    提交为项目规则
+                    作为项目统一定义
                   </el-radio-button>
                 </el-radio-group>
               </div>
@@ -437,7 +441,7 @@
                         <el-radio-button value="QUERY">仅修正这次</el-radio-button>
                         <el-radio-button value="USER">以后按我的习惯理解</el-radio-button>
                         <el-radio-button v-if="canSubmitProjectRule" value="PROJECT">
-                          提交为项目规则
+                          作为项目统一定义
                         </el-radio-button>
                       </el-radio-group>
                     </template>
@@ -490,7 +494,7 @@
                         prompt.businessLabel
                       }}”。{{
                         canSubmitProjectRule
-                          ? '可以提交为项目规则，由后续审核和版本发布决定是否对所有人使用。'
+                          ? '可以升级为项目统一定义；通过语义验证、回归与发布后才会对项目共享。'
                           : '系统会继续把它作为你的个人选择使用。'
                       }}
                     </span>
@@ -502,14 +506,14 @@
                         :loading="preferenceActionId === prompt.preferenceId"
                         @click="handlePreferenceUpgrade(prompt.preferenceId, 'PROMOTE')"
                       >
-                        提交为项目规则
+                        升级为项目统一定义
                       </el-button>
                       <el-button
                         size="small"
                         :loading="preferenceActionId === prompt.preferenceId"
                         @click="handlePreferenceUpgrade(prompt.preferenceId, 'CONTINUE')"
                       >
-                        继续只记住我的选择
+                        继续作为我的习惯
                       </el-button>
                       <el-button
                         size="small"
@@ -821,6 +825,12 @@
     () =>
       ['EDITOR', 'REVIEWER', 'PUBLISHER', 'ADMIN'].includes(currentOperatorRole.value) &&
       ['EDITOR', 'OWNER'].includes(selectedProjectAccess.value?.accessRole || ''),
+  );
+  const canViewTechnicalDetails = computed(
+    () =>
+      Boolean(selectedProjectAccess.value?.globalAdmin) ||
+      (['EDITOR', 'REVIEWER', 'PUBLISHER', 'ADMIN'].includes(currentOperatorRole.value) &&
+        ['EDITOR', 'OWNER'].includes(selectedProjectAccess.value?.accessRole || '')),
   );
   const humanReviewRequired = computed(() => {
     if (
@@ -1213,9 +1223,9 @@
       hiddenUpgradePromptIds.value = new Set([...hiddenUpgradePromptIds.value, preferenceId]);
       ElMessage.success(
         action === 'PROMOTE'
-          ? '已提交为项目规则建议；当前个人选择继续有效，待审核发布后才会影响其他用户'
+          ? '已申请升级为项目统一定义；当前个人习惯继续有效，通过语义验证、回归与发布后才会项目共享'
           : action === 'CONTINUE'
-            ? '已继续记住为你的选择，后续达到下一阈值再提醒'
+            ? '已继续作为你的个人习惯使用，后续稳定使用一段时间后再提醒'
             : '已关闭这条建议的提醒',
       );
     } catch (error) {
@@ -1516,7 +1526,7 @@
           selectedScope === 'USER'
             ? `已记住你把“${rawExpression}”理解为“${option.businessLabel}”。后续你的查询会优先使用这个含义。`
             : selectedScope === 'PROJECT'
-              ? `已按“${option.businessLabel}”重新查询，并提交为项目规则建议；审核发布前不会影响其他用户。`
+              ? `已按“${option.businessLabel}”重新查询，并申请作为项目统一定义；通过语义验证、回归与发布前不会影响其他用户。`
               : `已按“${option.businessLabel}”重新查询。这次修正只对本次查询生效。`,
         );
       } else {
@@ -1542,7 +1552,7 @@
           correctionCategory.value === 'DATA_QUALITY'
             ? '已记录为数据质量问题，这条错误结果不会继续参与学习。'
             : correctionCategory.value === 'PLANNING'
-              ? '已提交规划策略改进建议；必须经过 Planner Replay、审核与发布后才会影响后续规划。'
+              ? '已提交规划策略改进建议；必须经过回归验证、审核与发布后才会影响后续查询规划。'
               : ['DEFINITION', 'TIME', 'FILTER', 'RELATIONSHIP'].includes(correctionCategory.value)
                 ? '已提交业务模型改进建议；验证与回归测试通过前不会修改正式口径。'
                 : '已记录这次纠正，这条错误结果不会继续参与学习。',

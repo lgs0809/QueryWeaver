@@ -23,27 +23,6 @@
               <span>{{ item.label }}</span>
             </button>
           </nav>
-          <el-dropdown v-if="operator" trigger="click">
-            <button class="account-button" title="当前账号与权限">
-              <span class="account-avatar">{{ operator.operator.slice(0, 1).toUpperCase() }}</span>
-              <span class="account-name">{{ operator.operator }}</span>
-              <i class="bi bi-chevron-down"></i>
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item disabled>
-                  {{ operator.role }} · {{ operator.source }}
-                </el-dropdown-item>
-                <el-dropdown-item v-if="canAdmin" @click="router.push('/admin/models')">
-                  模型
-                </el-dropdown-item>
-                <el-dropdown-item v-if="canAdmin" @click="router.push('/admin/settings')">
-                  系统服务
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <div v-else-if="operatorError" class="operator-error">{{ operatorError }}</div>
         </div>
       </div>
     </header>
@@ -102,6 +81,8 @@
   const canAdmin = computed(() => hasRole('ADMIN'));
   const isActive = modules => modules.includes(route.meta.module);
   const degradedMessage = computed(() => {
+    if (operatorError.value)
+      return '本机运行上下文暂时不可用；管理和写操作会保持关闭，服务端仍会继续校验权限。';
     if (readinessError.value)
       return '模型能力状态暂时无法读取；项目、历史结果和管理页面仍可继续访问。';
     if (!readiness.value || readiness.value.ready) return '';
@@ -118,9 +99,7 @@
       platformContext.readiness(true),
     ]);
     if (operatorResult.status === 'fulfilled') operator.value = operatorResult.value;
-    else
-      operatorError.value =
-        operatorResult.reason instanceof Error ? operatorResult.reason.message : '账号信息不可用';
+    else operatorError.value = '本机运行上下文不可用';
     if (readinessResult.status === 'fulfilled') readiness.value = readinessResult.value;
     else
       readinessError.value =

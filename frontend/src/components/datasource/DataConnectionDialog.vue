@@ -108,11 +108,6 @@
     MYSQL: 3306,
     POSTGRESQL: 5432,
     POSTGRES: 5432,
-    ORACLE: 1521,
-    SQL_SERVER: 1433,
-    SQLSERVER: 1433,
-    HIVE: 10000,
-    DAMENG: 5236,
   };
 
   const initialize = async () => {

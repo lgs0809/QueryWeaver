@@ -17,6 +17,7 @@ package cn.lgs.semevosql.trajectory;
 
 import cn.lgs.semevosql.common.json.JsonPayloadRegistry;
 import cn.lgs.semevosql.common.json.VersionedJson;
+import cn.lgs.semevosql.evolution.LowRiskSemanticEvolutionCandidateEvent;
 import cn.lgs.semevosql.evolution.PlanningPolicyDistillationService;
 import cn.lgs.semevosql.evolution.PlanningPolicyDistillationService.DistilledPolicy;
 import cn.lgs.semevosql.evolution.SemanticPatch;
@@ -26,8 +27,10 @@ import cn.lgs.semevosql.evolution.MultiSourcePolicyPatch;
 import cn.lgs.semevosql.learning.QueryCaseGovernanceProperties;
 import cn.lgs.semevosql.learning.QueryPatternTemplateService;
 import cn.lgs.semevosql.learning.QueryPatternTemplateService.CaptureMode;
+import cn.lgs.semevosql.learning.ValidatedSemanticSqlPatternService;
 import cn.lgs.semevosql.evolution.MultiSourcePolicyPatch.PolicyAssetType;
 import cn.lgs.semevosql.evolution.MultiSourcePolicyPatchService;
+import cn.lgs.semevosql.evolution.application.LegacyEvolutionChangeSetBridge;
 import cn.lgs.semevosql.multisource.MultiSourcePolicyService;
 import cn.lgs.semevosql.run.ExecutionSnapshot;
 import cn.lgs.semevosql.run.ExecutionSnapshotService;
@@ -57,7 +60,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -85,6 +90,8 @@ public class TrajectoryAnalysisService {
 
 	private final QueryPatternTemplateService patternTemplateService;
 
+	private final ValidatedSemanticSqlPatternService semanticSqlPatternService;
+
 	private final ObjectMapper mapper = JsonUtil.getObjectMapper();
 
 	private final VersionedJson versionedJson = new VersionedJson();
@@ -98,6 +105,17 @@ public class TrajectoryAnalysisService {
 	private final SemanticEvolutionEvidenceService evolutionEvidenceService;
 
 	private final PlanningPolicyDistillationService planningPolicyDistillationService;
+
+	private LegacyEvolutionChangeSetBridge changeSetBridge;
+
+	private ApplicationEventPublisher eventPublisher;
+
+	@Autowired
+	public void setLowRiskEvolutionAutomation(LegacyEvolutionChangeSetBridge changeSetBridge,
+			ApplicationEventPublisher eventPublisher) {
+		this.changeSetBridge = changeSetBridge;
+		this.eventPublisher = eventPublisher;
+	}
 
 	@Value("${semevosql.trajectory.minimum-episodes:3}")
 	private int minimumEpisodes;
@@ -244,15 +262,18 @@ public class TrajectoryAnalysisService {
 		boolean succeeded = "SUCCEEDED".equals(text(attempt.get("status")));
 		String patternId = upsertPattern(projectId, projectVersionId, catalogHash, snapshot.compatibilityHash(),
 				patternShape, succeeded);
+		boolean corrected = feedback.stream().anyMatch(this::negativeOrCorrectionFeedback);
 		if (succeeded) {
-			boolean corrected = feedback.stream().anyMatch(this::negativeOrCorrectionFeedback);
 			CaptureMode captureMode = patternTemplateService.captureSuccessful(patternId, projectId, projectVersionId,
 					catalogHash, runId, attemptId, snapshot.plan(), sqlTraces, !clarifications.isEmpty(), corrected,
 					postExecutionReviewPassed);
 			if (captureMode != CaptureMode.NONE) {
 				promotePatternReuseMode(patternId, captureMode);
 			}
+			semanticSqlPatternService.captureSuccessful(projectId, projectVersionId, catalogHash, runId, attemptId,
+					snapshot.plan(), sqlTraces, corrected, postExecutionReviewPassed);
 		}
+		semanticSqlPatternService.recordRunOutcome(runId, succeeded && postExecutionReviewPassed && !corrected);
 		List<String> nodeSequence = nodeSequence(nodes, runId);
 		List<Map<String, Object>> decisions = decisions(nodes, clarifications, sources, postExecutionReview);
 		List<Map<String, Object>> sourceSequence = sources.stream().map(this::safeSource).toList();
@@ -701,8 +722,9 @@ public class TrajectoryAnalysisService {
 		SemanticPatch patch = new SemanticPatch(1, number(pattern.get("project_version_id")),
 				text(pattern.get("catalog_hash")), List.of(operation));
 		String candidateId = UUID.randomUUID().toString();
-		insertSemanticCandidate(candidateId, pattern, candidateType, assetType, assetKey, confidence,
-				confidence >= 0.8 ? "MEDIUM" : "LOW", patch,
+		String riskLevel = semanticRisk(issueType, operation, confidence,
+				distribution == null ? null : distribution.classification());
+		insertSemanticCandidate(candidateId, pattern, candidateType, assetType, assetKey, confidence, riskLevel, patch,
 				distribution == null ? null : distribution.classification(), independent, distribution, signal);
 		attachEvidence(candidateId, text(pattern.get("id")), signal, "DETOUR_AGGREGATE");
 	}
@@ -849,7 +871,7 @@ public class TrajectoryAnalysisService {
 		if (distribution != null) {
 			evidenceSummary.put("mappingDistribution", distribution);
 		}
-		jdbc.update("""
+		int inserted = jdbc.update("""
 				INSERT INTO qw_semantic_evolution_candidate
 				(id, project_id, source_version_id, source_catalog_hash, candidate_type, asset_type, asset_key,
 				 status, confidence, risk_level, patch_json, evidence_summary, mapping_classification,
@@ -863,6 +885,32 @@ public class TrajectoryAnalysisService {
 				distribution == null ? null : json(distribution), independent.distinctConversationCount(),
 				independent.distinctUserCount(), independent.distinctRootEvidenceCount(),
 				independent.distinctTimeWindowCount());
+		if (inserted == 1 && "LOW".equals(riskLevel) && patch instanceof SemanticPatch semanticPatch
+				&& !semanticPatch.operations().isEmpty() && changeSetBridge != null) {
+			changeSetBridge.linkCandidate(number(pattern.get("project_id")), number(pattern.get("project_version_id")),
+					candidateId, candidateType, assetType, assetKey, riskLevel, persistentPatchJson(semanticPatch),
+					Map.copyOf(evidenceSummary), representativeEpisodeId(text(pattern.get("id")), signal), "semevosql-system");
+			if (eventPublisher != null) {
+				eventPublisher.publishEvent(new LowRiskSemanticEvolutionCandidateEvent(candidateId));
+			}
+		}
+	}
+
+	private String semanticRisk(String issueType, Operation operation, double confidence, String mappingClassification) {
+		if (operation == null) {
+			return "HIGH";
+		}
+		boolean stableMapping = Set.of("TERM_ALIAS_MISSING", "ENUM_MAPPING_MISSING").contains(issueType)
+				&& !"TRUE_AMBIGUITY".equals(mappingClassification) && confidence >= 0.80d;
+		boolean additiveAlias = operation.operation() == OperationType.ADD_COLUMN_SYNONYM
+				|| operation.operation() == OperationType.ADD_ENUM_ALIAS;
+		if (stableMapping && additiveAlias) {
+			return "LOW";
+		}
+		return switch (operation.operation()) {
+			case UPDATE_METRIC, UPDATE_RELATIONSHIP, UPDATE_GRAIN, ADD_METRIC, ADD_RELATIONSHIP, ADD_GRAIN -> "HIGH";
+			default -> "MEDIUM";
+		};
 	}
 
 	private boolean mappingIssue(String issueType) {
@@ -1089,6 +1137,23 @@ public class TrajectoryAnalysisService {
 		};
 	}
 
+	private String representativeEpisodeId(String patternId, Map<String, Object> signal) {
+		return optional("""
+				SELECT p.episode_id
+				FROM qw_detour_signal d
+				JOIN qw_trajectory_path p ON p.id = d.path_id
+				WHERE d.pattern_id = ? AND d.signal_type = ? AND d.root_cause = ?
+				 AND d.issue_type IS NOT DISTINCT FROM ?
+				 AND d.asset_type IS NOT DISTINCT FROM ?
+				 AND d.asset_key IS NOT DISTINCT FROM ?
+				ORDER BY d.confidence DESC, d.create_time DESC LIMIT 1
+				""", patternId, signal.get("signal_type"), signal.get("root_cause"), signal.get("issue_type"),
+				signal.get("asset_type"), signal.get("asset_key"))
+			.map(row -> text(row.get("episode_id")))
+			.filter(StringUtils::hasText)
+			.orElse(null);
+	}
+
 	private Map<String, Object> representativeEvidence(String patternId, Map<String, Object> signal) {
 		return optional("""
 				SELECT evidence_json FROM qw_detour_signal
@@ -1214,21 +1279,47 @@ public class TrajectoryAnalysisService {
 	}
 
 	private SnapshotView snapshot(Map<String, Object> run, String catalogHash, Long versionId) {
+		String runId = text(run.get("run_id"));
+		String compatibilityHash = hash("legacy:" + versionId + ":" + catalogHash);
+		SemanticBlueprint plan = null;
 		String json = text(run.get("execution_snapshot"));
 		if (StringUtils.hasText(json)) {
 			try {
 				Optional<ExecutionSnapshot> snapshot = executionSnapshotService.readTyped(json);
 				if (snapshot.isPresent()) {
-					return new SnapshotView(snapshot.orElseThrow().compatibilityHash(),
-							snapshot.orElseThrow().semanticPlan());
+					compatibilityHash = snapshot.orElseThrow().compatibilityHash();
+					plan = snapshot.orElseThrow().semanticPlan();
 				}
 			}
 			catch (RuntimeException ex) {
-				log.warn("Ignoring unreadable execution snapshot during trajectory analysis for run {}: {}",
-						run.get("run_id"), ex.getMessage());
+				log.warn("Ignoring unreadable execution snapshot during trajectory analysis for run {}: {}", runId,
+						ex.getMessage());
 			}
 		}
-		return new SnapshotView(hash("legacy:" + versionId + ":" + catalogHash), null);
+		if (plan == null && StringUtils.hasText(runId)) {
+			plan = jdbc.query("""
+					SELECT payload FROM qw_run_event
+					WHERE run_id = ? AND event_type = 'SEMANTIC_PLAN_SNAPSHOT'
+					ORDER BY sequence DESC LIMIT 1
+					""", (rs, rowNum) -> decodeSemanticPlanSnapshot(rs.getString("payload")).orElse(null), runId)
+				.stream()
+				.filter(Objects::nonNull)
+				.findFirst()
+				.orElse(null);
+		}
+		return new SnapshotView(compatibilityHash, plan);
+	}
+
+	static Optional<SemanticBlueprint> decodeSemanticPlanSnapshot(String payload) {
+		if (!StringUtils.hasText(payload)) {
+			return Optional.empty();
+		}
+		try {
+			return Optional.of(JsonUtil.getObjectMapper().readValue(payload, SemanticBlueprint.class));
+		}
+		catch (Exception ex) {
+			return Optional.empty();
+		}
 	}
 
 	private List<Map<String, Object>> postExecutionReviews(String runId) {

@@ -169,7 +169,7 @@ public class SemanticBlueprintNode implements NodeAction {
 		PlanResolution resolution;
 		try {
 			resolution = resolvePlan(runId, projectId, projectVersionId, catalogHash, planningQuery, contextHash,
-					planningTables, requiredHints, forceReplan, retrievalRepairQuery);
+					planningTables, requiredHints, forceReplan, retrievalRepairQuery, principalId);
 		}
 		catch (SemanticPlanningClarificationRequiredException clarificationRequired) {
 			var clarification = runtimeClarificationService.createPlanningClarification(runId, planningQuery,
@@ -177,6 +177,7 @@ public class SemanticBlueprintNode implements NodeAction {
 			throw new RuntimeClarificationRequiredException(runId, clarification.clarificationId());
 		}
 		SemanticBlueprint plan = resolution.plan();
+		plan.setBindingDependencies(bindingDependencies(mergedBindings));
 		String activeTodoId = StateUtil.getStringValue(state, ACTIVE_TODO_ID, "");
 		if (state.value(TODO_ENABLED, false) && !activeTodoId.isBlank()) {
 			queryTaskRepository.savePlan(runId, activeTodoId, plan);
@@ -356,19 +357,41 @@ public class SemanticBlueprintNode implements NodeAction {
 				Math.max(base.confidence(), clarified.confidence()), scores);
 	}
 
+	private List<SemanticBlueprint.BindingDependency> bindingDependencies(BindingContext context) {
+		if (context == null || context.bindings() == null || context.bindings().isEmpty()) {
+			return List.of();
+		}
+		Map<String, SemanticBlueprint.BindingDependency> unique = new java.util.LinkedHashMap<>();
+		context.bindings().forEach(binding -> {
+			String key = Objects.toString(binding.normalizedPhrase(), "") + "|" + binding.assetType() + "|"
+					+ binding.assetKey() + "|" + binding.source() + "|" + Objects.toString(binding.principalId(), "");
+			unique.put(key, SemanticBlueprint.BindingDependency.builder()
+				.phrase(binding.displayPhrase())
+				.assetType(binding.assetType())
+				.assetKey(binding.assetKey())
+				.scope(binding.source())
+				.source(binding.source())
+				.principalId(binding.principalId())
+				.sourceRecordId(binding.sourceRecordId())
+				.build());
+		});
+		return List.copyOf(unique.values());
+	}
+
 	private PlanResolution resolvePlan(String runId, Long projectId, Long projectVersionId, String catalogHash,
 			String canonicalQuery, String contextHash, List<String> physicalTables, QueryCaseHints requiredHints,
-			boolean forceReplan, String retrievalRepairQuery) {
+			boolean forceReplan, String retrievalRepairQuery, String principalId) {
 		Optional<SemanticBlueprint> pinned = !forceReplan && (requiredHints == null || requiredHints.emptyHints())
 				? pinnedPlan(runId, projectId, projectVersionId, physicalTables) : Optional.empty();
 		if (pinned.isPresent()) {
 			QueryCaseHints historicalHints = queryExampleService.recallHints(projectId, projectVersionId, catalogHash,
-					canonicalQuery, contextHash, 5);
+					canonicalQuery, contextHash, principalId, 5);
 			queryExampleService.recordHintUsage(runId, historicalHints);
 			return new PlanResolution(pinned.orElseThrow(), historicalHints);
 		}
 		PlanningResult planning = semanticBlueprintPipeline.plan(new PlanningRequest(projectId, projectVersionId,
-				catalogHash, canonicalQuery, contextHash, physicalTables, requiredHints, 20, 5, retrievalRepairQuery));
+				catalogHash, canonicalQuery, contextHash, physicalTables, requiredHints, 20, 5, retrievalRepairQuery,
+				principalId));
 		queryExampleService.recordHintUsage(runId, planning.historicalHints());
 		if (runId != null && !runId.isBlank()) {
 			QueryExecutionEvidence evidence = QueryExecutionEvidence.semanticPlanning(planning);

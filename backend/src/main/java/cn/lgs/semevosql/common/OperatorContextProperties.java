@@ -20,7 +20,7 @@ import java.util.Map;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** Authentication bridge until a complete IAM integration is introduced. */
+/** Self-hosted single-user operator fallback plus an optional authenticated-role bridge. */
 @Data
 @ConfigurationProperties(prefix = "semevosql.operator")
 public class OperatorContextProperties {

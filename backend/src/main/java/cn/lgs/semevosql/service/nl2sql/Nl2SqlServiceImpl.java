@@ -19,6 +19,7 @@ import cn.lgs.semevosql.bo.DbConfigBO;
 import cn.lgs.semevosql.dto.prompt.SemanticConsistencyDTO;
 import cn.lgs.semevosql.dto.prompt.SqlGenerationDTO;
 import cn.lgs.semevosql.dto.schema.SchemaDTO;
+import cn.lgs.semevosql.exception.ModelOutputInvalidException;
 import cn.lgs.semevosql.prompt.PromptHelper;
 import cn.lgs.semevosql.service.llm.LlmService;
 import cn.lgs.semevosql.util.*;
@@ -104,8 +105,8 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 					});
 				}
 				catch (Exception e) {
-					log.error("Failed to parse table selection response: {}", jsonContent, e);
-					throw new IllegalStateException(jsonContent);
+					log.warn("Model table-selection output could not be parsed ({} chars)", jsonContent.length(), e);
+					throw new ModelOutputInvalidException("模型返回的表选择结果格式无效，请重试。", e);
 				}
 				if (tableList != null && !tableList.isEmpty()) {
 					Set<String> selectedTables = tableList.stream()
@@ -149,14 +150,8 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 						});
 					}
 					catch (Exception e) {
-						// Some scenarios may prompt exceptions, such as:
-						// java.lang.IllegalStateException:
-						// Please provide database schema information so I can filter
-						// relevant
-						// tables based on your question.
-						// TODO 目前异常接口直接返回500，未返回异常信息，后续优化将异常返回给用户
-						log.error("Failed to parse fine selection response: {}", jsonContent, e);
-						throw new IllegalStateException(jsonContent);
+						log.warn("Model schema-selection output could not be parsed ({} chars)", jsonContent.length(), e);
+						throw new ModelOutputInvalidException("模型返回的 Schema 选择结果格式无效，请重试。", e);
 					}
 					if (tableList != null && !tableList.isEmpty()) {
 						selectedTables.addAll(tableList.stream().map(String::toLowerCase).collect(Collectors.toSet()));

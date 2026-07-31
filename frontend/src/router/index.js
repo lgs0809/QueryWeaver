@@ -44,7 +44,7 @@ router.beforeEach(async (to, from, next) => {
   try {
     if (!(await ensureRole(to.meta?.minimumRole))) {
       ElMessage.error(
-        to.path === '/admin/models' ? '当前账号没有模型管理权限' : '当前账号没有访问此页面的权限',
+        to.path === '/admin/models' ? '当前运行权限不足，无法管理模型' : '当前运行权限不足，无法访问此页面',
       );
       next('/projects');
       return;
@@ -52,13 +52,17 @@ router.beforeEach(async (to, from, next) => {
     hasShownWarning = false;
     next();
   } catch (error) {
-    console.error('读取账号权限失败:', error);
+    console.error('读取运行权限失败:', error);
     if (!hasShownWarning) {
       ElMessage.warning({
-        message: '账号与平台能力状态暂时不可用；只读页面仍可尝试访问，服务端权限仍会继续校验。',
+        message: '运行权限状态暂时不可用；受保护页面已保持关闭。',
         duration: 5000,
       });
       hasShownWarning = true;
+    }
+    if (to.meta?.minimumRole) {
+      next('/projects');
+      return;
     }
     next();
   }
