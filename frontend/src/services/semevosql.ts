@@ -53,14 +53,11 @@ export interface QueryRun {
   projectId?: number;
   projectVersionId?: number;
   episodeId?: string;
-  attemptId?: string;
-  threadId?: string;
   status: string;
   currentNode?: string;
-  lastEventSequence: number;
-  revision: number;
   errorCode?: string;
   errorMessage?: string;
+  retryable?: boolean;
 }
 
 export interface RunEvent {
@@ -175,21 +172,12 @@ export interface ProjectInitializationView {
   nextGap?: { id: number; question: string; gapType: string; status: string };
 }
 
-export type ProjectAccessRole = 'VIEWER' | 'EDITOR' | 'OWNER';
+type ProjectAccessRole = 'VIEWER' | 'EDITOR' | 'OWNER';
 
 export interface ProjectAccessView {
   projectId: number;
   accessRole: ProjectAccessRole;
   globalAdmin: boolean;
-}
-
-export interface ProjectMembership {
-  projectId: number;
-  operatorId: string;
-  accessRole: ProjectAccessRole;
-  grantedBy: string;
-  createTime: string;
-  updateTime: string;
 }
 
 export interface ProjectHealthSummary {
@@ -1205,23 +1193,6 @@ export const semEvoSQLService = {
   },
   async projectAccess(projectId: number): Promise<ProjectAccessView> {
     return (await axios.get(`${apiBase}/projects/${projectId}/access`)).data;
-  },
-  async projectMembers(projectId: number): Promise<ProjectMembership[]> {
-    return (await axios.get(`${apiBase}/projects/${projectId}/members`)).data;
-  },
-  async grantProjectMember(
-    projectId: number,
-    memberId: string,
-    accessRole: ProjectAccessRole,
-  ): Promise<ProjectMembership> {
-    return (
-      await axios.put(`${apiBase}/projects/${projectId}/members/${encodeURIComponent(memberId)}`, {
-        accessRole,
-      })
-    ).data;
-  },
-  async revokeProjectMember(projectId: number, memberId: string): Promise<void> {
-    await axios.delete(`${apiBase}/projects/${projectId}/members/${encodeURIComponent(memberId)}`);
   },
   async projectReleaseCenter(projectId: number): Promise<ProjectReleaseCenter> {
     return (await axios.get(`${apiBase}/projects/${projectId}/release-center`)).data;

@@ -86,7 +86,7 @@ public record OperatorContext(String operator, OperatorRole role, String source,
 			String operator = required(properties.getDefaultOperator(), "semevosql.operator.default-operator");
 			OperatorRole role = Objects.requireNonNull(properties.getDefaultRole(),
 					"semevosql.operator.default-role is required");
-			return new OperatorContext(operator, role, "DEVELOPMENT_SINGLE_USER", requestId, idempotencyKey);
+			return new OperatorContext(operator, role, "SELF_HOSTED_SINGLE_USER", requestId, idempotencyKey);
 		}
 
 		private OperatorRole mappedRole(String operator) {

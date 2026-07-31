@@ -1,5 +1,6 @@
 server:
   port: 8065
+  address: ${SEMEVOSQL_SERVER_ADDRESS:127.0.0.1}
 
 management:
   endpoints:
@@ -44,7 +45,8 @@ semevosql:
     encryption-key: ${SEMEVOSQL_SECRET_ENCRYPTION_KEY:}
     migrate-plaintext: ${SEMEVOSQL_MIGRATE_PLAINTEXT_SECRETS:true}
   operator:
-    development-mode: ${SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE:false}
+    # Legacy Java property name retained internally; public deployments use SEMEVOSQL_SINGLE_USER_MODE.
+    development-mode: ${SEMEVOSQL_SINGLE_USER_MODE:true}
     default-operator: ${SEMEVOSQL_OPERATOR_DEFAULT_OPERATOR:local-operator}
     default-role: ${SEMEVOSQL_OPERATOR_DEFAULT_ROLE:ADMIN}
   model-client:
@@ -61,7 +63,7 @@ semevosql:
     max-code-bytes: ${SEMEVOSQL_EXECUTION_MAX_CODE_BYTES:1048576}
     max-input-bytes: ${SEMEVOSQL_EXECUTION_MAX_INPUT_BYTES:5242880}
     max-requirement-bytes: ${SEMEVOSQL_EXECUTION_MAX_REQUIREMENT_BYTES:65536}
-    image-name: ${SEMEVOSQL_EXECUTION_IMAGE:continuumio/anaconda3:latest}
+    image-name: ${SEMEVOSQL_EXECUTION_IMAGE:semevosql/python-runner:1.0.0}
     network-mode: ${SEMEVOSQL_EXECUTION_NETWORK_MODE:none}
     limit-memory: ${SEMEVOSQL_EXECUTION_MEMORY_MB:500}
     cpu-core: ${SEMEVOSQL_EXECUTION_CPU_CORES:1}

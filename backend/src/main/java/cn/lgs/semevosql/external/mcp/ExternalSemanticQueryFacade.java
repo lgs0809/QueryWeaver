@@ -28,6 +28,7 @@ import cn.lgs.semevosql.project.domain.ProjectRuntimeContext;
 import cn.lgs.semevosql.project.security.ProjectAccessRole;
 import cn.lgs.semevosql.project.security.ProjectAccessService;
 import cn.lgs.semevosql.run.QueryRun;
+import cn.lgs.semevosql.run.QueryRunErrorPresenter;
 import cn.lgs.semevosql.run.QueryRun.RunStatus;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService;
@@ -68,6 +69,7 @@ public class ExternalSemanticQueryFacade {
     private final VerifiedQueryExecutionService executionService;
     private final MultiSourceRunService multiSourceRunService;
     private final QueryRunService runService;
+    private final QueryRunErrorPresenter runErrorPresenter;
     private final ProjectMcpRepository repository;
     private final ProjectMcpProperties properties;
 
@@ -159,7 +161,8 @@ public class ExternalSemanticQueryFacade {
             repository.failHandle(queryId, message(ex));
             repository.audit(deployment.deploymentId(), deployment.projectId(), deployment.principalId(),
                     "EXECUTE_QUERY_PLAN", "FAILED", queryId);
-            return new QueryExecutionResult(queryId, "FAILED", null, 0, List.of(), List.of(), null, message(ex));
+            return new QueryExecutionResult(queryId, "FAILED", null, 0, List.of(), List.of(), null,
+                    runErrorPresenter.present("MCP_QUERY_EXECUTION_FAILED"));
         }
     }
 
@@ -184,7 +187,7 @@ public class ExternalSemanticQueryFacade {
         }
         if (run.status() == RunStatus.FAILED || run.status() == RunStatus.CANCELLED || run.status() == RunStatus.EXPIRED) {
             return new QueryExecutionResult(queryId, "FAILED", null, 0, List.of(), List.of(), null,
-                    firstText(run.errorMessage(), handle.lastError(), "Query failed"));
+                    runErrorPresenter.present(run));
         }
         return new QueryExecutionResult(queryId, "RUNNING", null, 0, List.of(), List.of(), null, null);
     }
@@ -451,6 +454,7 @@ public class ExternalSemanticQueryFacade {
     }
 
     public record QueryExecutionResult(String queryId, String status, String artifactId, long rowCount,
-            List<String> columns, List<Map<String, String>> rows, String contentHash, String error) {
+            List<String> columns, List<Map<String, String>> rows, String contentHash,
+            QueryRunErrorPresenter.ErrorPresentation error) {
     }
 }

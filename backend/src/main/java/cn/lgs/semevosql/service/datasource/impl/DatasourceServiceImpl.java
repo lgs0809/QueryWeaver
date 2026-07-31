@@ -35,6 +35,7 @@ import cn.lgs.semevosql.mapper.DatasourceMapper;
 import cn.lgs.semevosql.mapper.LogicalRelationMapper;
 import cn.lgs.semevosql.common.SecretCipher;
 import cn.lgs.semevosql.service.datasource.DatasourceService;
+import cn.lgs.semevosql.service.datasource.SemanticQueryDatasourceCapabilities;
 import cn.lgs.semevosql.service.datasource.handler.DatasourceTypeHandler;
 import cn.lgs.semevosql.service.datasource.handler.registry.DatasourceTypeHandlerRegistry;
 import java.util.ArrayList;
@@ -99,6 +100,7 @@ public class DatasourceServiceImpl implements DatasourceService {
 	@Override
 	public Datasource createDatasource(Datasource datasource) {
 		Datasource persisted = copyDatasource(datasource);
+		SemanticQueryDatasourceCapabilities.requireSupported(persisted.getType());
 		DatasourceTypeHandler handler = datasourceTypeHandlerRegistry.getRequired(persisted.getType());
 		String connectionUrl = handler.resolveConnectionUrl(persisted);
 		if (StringUtils.isNotBlank(connectionUrl)) {
@@ -128,6 +130,7 @@ public class DatasourceServiceImpl implements DatasourceService {
 			throw new DatasourceNotFoundException(id);
 		}
 		mergeUpdate(persisted, datasource);
+		SemanticQueryDatasourceCapabilities.requireSupported(persisted.getType());
 		DatasourceTypeHandler handler = datasourceTypeHandlerRegistry.getRequired(persisted.getType());
 		String connectionUrl = handler.resolveConnectionUrl(decryptDatasource(persisted));
 		if (StringUtils.isNotBlank(connectionUrl)) {

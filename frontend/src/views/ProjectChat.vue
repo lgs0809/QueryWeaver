@@ -95,7 +95,11 @@
             <el-button v-if="activeRun" link type="primary" @click="openDiagnosis(activeRun.runId)">
               查询诊断
             </el-button>
-            <el-button v-if="activeRun" link @click="openRunDetails(activeRun.runId)">
+            <el-button
+              v-if="activeRun && canViewTechnicalDetails"
+              link
+              @click="openRunDetails(activeRun.runId)"
+            >
               运行详情
             </el-button>
             <el-button v-if="activeRun && !terminalRun" type="danger" plain @click="cancelRun">
@@ -822,6 +826,12 @@
       ['EDITOR', 'REVIEWER', 'PUBLISHER', 'ADMIN'].includes(currentOperatorRole.value) &&
       ['EDITOR', 'OWNER'].includes(selectedProjectAccess.value?.accessRole || ''),
   );
+  const canViewTechnicalDetails = computed(
+    () =>
+      Boolean(selectedProjectAccess.value?.globalAdmin) ||
+      (['EDITOR', 'REVIEWER', 'PUBLISHER', 'ADMIN'].includes(currentOperatorRole.value) &&
+        ['EDITOR', 'OWNER'].includes(selectedProjectAccess.value?.accessRole || '')),
+  );
   const humanReviewRequired = computed(() => {
     if (
       activeRun.value?.status !== 'WAITING_HUMAN' ||
@@ -1542,7 +1552,7 @@
           correctionCategory.value === 'DATA_QUALITY'
             ? '已记录为数据质量问题，这条错误结果不会继续参与学习。'
             : correctionCategory.value === 'PLANNING'
-              ? '已提交规划策略改进建议；必须经过 Planner Replay、审核与发布后才会影响后续规划。'
+              ? '已提交规划策略改进建议；必须经过回归验证、审核与发布后才会影响后续查询规划。'
               : ['DEFINITION', 'TIME', 'FILTER', 'RELATIONSHIP'].includes(correctionCategory.value)
                 ? '已提交业务模型改进建议；验证与回归测试通过前不会修改正式口径。'
                 : '已记录这次纠正，这条错误结果不会继续参与学习。',
