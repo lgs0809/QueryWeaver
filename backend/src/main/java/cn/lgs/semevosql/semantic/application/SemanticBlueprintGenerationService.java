@@ -24,6 +24,7 @@ import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.CrossSourceRelatio
 import cn.lgs.semevosql.service.llm.LlmInvocationOptions;
 import cn.lgs.semevosql.learning.QueryCaseHints.EnumBindingHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.FilterBindingHint;
+import cn.lgs.semevosql.learning.QueryCaseHints.ResultCompositionHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.TimeBindingHint;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
 import cn.lgs.semevosql.semantic.domain.SemanticCandidateSet;
@@ -45,6 +46,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -69,6 +71,11 @@ public class SemanticBlueprintGenerationService {
 			"LTE", "IN", "IS_NULL", "IS_NOT_NULL");
 
 	private static final Set<String> SUPPORTED_TIME_GROUP_GRANULARITIES = Set.of("DAY", "MONTH", "YEAR");
+
+	private static final Pattern SCALAR_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
+	private static final Pattern SCALAR_BINARY_EXPRESSION = Pattern
+		.compile("([A-Za-z_][A-Za-z0-9_]*)\\s*([+-])\\s*([A-Za-z_][A-Za-z0-9_]*)");
 
 	private static final Set<String> QUERY_SELECTABLE_RULE_TYPES = Set.of("BUSINESS_RULE", "BUSINESS_FILTER");
 
@@ -110,15 +117,24 @@ public class SemanticBlueprintGenerationService {
 			   time-dimension assets. The downstream Planner may choose HOW to bucket/order a selected time axis; it may not guess
 			   WHICH business time axis the user meant.
 			8. relationshipCodes contains only published relationships necessary to connect the selected semantic assets.
-			9. grainCodes contains only published grains explicitly required for the requested result semantics.
-			10. Do not add context that the user did not ask for. Minimal sufficient plan wins.
-			11. historicalHints are non-authoritative prior experience and may be reused only when the current question
+			   Do NOT select a row-level relationship merely because metrics come from multiple models.
+			9. resultComposition is an execution-composition declaration, not a business asset. Use it only when the user requests
+			   independent scalar aggregates from separate selected models/sources that must be returned together without a row-level
+			   relationship. Set type=SCALAR and leave relationshipCodes empty. calculationExpression is optional; when requested,
+			   it may use only selected metric codes in exactly one validated binary + or - expression, optionally wrapped in ABS,
+			   with an output alias assignment (examples of syntax only: delta=left_metric-right_metric,
+			   gap=ABS(left_metric-right_metric)). For an undirected difference/magnitude, use ABS; use signed subtraction only
+			   when the user explicitly asks for a directional A-minus-B comparison. Never invent metric codes or arbitrary
+			   functions/operators.
+			10. grainCodes contains only published grains explicitly required for the requested result semantics.
+			11. Do not add context that the user did not ask for. Minimal sufficient plan wins.
+			12. historicalHints are non-authoritative prior experience and may be reused only when the current question
 			    and current Catalog candidates independently support them. requiredHints are explicit user/runtime
 			    constraints and MUST be preserved exactly when present.
-			12. Return status=NEEDS_CLARIFICATION only when two or more supplied governed candidates represent materially
+			13. Return status=NEEDS_CLARIFICATION only when two or more supplied governed candidates represent materially
 			    different plausible meanings and the current question/requiredHints cannot distinguish them. Clarification
 			    options must reference only supplied candidate asset codes. Do not use clarification to hide a retrieval miss.
-			13. Return status=UNRESOLVABLE only when a required BUSINESS meaning (metric/definition/model/relation/rule) is absent
+			14. Return status=UNRESOLVABLE only when a required BUSINESS meaning (metric/definition/model/relation/rule) is absent
 			    from the governed candidates. Missing SQL operators, bucket granularities, window functions or multi-stage
 			    computation are execution concerns and must never by themselves make semantic planning UNRESOLVABLE.
 
@@ -138,6 +154,7 @@ public class SemanticBlueprintGenerationService {
 			    {"modelCode":"published_model_code","columnName":"explicitly named nullable column","operator":"IS_NULL"}
 			  ],
 			  "timeBinding": {"modelCode":"published_model_code","columnName":"published_time_column","groupGranularity":null},
+			  "resultComposition": null,
 			  "confidence": 0.0
 			}
 
@@ -579,7 +596,8 @@ public class SemanticBlueprintGenerationService {
 		return mapOf("modelCodes", hints.modelCodes(), "metricCodes", hints.metricCodes(), "dimensionCodes",
 				hints.dimensionCodes(), "grainCodes", hints.grainCodes(), "relationshipCodes", hints.relationshipCodes(),
 				"ruleCodes", hints.ruleCodes(), "enumBindings", hints.enumBindings(), "filters", hints.filterBindings(),
-				"timeBinding", hints.timeBinding(), "confidence", hints.confidence());
+				"timeBinding", hints.timeBinding(), "resultComposition", hints.resultComposition(), "confidence",
+				hints.confidence());
 	}
 
 	private Map<String, Object> withRetrieval(Map<String, Object> values, RetrievalHit hit) {
@@ -620,6 +638,7 @@ public class SemanticBlueprintGenerationService {
 		List<EnumBindingHint> enumBindings = enumBindings(query, root.path("enumBindings"), candidates, confidence);
 		List<FilterBindingHint> filterBindings = filterBindings(query, root.path("filters"), candidates, confidence);
 		TimeBindingHint timeBinding = timeBinding(query, root.path("timeBinding"), candidates, confidence);
+		ResultCompositionHint resultComposition = resultComposition(root.path("resultComposition"), metricCodes);
 
 		Set<String> modelCodes = new LinkedHashSet<>();
 		metricCodes.stream().map(metrics::get).filter(Objects::nonNull).map(SemanticCatalogSnapshot.Metric::getModelCode)
@@ -646,10 +665,23 @@ public class SemanticBlueprintGenerationService {
 		if (metricCodes.isEmpty() && dimensionCodes.isEmpty()) {
 			throw new IllegalArgumentException("LLM semantic plan selected no governed projection metric or dimension");
 		}
-		assertRelationshipSelection(modelCodes, relationshipCodes, candidates.relationships());
+		Set<String> metricModelCodes = metricCodes.stream()
+			.map(metrics::get)
+			.filter(Objects::nonNull)
+			.map(SemanticCatalogSnapshot.Metric::getModelCode)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		boolean independentScalarMetrics = resultComposition != null && relationshipCodes.isEmpty()
+				&& !metricModelCodes.isEmpty() && dimensionCodes.isEmpty() && grainCodes.isEmpty()
+				&& (timeBinding == null || !StringUtils.hasText(timeBinding.groupGranularity()))
+				&& metricModelCodes.equals(modelCodes);
+		if (resultComposition != null && !independentScalarMetrics) {
+			throw new IllegalArgumentException(
+					"resultComposition=SCALAR requires relationship-free scalar metrics from all selected models");
+		}
+		assertRelationshipSelection(modelCodes, relationshipCodes, candidates.relationships(), independentScalarMetrics);
 		QueryCaseHints result = new QueryCaseHints(Set.copyOf(modelCodes), metricCodes, dimensionCodes, grainCodes,
 				relationshipCodes, ruleCodes, enumBindings, filterBindings, List.of(), timeBinding, true,
-				"LLM_SEMANTIC_PLANNER", List.of(), confidence, Map.of("semanticPlanner", confidence));
+				"LLM_SEMANTIC_PLANNER", List.of(), confidence, Map.of("semanticPlanner", confidence), resultComposition);
 		assertRequiredPriorBindings(result, priorHints);
 		return result;
 	}
@@ -691,11 +723,14 @@ public class SemanticBlueprintGenerationService {
 	}
 
 	private void assertRelationshipSelection(Set<String> modelCodes, Set<String> relationshipCodes,
-			List<SemanticCatalogSnapshot.Relationship> candidates) {
+			List<SemanticCatalogSnapshot.Relationship> candidates, boolean relationshipOptional) {
 		if (modelCodes.size() <= 1) {
 			return;
 		}
 		if (relationshipCodes.isEmpty()) {
+			if (relationshipOptional) {
+				return;
+			}
 			throw new IllegalArgumentException("relationshipCodes must connect all selected semantic models");
 		}
 		Map<String, Set<String>> adjacency = new LinkedHashMap<>();
@@ -939,6 +974,52 @@ public class SemanticBlueprintGenerationService {
 		}
 		return new TimeBindingHint(query, modelCode, columnName, "LLM_SEMANTIC_PLANNER", confidence,
 				groupGranularity);
+	}
+
+	private ResultCompositionHint resultComposition(JsonNode node, Set<String> metricCodes) {
+		if (node == null || node.isNull() || node.isMissingNode()) {
+			return null;
+		}
+		if (!node.isObject()) {
+			throw new IllegalArgumentException("resultComposition must be an object or null");
+		}
+		return validateResultComposition(nullableText(node, "type"), nullableText(node, "calculationExpression"),
+				metricCodes);
+	}
+
+	static ResultCompositionHint validateResultComposition(String type, String calculationExpression,
+			Set<String> metricCodes) {
+		String normalizedType = Objects.toString(type, "").trim().toUpperCase(Locale.ROOT);
+		if (!"SCALAR".equals(normalizedType)) {
+			throw new IllegalArgumentException("resultComposition.type must be SCALAR");
+		}
+		if (!StringUtils.hasText(calculationExpression)) {
+			return new ResultCompositionHint("SCALAR", null);
+		}
+		String normalized = calculationExpression.replaceAll("\\s+", "").trim();
+		String[] assignment = normalized.split("=", 2);
+		if (assignment.length != 2 || !SCALAR_IDENTIFIER.matcher(assignment[0]).matches()) {
+			throw new IllegalArgumentException("resultComposition.calculationExpression must assign a valid output alias");
+		}
+		if (metricCodes.contains(assignment[0])) {
+			throw new IllegalArgumentException("resultComposition output alias must not overwrite a selected metric");
+		}
+		String expression = assignment[1];
+		if (expression.regionMatches(true, 0, "ABS(", 0, 4) && expression.endsWith(")")) {
+			expression = expression.substring(4, expression.length() - 1);
+		}
+		var matcher = SCALAR_BINARY_EXPRESSION.matcher(expression);
+		if (!matcher.matches()) {
+			throw new IllegalArgumentException(
+					"resultComposition.calculationExpression supports only one binary + or - expression");
+		}
+		String leftMetric = matcher.group(1);
+		String rightMetric = matcher.group(3);
+		if (!metricCodes.contains(leftMetric) || !metricCodes.contains(rightMetric)) {
+			throw new IllegalArgumentException(
+					"resultComposition.calculationExpression may reference only selected metric codes");
+		}
+		return new ResultCompositionHint("SCALAR", normalized);
 	}
 
 	private SemanticPlanningOutcome explicitNonResolvedOutcome(String response) {

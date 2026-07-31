@@ -14,20 +14,18 @@ semevosql:
   sql-execution:
     require-time-filter: true
     reject-full-table-scan: true
-
-springdoc:
-  api-docs:
-    enabled: false
-  swagger-ui:
-    enabled: false
-
-semevosql:
   mcp:
     enabled: ${SEMEVOSQL_MCP_ENABLED:true}
   security:
     enabled: true
   operator:
     development-mode: false
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
 
 logging:
   level:

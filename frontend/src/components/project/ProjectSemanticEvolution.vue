@@ -32,7 +32,7 @@
       title="批准建议只会进入草稿；自动回归结果、人工证明和最终发布决定始终作为三个独立治理事实保留。"
     />
 
-    <el-table :data="candidates" empty-text="暂无语义演进候选">
+    <el-table :data="candidates" empty-text="暂无业务模型建议">
       <el-table-column label="学习建议" min-width="320">
         <template #default="scope">
           <strong>{{ suggestionTitle(scope.row) }}</strong>
@@ -150,14 +150,14 @@
       </el-table-column>
     </el-table>
 
-    <el-drawer v-model="drawerVisible" title="语义候选审核" size="76%">
+    <el-drawer v-model="drawerVisible" title="业务模型建议审核" size="76%">
       <template v-if="selected">
         <el-alert
           v-if="isTrueAmbiguity(selected)"
           type="error"
           :closable="false"
           show-icon
-          title="真实歧义需要显式补充语义材料并完成消歧，不能自动批准、创建草稿或应用 Patch。"
+          title="真实歧义需要显式补充业务语义材料并完成消歧，不能自动批准、创建草稿或应用变更。"
         />
         <el-descriptions :column="2" border>
           <el-descriptions-item label="候选类型">
@@ -172,7 +172,7 @@
           <el-descriptions-item label="审核人">
             {{ selected.reviewed_by || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="Mapping Classification">
+          <el-descriptions-item label="映射判定">
             <el-tag :type="mappingType(selected.mapping_classification)">
               {{ mappingLabel(selected.mapping_classification) }}
             </el-tag>
@@ -190,7 +190,7 @@
             {{ selected.distinct_root_evidence_count || 0 }} /
             {{ selected.distinct_time_window_count || 0 }}
           </el-descriptions-item>
-          <el-descriptions-item label="Patch Hash">
+          <el-descriptions-item label="变更指纹">
             <code>{{ selected.patch_hash || '-' }}</code>
           </el-descriptions-item>
           <el-descriptions-item label="原子应用时间">
@@ -198,7 +198,7 @@
           </el-descriptions-item>
         </el-descriptions>
 
-        <h3>Resolution Distribution</h3>
+        <h3>解析结果分布</h3>
         <el-table :data="resolutionDistribution" size="small" empty-text="暂无解析分布">
           <el-table-column prop="resolution" label="解析目标" min-width="260" />
           <el-table-column prop="count" label="独立根证据数" width="140" />
@@ -209,12 +209,12 @@
 
         <div class="section-title">
           <div>
-            <h3>Semantic Patch Operations</h3>
-            <p>来源版本与 Catalog Hash 固定不可编辑；CANDIDATE 状态可修改 Operation。</p>
+            <h3>业务模型变更项</h3>
+            <p>来源版本和内容指纹固定不可编辑；待审核状态可调整具体变更操作。</p>
           </div>
           <div class="actions" v-if="canGovern && selected.status === 'CANDIDATE'">
             <el-button :disabled="isTrueAmbiguity(selected)" @click="runPreflight">
-              Preflight
+              校验变更
             </el-button>
             <el-button
               type="primary"
@@ -222,16 +222,16 @@
               :disabled="isTrueAmbiguity(selected)"
               @click="savePatch"
             >
-              保存 Patch
+              保存变更
             </el-button>
           </div>
         </div>
 
         <el-descriptions :column="2" border class="source-lock">
-          <el-descriptions-item label="sourceVersionId">
+          <el-descriptions-item label="来源版本 ID">
             {{ patch.sourceVersionId }}
           </el-descriptions-item>
-          <el-descriptions-item label="sourceCatalogHash">
+          <el-descriptions-item label="来源内容指纹">
             <code>{{ patch.sourceCatalogHash }}</code>
           </el-descriptions-item>
         </el-descriptions>
@@ -241,7 +241,7 @@
           type="error"
           :closable="false"
           show-icon
-          :title="`前端 Schema 校验失败（${clientValidation.length} 项）`"
+          :title="`变更格式校验失败（${clientValidation.length} 项）`"
         >
           <ul>
             <li v-for="item in clientValidation" :key="item">{{ item }}</li>
@@ -252,7 +252,7 @@
             :type="preflight.valid ? 'success' : 'error'"
             :closable="false"
             show-icon
-            :title="preflight.valid ? '服务端 Preflight 通过' : '服务端 Preflight 未通过'"
+            :title="preflight.valid ? '变更校验通过' : '变更校验未通过'"
           />
           <el-table :data="[...preflight.errors, ...preflight.warnings]" size="small">
             <el-table-column prop="severity" label="级别" width="90" />
@@ -311,26 +311,26 @@
           </el-form>
         </div>
 
-        <h3>资产级 Diff</h3>
-        <el-table :data="assetDiff" empty-text="Patch 中没有 Operation">
+        <h3>资产级变更对比</h3>
+        <el-table :data="assetDiff" empty-text="当前没有资产变更">
           <el-table-column prop="assetType" label="资产类型" width="150" />
           <el-table-column prop="assetKey" label="资产 Key" min-width="200" />
           <el-table-column prop="operation" label="变更" width="190" />
-          <el-table-column label="Source Catalog" min-width="220">
+          <el-table-column label="变更前" min-width="220">
             <template #default="scope">
               <code>{{ scope.row.before }}</code>
             </template>
           </el-table-column>
-          <el-table-column label="Patch 后 Draft" min-width="280">
+          <el-table-column label="变更后草稿" min-width="280">
             <template #default="scope">
               <pre>{{ scope.row.after }}</pre>
             </template>
           </el-table-column>
         </el-table>
 
-        <h3>Automated Replay Results</h3>
+        <h3>自动回归结果</h3>
         <p class="section-note">
-          机器 Replay 事实按 execution 追加保存；人工证明不会改写为机器 PASS。
+          自动回归结果按每次执行追加保存；人工证明不会改写自动验证结果。
         </p>
         <el-progress
           v-if="selected.status === 'REPLAY_RUNNING'"
@@ -338,7 +338,7 @@
           :status="replayFor(selected.id)?.cancelRequested ? 'exception' : undefined"
         />
         <el-descriptions v-if="replayFor(selected.id)" :column="2" border>
-          <el-descriptions-item label="Replay Run">
+          <el-descriptions-item label="回归任务">
             {{ replayFor(selected.id)?.replayRunId }}
           </el-descriptions-item>
           <el-descriptions-item label="状态">
@@ -354,8 +354,8 @@
             {{ replayFor(selected.id)?.errorMessage || '-' }}
           </el-descriptions-item>
         </el-descriptions>
-        <el-table :data="replayLevels" empty-text="暂无机器 Replay 结果">
-          <el-table-column prop="level" label="Replay Level" width="190" />
+        <el-table :data="replayLevels" empty-text="暂无自动回归结果">
+          <el-table-column prop="level" label="回归级别" width="190" />
           <el-table-column prop="status" label="机器状态" width="150">
             <template #default="scope">
               <el-tag :type="replayStatusType(scope.row.status)">{{ scope.row.status }}</el-tag>
@@ -368,14 +368,14 @@
             </template>
           </el-table-column>
         </el-table>
-        <h4>Replay Summary</h4>
+        <h4>回归摘要</h4>
         <pre>{{ pretty(selected.replay_summary_json) }}</pre>
 
-        <h3>Manual Attestations</h3>
+        <h3>人工证明</h3>
         <p class="section-note">
-          人工记录只表达风险例外、替代证明或拒绝，不改变机器 Replay 原始事实。
+          人工记录只表达风险例外、替代证明或拒绝，不改变自动回归的原始事实。
         </p>
-        <el-table :data="manualAttestations" empty-text="暂无人工 Attestation">
+        <el-table :data="manualAttestations" empty-text="暂无人工证明">
           <el-table-column prop="attestation_type" label="类型" width="170" />
           <el-table-column prop="decision" label="人工决定" width="220" />
           <el-table-column prop="operator" label="操作者" width="160" />
@@ -387,12 +387,12 @@
           </el-table-column>
         </el-table>
 
-        <h3>Release Decisions</h3>
-        <p class="section-note">发布门禁决定独立于机器结果和人工 Attestation 保存。</p>
-        <el-table :data="releaseDecisions" empty-text="暂无 Release Decision">
+        <h3>发布门禁决定</h3>
+        <p class="section-note">发布门禁决定独立于自动回归结果和人工证明保存。</p>
+        <el-table :data="releaseDecisions" empty-text="暂无发布门禁决定">
           <el-table-column prop="decision" label="决定" width="120" />
-          <el-table-column prop="policy_code" label="Policy Code" width="230" />
-          <el-table-column prop="automated_replay_result" label="机器事实" width="150" />
+          <el-table-column prop="policy_code" label="策略代码" width="230" />
+          <el-table-column prop="automated_replay_result" label="自动回归结果" width="150" />
           <el-table-column prop="reason" label="依据" min-width="280" />
           <el-table-column label="时间" width="180">
             <template #default="scope">
@@ -406,7 +406,7 @@
         <h3>证据链</h3>
         <el-table :data="selected.evidence || []" empty-text="暂无证据">
           <el-table-column prop="evidence_type" label="类型" width="180" />
-          <el-table-column prop="episode_id" label="Episode" width="180" />
+          <el-table-column prop="episode_id" label="查询经历 ID" width="180" />
           <el-table-column prop="weight" label="权重" width="100" />
           <el-table-column label="证据" min-width="320">
             <template #default="scope">
@@ -612,7 +612,7 @@
       if (!isAdd && !operation.expectedCurrentFingerprint)
         errors.push(`${prefix} UPDATE 必须携带 Fingerprint`);
       const key = `${operation.operation}:${operation.assetType}:${operation.assetKey}`;
-      if (seen.has(key)) errors.push(`${prefix} 与同一 Patch 中其他 Operation 重复`);
+      if (seen.has(key)) errors.push(`${prefix} 与同一变更中的其他操作重复`);
       seen.add(key);
     });
     return errors;
@@ -717,7 +717,7 @@
   };
   const runPreflight = async () => {
     if (selected.value && isTrueAmbiguity(selected.value)) {
-      ElMessage.error('真实歧义必须先完成显式语义消歧，不能执行 Patch Preflight');
+      ElMessage.error('真实歧义必须先完成显式语义消歧，不能执行变更校验');
       return false;
     }
     syncEditors();
@@ -743,9 +743,9 @@
       }
       await reloadSelected();
       await load();
-      ElMessage.success('Patch 已保存并从服务端重新加载');
+      ElMessage.success('变更已保存并重新加载');
     } catch (error) {
-      ElMessage.error(error instanceof Error ? error.message : 'Patch 保存失败');
+      ElMessage.error(error instanceof Error ? error.message : '变更保存失败');
     } finally {
       savingPatch.value = false;
     }
@@ -758,7 +758,7 @@
     try {
       let comment = '';
       if (!approved) {
-        const response = await ElMessageBox.prompt('说明拒绝原因。', '拒绝语义候选', {
+        const response = await ElMessageBox.prompt('说明拒绝原因。', '拒绝业务模型建议', {
           inputType: 'textarea',
           inputValidator: value => Boolean(value.trim()) || '必须填写原因',
         });
@@ -768,13 +768,13 @@
         hydratePatch(selected.value);
         if (!(await runPreflight())) return;
         await ElMessageBox.confirm(
-          '批准后只允许创建 Clone Draft；创建 Draft 时 Patch 会被原子应用，仍需系统 Replay 与发布门禁。',
-          '批准语义候选',
+          '批准后只会进入草稿版本；创建草稿时变更会一次性应用，之后仍需自动回归验证与发布门禁。',
+          '批准业务模型建议',
           { type: 'warning' },
         );
       }
       await semEvoSQLService.reviewSemanticEvolution(candidate.id, approved, comment);
-      ElMessage.success(approved ? '候选已批准' : '候选已拒绝');
+      ElMessage.success(approved ? '建议已批准' : '建议已拒绝');
       await load();
     } catch (error) {
       if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
@@ -787,12 +787,12 @@
     }
     try {
       const response = await ElMessageBox.prompt(
-        '输入新的用户可见版本号，例如 1.2.0。Patch 将在短事务内原子应用到 Clone Draft。',
-        '创建并应用 Clone Draft',
+        '输入新的用户可见版本号，例如 1.2.0。当前变更会一次性应用到新草稿版本。',
+        '创建草稿版本',
         { inputValidator: value => Boolean(value.trim()) || '版本号不能为空' },
       );
       await semEvoSQLService.createSemanticEvolutionDraft(candidate.id, response.value.trim());
-      ElMessage.success('Clone Draft 已创建，Patch 已自动原子应用');
+      ElMessage.success('草稿版本已创建，变更已一次性应用');
       await load();
     } catch (error) {
       if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
@@ -803,21 +803,21 @@
       const run = await semEvoSQLService.replaySemanticEvolution(candidate.id);
       replayRuns.value[candidate.id] = run;
       localStorage.setItem(replayStorageKey(candidate.id), run.replayRunId);
-      ElMessage.success(`系统 Replay 已进入后台：${run.replayRunId}`);
+      ElMessage.success(`自动回归验证已开始：${run.replayRunId}`);
       await load();
     } catch (error) {
-      ElMessage.error(error instanceof Error ? error.message : 'Replay 启动失败');
+      ElMessage.error(error instanceof Error ? error.message : '自动回归验证启动失败');
     }
   };
   const cancelReplay = async (candidate: SemanticEvolutionCandidate) => {
     const run = replayFor(candidate.id);
     if (!run) {
-      ElMessage.error('未找到可恢复的 Replay Run ID');
+      ElMessage.error('未找到可恢复的回归任务');
       return;
     }
     await ElMessageBox.confirm(
-      '取消会持久化取消状态，并尝试取消正在执行的 JDBC Statement。',
-      '取消系统 Replay',
+      '取消后会记录取消状态，并尝试终止正在执行的数据库查询。',
+      '取消自动回归验证',
       {
         type: 'warning',
       },
@@ -825,7 +825,7 @@
     replayRuns.value[candidate.id] = await semEvoSQLService.cancelSemanticEvolutionReplay(
       run.replayRunId,
     );
-    ElMessage.success('Replay 取消请求已提交');
+    ElMessage.success('自动回归验证取消请求已提交');
   };
   const refreshReplay = async (candidateId: string) => {
     const replayRunId =
@@ -867,7 +867,7 @@
   const recordReplay = async (candidate: SemanticEvolutionCandidate, passed: boolean) => {
     try {
       const response = await ElMessageBox.prompt(
-        '该记录不会改写机器 Replay 事实。请填写替代证明、风险接受或人工拒绝的完整依据。',
+        '该记录不会改写自动回归结果。请填写替代证明、风险接受或人工拒绝的完整依据。',
         passed ? '登记人工证明 / 风险例外' : '登记人工拒绝',
         {
           inputType: 'textarea',
@@ -875,7 +875,7 @@
         },
       );
       await semEvoSQLService.recordSemanticEvolutionReplay(candidate.id, passed, response.value);
-      ElMessage.success('人工 Attestation 与 Release Decision 已独立登记');
+      ElMessage.success('人工证明与发布门禁决定已独立登记');
       await Promise.all([load(), loadReplayGovernance(candidate.id)]);
     } catch (error) {
       if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);
@@ -892,8 +892,8 @@
   const stale = async (candidate: SemanticEvolutionCandidate) => {
     try {
       const response = await ElMessageBox.prompt(
-        '说明过期原因，例如 Catalog Hash 已变化。',
-        '标记候选过期',
+        '说明过期原因，例如来源业务模型内容已经变化。',
+        '标记建议过期',
         {
           inputType: 'textarea',
           inputValidator: value => Boolean(value.trim()) || '必须填写原因',
@@ -901,7 +901,7 @@
       );
       await action(
         () => semEvoSQLService.staleSemanticEvolution(candidate.id, response.value),
-        '候选已标记过期',
+        '建议已标记过期',
       );
     } catch (error) {
       if (error instanceof Error && error.message !== 'cancel') ElMessage.error(error.message);

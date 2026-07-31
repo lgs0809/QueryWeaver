@@ -44,6 +44,7 @@ public class MultiSourceMergeEngine {
 			case AGGREGATION_MERGE -> aggregate(safeInputs, policy);
 			case SEQUENTIAL_DEPENDENCY -> copy(safeInputs.get(safeInputs.size() - 1));
 			case DERIVED_CALCULATION -> derived(safeInputs, policy);
+			case SCALAR_COMPOSITION -> scalarComposition(safeInputs, policy);
 		};
 		int maxRows = policy.getMaxRows() == null ? 10_000 : policy.getMaxRows();
 		if (result.getData() != null && result.getData().size() > maxRows) {
@@ -199,6 +200,60 @@ public class MultiSourceMergeEngine {
 			return normalizeRow(columns, calculated);
 		}).toList();
 		return ResultSetBO.builder().column(new ArrayList<>(columns)).data(rows).build();
+	}
+
+	private ResultSetBO scalarComposition(List<ResultSetBO> inputs, MergePolicy policy) {
+		Set<String> columns = new LinkedHashSet<>();
+		Map<String, String> row = new LinkedHashMap<>();
+		for (ResultSetBO input : inputs) {
+			List<Map<String, String>> rows = safeRows(input);
+			if (rows.size() != 1) {
+				throw new IllegalStateException(
+						"Scalar composition requires exactly one row from each source; actual rows=" + rows.size());
+			}
+			for (String column : safeColumns(input)) {
+				if (!columns.add(column) && row.containsKey(column)) {
+					throw new IllegalStateException("Scalar composition has duplicate output column: " + column);
+				}
+				row.put(column, rows.get(0).get(column));
+			}
+		}
+		if (hasText(policy.getCalculationExpression())) {
+			applyCalculation(row, columns, policy.getCalculationExpression());
+		}
+		return ResultSetBO.builder().column(new ArrayList<>(columns)).data(List.of(normalizeRow(columns, row))).build();
+	}
+
+	private void applyCalculation(Map<String, String> row, Set<String> columns, String calculationExpression) {
+		String[] assignment = calculationExpression.split("=", 2);
+		if (assignment.length != 2 || !hasText(assignment[0]) || !hasText(assignment[1])) {
+			throw new IllegalArgumentException("Scalar calculation must be an assignment");
+		}
+		String output = assignment[0].trim();
+		String expression = assignment[1].trim();
+		boolean absolute = expression.regionMatches(true, 0, "ABS(", 0, 4) && expression.endsWith(")");
+		if (absolute) {
+			expression = expression.substring(4, expression.length() - 1).trim();
+		}
+		String operator = expression.contains("-") ? "-" : expression.contains("+") ? "+" : null;
+		if (operator == null) {
+			throw new IllegalArgumentException("Only addition and subtraction are supported for scalar calculation");
+		}
+		String[] operands = expression.split("\\" + operator, 2);
+		if (operands.length != 2) {
+			throw new IllegalArgumentException("Invalid scalar calculation expression");
+		}
+		BigDecimal left = decimal(row.get(operands[0].trim()));
+		BigDecimal right = decimal(row.get(operands[1].trim()));
+		if (left == null || right == null) {
+			throw new IllegalStateException("Scalar calculation operands must both be numeric result columns");
+		}
+		BigDecimal value = "+".equals(operator) ? left.add(right) : left.subtract(right);
+		if (absolute) {
+			value = value.abs();
+		}
+		columns.add(output);
+		row.put(output, value.stripTrailingZeros().toPlainString());
 	}
 
 	private ResultSetBO copy(ResultSetBO input) {

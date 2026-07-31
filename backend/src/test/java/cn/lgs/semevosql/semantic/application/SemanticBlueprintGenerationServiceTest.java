@@ -16,6 +16,7 @@
 package cn.lgs.semevosql.semantic.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.lgs.semevosql.learning.QueryCaseHints;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.CrossSourceRelationship;
@@ -63,6 +64,31 @@ class SemanticBlueprintGenerationServiceTest {
 				candidates, QueryCaseHints.empty());
 
 		assertThat(outcome).isNull();
+	}
+
+	@Test
+	void scalarCompositionAcceptsPlannerDeclaredGovernedMetricCalculation() {
+		QueryCaseHints.ResultCompositionHint composition = SemanticBlueprintGenerationService.validateResultComposition("SCALAR",
+				"difference = ABS(order_count - golden_order_count)", Set.of("order_count", "golden_order_count"));
+
+		assertThat(composition.type()).isEqualTo("SCALAR");
+		assertThat(composition.calculationExpression()).isEqualTo("difference=ABS(order_count-golden_order_count)");
+	}
+
+	@Test
+	void scalarCompositionRejectsMetricsThatWereNotSelectedByPlanner() {
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.validateResultComposition("SCALAR",
+				"difference=order_count-unknown_metric", Set.of("order_count", "golden_order_count")))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("only selected metric codes");
+	}
+
+	@Test
+	void scalarCompositionRejectsArbitraryFunctionsAndOperators() {
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.validateResultComposition("SCALAR",
+				"ratio=order_count/golden_order_count", Set.of("order_count", "golden_order_count")))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("only one binary + or - expression");
 	}
 
 	@Test

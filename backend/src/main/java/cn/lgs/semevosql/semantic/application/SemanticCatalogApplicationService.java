@@ -390,8 +390,21 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 				.build())
 			.toList();
 
+		SemanticBlueprintEnricher.IrDetails ir = queryIrEnricher.enrich(snapshot, canonicalQuery, effectiveModels,
+				metrics, dimensions, grains, semanticHints);
+		Set<String> metricModelCodes = metrics.stream()
+			.map(SemanticBlueprint.MetricSelection::getModelCode)
+			.filter(Objects::nonNull)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		boolean scalarCompositionDeclared = hints.resultComposition() != null
+				&& "SCALAR".equalsIgnoreCase(hints.resultComposition().type());
+		boolean relationshipFreeScalar = scalarCompositionDeclared && ir.expectedResult() != null
+				&& "SCALAR".equalsIgnoreCase(ir.expectedResult().getGrain()) && ir.groupBy().isEmpty()
+				&& hints.relationshipCodes().isEmpty() && !metricModelCodes.isEmpty()
+				&& metricModelCodes.equals(effectiveModelCodes);
+		String scalarCalculationExpression = relationshipFreeScalar ? hints.resultComposition().calculationExpression() : null;
 		PlanningDecision multiSourceDecision = multiSourcePolicyService.plan(projectId, policyVersionId,
-				effectiveModelCodes);
+				effectiveModelCodes, hints.relationshipCodes(), relationshipFreeScalar, scalarCalculationExpression);
 		List<SemanticBlueprint.RelationshipSelection> relationshipSelections = new ArrayList<>(catalogRelationships);
 		multiSourceDecision.relationships()
 			.stream()
@@ -455,8 +468,6 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 					.partialFailurePolicy(multiSourceDecision.mergePolicy().getPartialFailurePolicy())
 					.calculationExpression(multiSourceDecision.mergePolicy().getCalculationExpression())
 					.build();
-		SemanticBlueprintEnricher.IrDetails ir = queryIrEnricher.enrich(snapshot, canonicalQuery, effectiveModels,
-				metrics, dimensions, grains, semanticHints);
 		BusinessRuleFilterResult businessRuleFilters = businessRuleFilters(snapshot, rules);
 
 		List<String> errors = new ArrayList<>(multiSourceDecision.errors());
@@ -476,8 +487,8 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 		if (effectiveSelectedModels.isEmpty()) {
 			errors.add("No enabled semantic model matches the selected physical tables");
 		}
-		if (effectiveModelCodes.size() > 1 && !isConnected(effectiveModelCodes, selectedRelationships,
-				multiSourceDecision, hints.relationshipCodes())) {
+		if (effectiveModelCodes.size() > 1 && !relationshipFreeScalar
+				&& !isConnected(effectiveModelCodes, selectedRelationships, multiSourceDecision, hints.relationshipCodes())) {
 			errors.add("Selected semantic models are not connected by published semantic/cross-source relationships: "
 					+ String.join(", ", effectiveModelCodes));
 		}
@@ -514,7 +525,7 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			.groupBy(ir.groupBy())
 			.orderBy(ir.orderBy())
 			.limit(ir.limit())
-			.expectedResult(ir.expectedResult())
+			.expectedResult(withScalarCalculation(ir.expectedResult(), scalarCalculationExpression))
 			.models(effectiveModels)
 			.metrics(metrics)
 			.dimensions(ir.dimensions())
@@ -1098,6 +1109,26 @@ public class SemanticCatalogApplicationService implements ProjectVersionCatalogR
 			}
 		}
 		return List.copyOf(path);
+	}
+
+	private SemanticBlueprint.ExpectedResultShape withScalarCalculation(SemanticBlueprint.ExpectedResultShape expected,
+			String calculationExpression) {
+		if (expected == null || !hasText(calculationExpression) || !calculationExpression.contains("=")) {
+			return expected;
+		}
+		String output = calculationExpression.substring(0, calculationExpression.indexOf('=')).trim();
+		if (!hasText(output)) {
+			return expected;
+		}
+		Set<String> columns = new LinkedHashSet<>(expected.getColumns() == null ? List.of() : expected.getColumns());
+		columns.add(output);
+		return SemanticBlueprint.ExpectedResultShape.builder()
+			.columns(List.copyOf(columns))
+			.grain(expected.getGrain())
+			.maxRows(expected.getMaxRows())
+			.tabular(expected.getTabular())
+			.chartable(expected.getChartable())
+			.build();
 	}
 
 	private boolean isConnected(Set<String> modelCodes, List<SemanticCatalogSnapshot.Relationship> relationships,

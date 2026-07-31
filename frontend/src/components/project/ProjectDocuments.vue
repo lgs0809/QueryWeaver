@@ -239,7 +239,7 @@
         class="evidence-alert"
         type="info"
         :closable="false"
-        title="APPLIED 表示该定义已进入当前草稿 Catalog；CONFLICT 表示定义与已有资产不一致，未覆盖 Catalog，并已生成阻塞缺口。"
+        title="已应用表示该定义已进入当前业务模型草稿；冲突表示定义与已有资产不一致，系统不会覆盖现有内容，并会生成待处理缺口。"
       />
       <el-table
         v-loading="provenanceLoading"

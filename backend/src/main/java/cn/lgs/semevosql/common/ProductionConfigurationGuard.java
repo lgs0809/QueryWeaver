@@ -59,6 +59,22 @@ public class ProductionConfigurationGuard implements ApplicationRunner {
 		if ("execution-worker".equals(runtimeRole) && executor != CodePoolExecutorEnum.DOCKER) {
 			throw invalid("the execution-worker process must use the Docker executor");
 		}
+		if (executor == CodePoolExecutorEnum.DOCKER) {
+			String imageName = requireText(codeExecutorProperties.getImageName(), "execution runner image");
+			if (!"semevosql/python-runner:1.0.0".equals(imageName)) {
+				throw invalid("execution runner image must be the release-pinned semevosql/python-runner:1.0.0 image");
+			}
+			if (!"none".equalsIgnoreCase(codeExecutorProperties.getNetworkMode())) {
+				throw invalid("execution containers must use network mode none");
+			}
+			if (!Boolean.TRUE.equals(codeExecutorProperties.getReadOnlyRootFilesystem())) {
+				throw invalid("execution containers must use a read-only root filesystem");
+			}
+			String runAsUser = requireText(codeExecutorProperties.getRunAsUser(), "execution container user");
+			if (runAsUser.startsWith("0:") || "0".equals(runAsUser)) {
+				throw invalid("execution containers must not run as root");
+			}
+		}
 		if (executor == CodePoolExecutorEnum.REMOTE) {
 			requireText(codeExecutorProperties.getRemoteUrl(), "remote code executor URL");
 		}

@@ -31,7 +31,7 @@
             <el-tag :type="confidenceType" effect="plain">
               {{ confidenceLabel(diagnosis.confidence) }}
             </el-tag>
-            <el-tag effect="plain">Run {{ diagnosis.runStatus }}</el-tag>
+            <el-tag effect="plain">执行状态：{{ diagnosis.runStatus }}</el-tag>
           </div>
         </section>
 
@@ -41,7 +41,7 @@
               <span class="section-index">01</span>
               <h3>异常定位</h3>
             </div>
-            <small>只使用持久化执行事实，不展示或猜测模型 Chain-of-Thought</small>
+            <small>基于可审计的执行记录定位问题，不展示模型内部推理过程</small>
           </div>
           <div class="stage-grid">
             <article
@@ -226,8 +226,7 @@
                 </el-form-item>
                 <div class="repair-submit">
                   <span>
-                    QUERY / USER 会立即按正确 Binding 重跑；PROJECT 会额外创建受治理 Alias
-                    Candidate。
+                    “仅本次”和“记住我的选择”会立即按正确业务含义重跑；项目公共别名会进入治理流程。
                   </span>
                   <el-button
                     type="primary"
@@ -247,7 +246,7 @@
                 type="info"
                 :closable="false"
                 show-icon
-                title="项目级定义修正需要 Editor 权限，并且必须经过 Replay 与发布门禁。"
+                title="项目级定义修正需要编辑权限，并经过回归验证后才能生效。"
               />
               <el-form label-position="top" class="repair-form">
                 <el-form-item label="问题类型">
@@ -272,13 +271,13 @@
                     :disabled="!actionEnabled('PROPOSE_DEFINITION')"
                     :placeholder="
                       definitionForm.category === 'PLANNING'
-                        ? '说明这次规划哪里不合理，以及在什么情况下应该如何规划；系统只生成待回放审核的 Planning Policy Candidate。'
+                        ? '说明这次规划哪里不合理，以及在什么情况下应该如何规划；系统会先生成待审核的规划建议。'
                         : '写清正确口径，例如：有效支付金额只统计支付成功且未全额退款的订单。'
                     "
                   />
                 </el-form-item>
                 <div class="repair-submit">
-                  <span>不会直接改正式 Catalog；先形成 Candidate，再转成可审计 Patch。</span>
+                  <span>不会直接修改正式业务模型；系统会先生成待审核变更，并保留完整审计记录。</span>
                   <el-button
                     type="primary"
                     :loading="mutating"
@@ -314,11 +313,11 @@
               <strong>{{ diagnosis.governance.riskLevel }}</strong>
             </div>
             <div v-if="diagnosis.governance.impact">
-              <span>直接受影响 Case</span>
+              <span>直接受影响案例</span>
               <strong>{{ diagnosis.governance.impact.referencedAffectedCases }}</strong>
             </div>
             <div v-if="diagnosis.governance.impact">
-              <span>本次 Replay 样本</span>
+              <span>本次回归样本</span>
               <strong>{{ diagnosis.governance.impact.totalSelectedCases }}</strong>
             </div>
           </div>
@@ -335,7 +334,7 @@
             v-if="Object.keys(diagnosis.governance.replayResultCounts || {}).length"
             class="replay-results"
           >
-            <span>Replay 结果</span>
+            <span>回归结果</span>
             <el-tag
               v-for="(count, status) in diagnosis.governance.replayResultCounts"
               :key="status"
@@ -358,23 +357,23 @@
             </template>
           </div>
           <p class="permission-hint">
-            灰色动作表示当前角色未达到所需权限；服务端仍会再次校验，不依赖前端隐藏按钮。
+            灰色操作表示当前账号权限不足。
           </p>
         </section>
 
         <el-collapse v-if="diagnosis.advanced" class="advanced-evidence">
           <el-collapse-item title="高级诊断证据（管理员）" name="advanced">
             <el-descriptions :column="1" border size="small">
-              <el-descriptions-item label="Run Error Code">
+              <el-descriptions-item label="运行错误代码">
                 {{ diagnosis.advanced.runErrorCode || '-' }}
               </el-descriptions-item>
-              <el-descriptions-item label="Current Node">
+              <el-descriptions-item label="当前执行节点">
                 {{ diagnosis.advanced.currentNode || '-' }}
               </el-descriptions-item>
-              <el-descriptions-item label="Historical Query Cases">
+              <el-descriptions-item label="历史查询案例">
                 {{ diagnosis.advanced.historicalExampleIds.join(', ') || '-' }}
               </el-descriptions-item>
-              <el-descriptions-item label="Persisted Event Types">
+              <el-descriptions-item label="持久化事件类型">
                 {{ diagnosis.advanced.eventTypes.join(' → ') || '-' }}
               </el-descriptions-item>
             </el-descriptions>
@@ -478,7 +477,7 @@
   const impactDescription = computed(() => {
     const impact = diagnosis.value?.governance?.impact;
     if (!impact) return '';
-    return `系统会优先覆盖 ${impact.referencedAffectedCases} 个直接引用受改资产的 Case，并补 ${impact.selectedRepresentativeCases} 个 canonical shape 代表样本；本次最多 ${impact.maxCases} 条，不声称“无需回归”。`;
+    return `系统会优先覆盖 ${impact.referencedAffectedCases} 个直接引用受改资产的案例，并补 ${impact.selectedRepresentativeCases} 个代表性查询样本；本次最多 ${impact.maxCases} 条。`;
   });
 
   const load = async () => {
@@ -538,7 +537,7 @@
       );
       ElMessage.success(
         bindingForm.scope === 'PROJECT'
-          ? '已按正确映射重新查询，并创建项目 Alias 治理建议'
+          ? '已按正确映射重新查询，并创建项目公共别名治理建议'
           : '已按正确映射重新查询',
       );
       emit('rerun', result.rerunId);
@@ -563,7 +562,7 @@
         definitionForm.category,
         definitionForm.correctionText.trim(),
       );
-      ElMessage.success('已创建 Semantic Evolution 修复建议');
+      ElMessage.success('已创建业务模型修复建议');
       await load();
     } catch (caught) {
       ElMessage.error(caught instanceof Error ? caught.message : '定义修正提交失败');
@@ -594,7 +593,7 @@
         ElMessage.success('修复建议已审核通过');
       } else if (code === 'CREATE_DRAFT') {
         const version = await ElMessageBox.prompt(
-          '为修复草稿输入语义版本号，例如 2.1.0',
+          '为修复草稿输入业务模型版本号，例如 2.1.0',
           '创建修复草稿',
           {
             inputPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/,
@@ -605,13 +604,13 @@
           governance.candidateId,
           version.value.trim(),
         );
-        ElMessage.success('修复 Draft 已创建并应用 Patch');
+        ElMessage.success('修复草稿已创建并应用变更');
       } else if (code === 'START_REPLAY') {
         await semEvoSQLService.replaySemanticEvolution(governance.candidateId);
-        ElMessage.success('定向 Replay 已启动，会在后台持久执行');
+        ElMessage.success('定向回归验证已启动，会在后台持续执行');
       } else if (code === 'READY_FOR_PUBLISH') {
         await semEvoSQLService.readySemanticEvolution(governance.candidateId);
-        ElMessage.success('已通过 Replay 门禁，等待发布');
+        ElMessage.success('已通过回归验证门禁，等待发布');
       } else if (code === 'PUBLISH_DRAFT' && governance.targetDraftVersionId) {
         await semEvoSQLService.publishProjectVersion(
           diagnosis.value.projectId,
@@ -705,12 +704,12 @@
   const governanceStatusLabel = (value: string) => {
     const labels: Record<string, string> = {
       CANDIDATE: '修复建议待审核',
-      APPROVED: '已审核，待创建 Draft',
-      DRAFT_CREATED: 'Draft 已创建',
-      PATCH_APPLIED: 'Patch 已应用，待 Replay',
-      REPLAY_RUNNING: '定向 Replay 进行中',
-      REPLAY_PASSED: 'Replay 通过',
-      REPLAY_FAILED: 'Replay 未通过',
+      APPROVED: '已审核，待创建草稿',
+      DRAFT_CREATED: '草稿已创建',
+      PATCH_APPLIED: '变更已应用，待回归验证',
+      REPLAY_RUNNING: '定向回归验证进行中',
+      REPLAY_PASSED: '回归验证通过',
+      REPLAY_FAILED: '回归验证未通过',
       READY_FOR_PUBLISH: '等待发布',
       PUBLISHED: '修复版本已发布',
       STALE: '修复建议已过期',

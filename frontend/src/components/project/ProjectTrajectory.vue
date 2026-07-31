@@ -92,7 +92,7 @@
           <el-descriptions-item label="Shape Hash">
             <code>{{ shortHash(detail.shape_hash) }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="Catalog Hash">
+          <el-descriptions-item label="业务模型内容指纹">
             <code>{{ shortHash(detail.catalog_hash) }}</code>
           </el-descriptions-item>
           <el-descriptions-item label="状态">{{ detail.status }}</el-descriptions-item>

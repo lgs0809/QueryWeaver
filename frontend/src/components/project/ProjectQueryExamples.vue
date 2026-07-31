@@ -157,7 +157,7 @@
       </el-table-column>
     </el-table>
 
-    <el-drawer v-model="drawerVisible" title="结构化 Query Case 详情" size="76%">
+    <el-drawer v-model="drawerVisible" title="验证案例详情" size="76%">
       <template v-if="selected">
         <el-alert
           v-if="!selected.typed_ir_json"
@@ -175,46 +175,46 @@
         />
 
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="Case ID">
+          <el-descriptions-item label="案例 ID">
             <code>{{ selected.id }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="Status">
+          <el-descriptions-item label="状态">
             <el-tag :type="statusType(selected.status)">{{ statusLabel(selected.status) }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="Catalog Hash">
+          <el-descriptions-item label="业务模型内容指纹">
             <code>{{ selected.catalog_hash }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="Lineage Hash">
+          <el-descriptions-item label="证据链指纹">
             <code>{{ selected.evidence_lineage_hash || '-' }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="Original Question" :span="2">
+          <el-descriptions-item label="原始问题" :span="2">
             {{ selected.original_question || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="Normalized Question" :span="2">
+          <el-descriptions-item label="标准化问题" :span="2">
             {{ selected.normalized_question }}
           </el-descriptions-item>
-          <el-descriptions-item label="Intent Type">
+          <el-descriptions-item label="意图类型">
             {{ selected.intent_type || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="Conversation Independent">
-            {{ truth(selected.conversation_independent) ? 'true' : 'false' }}
+          <el-descriptions-item label="是否独立于会话">
+            {{ truth(selected.conversation_independent) ? '是' : '否' }}
           </el-descriptions-item>
-          <el-descriptions-item label="Context Hash">
+          <el-descriptions-item label="上下文指纹">
             <code>{{ selected.context_hash || '-' }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="Result Schema Hash">
+          <el-descriptions-item label="结果结构指纹">
             <code>{{ selected.result_schema_hash || '-' }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="Canonical Shape Hash" :span="2">
+          <el-descriptions-item label="标准查询形态指纹" :span="2">
             <code>{{ selected.canonical_shape_hash || '-' }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="Rebind Status">
+          <el-descriptions-item label="重新绑定状态">
             {{ rebindLabel(selected.rebind_status) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Source Example">
+          <el-descriptions-item label="来源案例">
             {{ selected.source_example_id || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="Recall / Failure / Consecutive">
+          <el-descriptions-item label="召回 / 失败 / 连续异常">
             {{ selected.recall_count || 0 }} / {{ selected.failed_after_recall_count || 0 }} /
             {{ selected.consecutive_recall_issue_count || 0 }}
           </el-descriptions-item>
@@ -396,7 +396,7 @@
     try {
       const response = await ElMessageBox.prompt(
         action === 'RESTORE'
-          ? '说明独立 Replay、人工复核或其他足以恢复该案例的证据。'
+          ? '说明独立回归验证、人工复核或其他足以恢复该案例的证据。'
           : '说明为什么该隔离案例应被永久拒绝。',
         action === 'RESTORE' ? '恢复隔离 Query Case' : '拒绝隔离 Query Case',
         {

@@ -25,6 +25,7 @@ import cn.lgs.semevosql.exception.LogicalRelationNotFoundException;
 import cn.lgs.semevosql.exception.ModelConfigConflictException;
 import cn.lgs.semevosql.exception.ModelConfigNotFoundException;
 import cn.lgs.semevosql.exception.ModelConnectionException;
+import cn.lgs.semevosql.exception.SemEvoSQLException;
 import cn.lgs.semevosql.clarification.RuntimeClarificationRequiredException;
 import cn.lgs.semevosql.common.OptimisticLockingFailureException;
 import cn.lgs.semevosql.concurrency.CapacityRejectedException;
@@ -187,6 +188,26 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiResponse<Object>> handleModelConnection(ModelConnectionException e) {
 		return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
 			.body(ApiResponse.error(ApiErrorCode.MODEL_CONNECTION_FAILED, e.getMessage()));
+	}
+
+	@ExceptionHandler(SemEvoSQLException.class)
+	public ResponseEntity<ApiResponse<Object>> handleSemEvoSQLException(SemEvoSQLException e) {
+		HttpStatus status = switch (e.getErrorCode()) {
+			case MODEL_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+			case MODEL_OUTPUT_INVALID, QUERY_EXECUTION_FAILED -> HttpStatus.BAD_GATEWAY;
+			case SEMANTIC_CLARIFICATION_REQUIRED -> HttpStatus.CONFLICT;
+			case SEMANTIC_PLANNING_REJECTED, QUERY_POLICY_REJECTED -> HttpStatus.UNPROCESSABLE_ENTITY;
+			default -> HttpStatus.INTERNAL_SERVER_ERROR;
+		};
+		Map<String, Object> details = Map.of("retryable", e.isRetryable());
+		if (status.is5xxServerError()) {
+			log.error("SemEvoSQL runtime failure [{}]: {}", e.getErrorCode(), e.getPublicMessage(), e);
+		}
+		else {
+			log.warn("SemEvoSQL request rejected [{}]: {}", e.getErrorCode(), e.getPublicMessage());
+		}
+		return ResponseEntity.status(status)
+			.body(ApiResponse.error(e.getErrorCode(), e.getPublicMessage(), details));
 	}
 
 	@ExceptionHandler(IllegalStateException.class)

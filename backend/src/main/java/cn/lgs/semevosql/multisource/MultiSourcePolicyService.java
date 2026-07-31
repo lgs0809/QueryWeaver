@@ -23,6 +23,7 @@ import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.CrossSourceRelatio
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.FreshnessPolicy;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.LogicalColumnBinding;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.MergePolicy;
+import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.MergeType;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.SourceRole;
 import cn.lgs.semevosql.project.domain.ProjectDatasourceBinding;
 import cn.lgs.semevosql.project.domain.ProjectVersionStatus;
@@ -152,10 +153,33 @@ public class MultiSourcePolicyService {
 	}
 
 	public PlanningDecision plan(Long projectId, Long versionId, Set<String> selectedModelCodes) {
+		return plan(projectId, versionId, selectedModelCodes, null, false, null);
+	}
+
+	public PlanningDecision plan(Long projectId, Long versionId, Set<String> selectedModelCodes,
+			Set<String> selectedRelationshipCodes, boolean scalarComposition, String scalarCalculationExpression) {
 		MultiSourcePolicySnapshot policy = load(projectId, versionId);
 		List<SourceCandidate> sources = sourceCandidates(projectId, versionId, selectedModelCodes);
 		if (sources.size() <= 1) {
 			return new PlanningDecision(sources, null, List.of(), List.of());
+		}
+		List<String> warnings = sources.stream()
+			.filter(source -> source.freshnessPolicy() != null)
+			.map(source -> freshnessWarning(source.datasourceId(), source.freshnessPolicy()))
+			.toList();
+		if (scalarComposition) {
+			MergePolicy runtimePolicy = MergePolicy.builder()
+				.policyCode("runtime_scalar_composition")
+				.mergeType(MergeType.SCALAR_COMPOSITION)
+				.nullPolicy("KEEP")
+				.duplicatePolicy("ERROR")
+				.maxRows(1)
+				.partialFailurePolicy("FAIL_ALL")
+				.calculationExpression(scalarCalculationExpression)
+				.evidence("Built-in execution composition for independent governed scalar aggregates")
+				.status(SemanticAssetStatus.ENABLED)
+				.build();
+			return new PlanningDecision(sources, runtimePolicy, List.of(), List.of(), warnings);
 		}
 		Set<Integer> selectedDatasourceIds = sources.stream()
 			.map(SourceCandidate::datasourceId)
@@ -165,6 +189,8 @@ public class MultiSourcePolicyService {
 			.filter(item -> item.getStatus() == SemanticAssetStatus.ENABLED)
 			.filter(item -> selectedDatasourceIds.contains(item.getLeftDatasourceId())
 					&& selectedDatasourceIds.contains(item.getRightDatasourceId()))
+			.filter(item -> selectedRelationshipCodes == null
+					|| selectedRelationshipCodes.contains(item.getRelationshipCode()))
 			.toList();
 		List<String> errors = new ArrayList<>();
 		if (!datasourcesConnected(selectedDatasourceIds, relationships)) {
@@ -185,10 +211,6 @@ public class MultiSourcePolicyService {
 		if (mergePolicy == null) {
 			errors.add("A published merge policy is required for a multi-source query");
 		}
-		List<String> warnings = sources.stream()
-			.filter(source -> source.freshnessPolicy() != null)
-			.map(source -> freshnessWarning(source.datasourceId(), source.freshnessPolicy()))
-			.toList();
 		return new PlanningDecision(sources, mergePolicy, relationships, List.copyOf(errors), warnings);
 	}
 

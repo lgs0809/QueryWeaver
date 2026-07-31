@@ -6,11 +6,10 @@
   <section class="semantic-governance" v-loading="loading">
     <div class="governance-heading">
       <div>
-        <span class="eyebrow">Semantic Governance</span>
-        <h2>语义版本与知识更新</h2>
+        <span class="eyebrow">业务模型治理</span>
+        <h2>业务模型版本与资料更新</h2>
         <p>
-          问数始终读取当前 Active Semantic Version；资料更新在后台形成
-          ChangeSet，通过验证后再切换版本。
+          新查询始终使用当前生效的业务模型版本；资料更新和查询纠错会先形成待审核变更，通过验证后再自动或人工切换版本。
         </p>
       </div>
       <el-button :loading="loading" @click="load">刷新</el-button>
@@ -32,13 +31,13 @@
           :type="readiness.queryReady ? 'success' : 'danger'"
           effect="plain"
         >
-          {{ readiness.queryReady ? "Query Ready" : "Query Blocked" }}
+          {{ readiness.queryReady ? "可问数" : "暂不可用" }}
         </el-tag>
       </div>
       <div class="status-card">
-        <span>当前语义版本</span>
+        <span>当前业务模型版本</span>
         <strong>v{{ activeVersionLabel }}</strong>
-        <code>{{ shortHash(readiness.activeVersion?.semanticStateHash) }}</code>
+        <small>当前所有新查询都会使用此版本</small>
       </div>
       <div class="status-card">
         <span>知识更新</span>
@@ -49,14 +48,14 @@
           :type="readiness.knowledgeUpdateInProgress ? 'warning' : 'info'"
           effect="plain"
         >
-          {{ readiness.knowledgeUpdateCount }} 个 ChangeSet
+          {{ readiness.knowledgeUpdateCount }} 个待处理变更
         </el-tag>
       </div>
     </div>
 
     <el-tabs v-model="activeTab" class="governance-tabs">
-      <el-tab-pane label="Semantic Versions" name="versions">
-        <el-table :data="versions" empty-text="暂无 Semantic Version">
+      <el-tab-pane label="业务模型版本" name="versions">
+        <el-table :data="versions" empty-text="暂无业务模型版本">
           <el-table-column label="版本" min-width="150">
             <template #default="{ row }">
               <div class="version-cell">
@@ -66,20 +65,19 @@
                   size="small"
                   type="success"
                 >
-                  Active
+                  当前生效
                 </el-tag>
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="versionLevel" label="级别" width="100" />
-          <el-table-column prop="versionCause" label="原因" min-width="180" />
-          <el-table-column prop="status" label="状态" width="120" />
-          <el-table-column label="State Hash" min-width="150">
-            <template #default="{ row }"
-              ><code>{{
-                shortHash(row.semanticStateHash || row.catalogHash)
-              }}</code></template
-            >
+          <el-table-column label="级别" width="100">
+            <template #default="{ row }">{{ versionLevelLabel(row.versionLevel) }}</template>
+          </el-table-column>
+          <el-table-column label="原因" min-width="180">
+            <template #default="{ row }">{{ versionCauseLabel(row.versionCause) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">{{ versionStatusLabel(row.status) }}</template>
           </el-table-column>
           <el-table-column label="激活时间" min-width="175">
             <template #default="{ row }">{{
@@ -109,8 +107,8 @@
         </el-table>
 
         <div class="subsection-heading">
-          <h3>Activation Events</h3>
-          <span>只改变 Active 指针，不通过回滚制造新版本。</span>
+          <h3>版本切换记录</h3>
+          <span>回滚只切换当前生效版本，不会制造新的业务模型版本。</span>
         </div>
         <el-timeline v-if="timeline?.activationEvents?.length">
           <el-timeline-item
@@ -128,9 +126,9 @@
         </el-timeline>
       </el-tab-pane>
 
-      <el-tab-pane label="Corpus Revisions" name="corpus">
+      <el-tab-pane label="资料修订" name="corpus">
         <el-table :data="corpus" empty-text="还没有资料修订记录">
-          <el-table-column prop="revisionNo" label="Revision" width="100" />
+          <el-table-column prop="revisionNo" label="修订号" width="100" />
           <el-table-column prop="sourceType" label="来源" width="120" />
           <el-table-column
             prop="sourceRef"
@@ -138,7 +136,7 @@
             min-width="220"
             show-overflow-tooltip
           />
-          <el-table-column label="Semantic Diff" width="130">
+          <el-table-column label="业务模型变化" width="130">
             <template #default="{ row }">
               <el-tag
                 :type="row.semanticDiffDetected ? 'warning' : 'info'"
@@ -148,7 +146,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="ChangeSet" min-width="180">
+          <el-table-column label="关联变更" min-width="180">
             <template #default="{ row }">
               <el-button
                 v-if="row.semanticChangeSetId"
@@ -168,9 +166,9 @@
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="ChangeSets" name="changesets">
-        <el-table :data="changeSets" empty-text="暂无 Semantic ChangeSet">
-          <el-table-column label="ChangeSet" min-width="160">
+      <el-tab-pane label="变更记录" name="changesets">
+        <el-table :data="changeSets" empty-text="暂无业务模型变更">
+          <el-table-column label="变更编号" min-width="160">
             <template #default="{ row }">
               <el-button link @click="openChangeSet(row.changeSetId)">{{
                 shortId(row.changeSetId)
@@ -213,7 +211,7 @@
                 type="primary"
                 @click="promote(row)"
               >
-                Promote
+                设为新业务基线
               </el-button>
             </template>
           </el-table-column>
@@ -221,10 +219,10 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-drawer v-model="detailVisible" title="Semantic ChangeSet" size="680px">
+    <el-drawer v-model="detailVisible" title="业务模型变更详情" size="680px">
       <div v-loading="detailLoading" class="detail-drawer">
         <el-descriptions v-if="detail" :column="1" border>
-          <el-descriptions-item label="ChangeSet">{{
+          <el-descriptions-item label="变更编号">{{
             detail.changeSet.changeSetId
           }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{
@@ -237,35 +235,35 @@
           <el-descriptions-item label="版本变化">{{
             detail.changeSet.targetVersionLevel
           }}</el-descriptions-item>
-          <el-descriptions-item label="Base Version ID">{{
+          <el-descriptions-item label="基准版本 ID">{{
             detail.changeSet.baseSemanticVersionId
           }}</el-descriptions-item>
-          <el-descriptions-item label="Materialized Version ID">
+          <el-descriptions-item label="生成版本 ID">
             {{ detail.changeSet.materializedVersionId || "-" }}
           </el-descriptions-item>
         </el-descriptions>
 
-        <div class="subsection-heading"><h3>Change Items</h3></div>
+        <div class="subsection-heading"><h3>变更项</h3></div>
         <el-table v-if="detail" :data="detail.items" size="small">
           <el-table-column prop="operation" label="操作" width="90" />
           <el-table-column prop="assetType" label="资产类型" width="110" />
           <el-table-column prop="assetKey" label="资产" min-width="160" />
-          <el-table-column label="Patch" min-width="220">
+          <el-table-column label="变更内容" min-width="220">
             <template #default="{ row }"
               ><code class="json-code">{{ row.patchJson }}</code></template
             >
           </el-table-column>
         </el-table>
 
-        <div class="subsection-heading"><h3>Replay Evidence</h3></div>
+        <div class="subsection-heading"><h3>回归验证</h3></div>
         <el-table
           v-if="detail"
           :data="detail.replayResults"
           size="small"
-          empty-text="尚无 replay 结果"
+          empty-text="尚无回归结果"
         >
-          <el-table-column prop="case_id" label="Case" min-width="150" />
-          <el-table-column prop="replay_level" label="Level" width="120" />
+          <el-table-column prop="case_id" label="案例" min-width="150" />
+          <el-table-column prop="replay_level" label="级别" width="120" />
           <el-table-column prop="status" label="状态" width="110" />
           <el-table-column
             prop="error_message"
@@ -345,7 +343,7 @@ const openChangeSet = async (changeSetId: string) => {
   try {
     detail.value = await semEvoSQLService.semanticChangeSet(changeSetId);
   } catch (cause: unknown) {
-    ElMessage.error(errorMessage(cause, "ChangeSet 读取失败"));
+    ElMessage.error(errorMessage(cause, "业务模型变更读取失败"));
   } finally {
     detailLoading.value = false;
   }
@@ -354,11 +352,11 @@ const openChangeSet = async (changeSetId: string) => {
 const promote = async (changeSet: SemanticChangeSet) => {
   try {
     await ElMessageBox.confirm(
-      `将 MAJOR ChangeSet ${shortId(changeSet.changeSetId)} Promote 为新的业务基线？`,
-      "Promote Semantic Version",
+      `将 MAJOR 级变更 ${shortId(changeSet.changeSetId)} 设为新的业务基线？`,
+      "设为新业务基线",
       {
         type: "warning",
-        confirmButtonText: "Promote",
+        confirmButtonText: "确认设为新基线",
         cancelButtonText: "取消",
       },
     );
@@ -366,20 +364,20 @@ const promote = async (changeSet: SemanticChangeSet) => {
       changeSet.changeSetId,
       "manual business baseline promotion",
     );
-    ElMessage.success("新的 MAJOR Semantic Version 已激活");
+    ElMessage.success("新的 MAJOR 业务模型版本已生效");
     await load();
     emit("changed");
   } catch (cause: unknown) {
     if (cause === "cancel" || cause === "close") return;
-    ElMessage.error(errorMessage(cause, "Promote 失败"));
+    ElMessage.error(errorMessage(cause, "设置新业务基线失败"));
   }
 };
 
 const rollback = async (version: SemanticProjectVersion) => {
   try {
     await ElMessageBox.confirm(
-      `将 Active 指针回滚到 v${version.versionNumber}？不会创建新的 Semantic Version。`,
-      "Rollback Semantic Version",
+      `将当前生效版本回滚到 v${version.versionNumber}？此操作不会创建新的业务模型版本。`,
+      "回滚业务模型版本",
       {
         type: "warning",
         confirmButtonText: "确认回滚",
@@ -396,11 +394,24 @@ const rollback = async (version: SemanticProjectVersion) => {
     emit("changed");
   } catch (cause: unknown) {
     if (cause === "cancel" || cause === "close") return;
-    ElMessage.error(errorMessage(cause, "Rollback 失败"));
+    ElMessage.error(errorMessage(cause, "回滚失败"));
   }
 };
 
-const shortHash = (value?: string) => (value ? `${value.slice(0, 10)}…` : "-");
+const versionLevelLabel = (value?: string) =>
+  ({ INITIAL: "初始", PATCH: "修订", MINOR: "资料更新", MAJOR: "业务基线" })[value || ""] || value || "-";
+const versionCauseLabel = (value?: string) =>
+  ({
+    INITIALIZATION: "项目初始化",
+    EPISODE_LEARNING: "查询经验沉淀",
+    MANUAL_SEMANTIC_FIX: "人工语义修正",
+    CORPUS_SEMANTIC_DIFF: "资料语义变化",
+    BUSINESS_BASELINE_PROMOTION: "业务基线升级",
+  })[value || ""] || value || "-";
+const versionStatusLabel = (value?: string) =>
+  ({ DRAFT: "草稿", VALIDATED: "已验证", PUBLISHED: "已发布", ARCHIVED: "已归档" })[
+    value || ""
+  ] || value || "-";
 const shortId = (value?: string) => (value ? `${value.slice(0, 8)}…` : "-");
 const formatTime = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN") : "-";

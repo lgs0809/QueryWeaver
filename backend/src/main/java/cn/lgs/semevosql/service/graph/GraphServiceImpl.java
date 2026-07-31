@@ -28,6 +28,7 @@ import cn.lgs.semevosql.project.domain.ProjectRuntimeContext;
 import cn.lgs.semevosql.run.ExecutionSnapshotService;
 import cn.lgs.semevosql.run.ExecutionSnapshotService.ExecutionSnapshotMismatchException;
 import cn.lgs.semevosql.run.QueryRun;
+import cn.lgs.semevosql.run.QueryRunErrorPresenter;
 import cn.lgs.semevosql.run.QueryRun.RunStatus;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService;
@@ -113,6 +114,8 @@ public class GraphServiceImpl implements GraphService {
 
 	private final QueryRunService runService;
 
+	private final QueryRunErrorPresenter runErrorPresenter;
+
 	private final RuntimeClarificationService clarificationService;
 
 	private final ThreadExecutionGuardService threadExecutionGuardService;
@@ -131,7 +134,8 @@ public class GraphServiceImpl implements GraphService {
 			MultiTurnContextManager multiTurnContextManager, LangfuseService langfuseReporter,
 			ProjectRuntimeGate projectRuntimeGate, ProjectRuntimeProfileService runtimeProfileService,
 			SemEvoSQLProductionService productionService, QueryRunService runService,
-			RuntimeClarificationService clarificationService, ThreadExecutionGuardService threadExecutionGuardService,
+			QueryRunErrorPresenter runErrorPresenter, RuntimeClarificationService clarificationService,
+			ThreadExecutionGuardService threadExecutionGuardService,
 			ExecutionSnapshotService executionSnapshotService, QueryTaskRepository queryTaskRepository,
 			SemEvoSQLConcurrencyProperties concurrencyProperties)
 			throws GraphStateException {
@@ -146,6 +150,7 @@ public class GraphServiceImpl implements GraphService {
 		this.runtimeProfileService = runtimeProfileService;
 		this.productionService = productionService;
 		this.runService = runService;
+		this.runErrorPresenter = runErrorPresenter;
 		this.clarificationService = clarificationService;
 		this.threadExecutionGuardService = threadExecutionGuardService;
 		this.executionSnapshotService = executionSnapshotService;
@@ -555,8 +560,7 @@ public class GraphServiceImpl implements GraphService {
 			sink.tryEmitNext(completed.build());
 		}
 		else {
-			String message = "Run 已结束，状态为 " + run.status()
-					+ (StringUtils.hasText(run.errorMessage()) ? "：" + run.errorMessage() : "");
+			String message = runErrorPresenter.present(run).message();
 			ServerSentEvent.Builder<GraphNodeResponse> failed = ServerSentEvent
 				.builder(GraphNodeResponse.error(agentId, threadId, run.runId(), message))
 				.event(STREAM_EVENT_ERROR);
@@ -911,6 +915,9 @@ public class GraphServiceImpl implements GraphService {
 		context.setEpisodeId(episodeId);
 		context.setAttemptId(attemptId);
 		context.setEpisodeStartNanos(System.nanoTime());
+		if (run.status() == RunStatus.QUEUED) {
+			run = runService.transition(run.runId(), RunStatus.RUNNING, run.currentNode(), null, null);
+		}
 		if (clarificationService
 			.detect(context.getRunId(), projectContext.projectId(), projectContext.projectVersionId(), query)
 			.isPresent()) {

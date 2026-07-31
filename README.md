@@ -36,6 +36,14 @@ Open **http://127.0.0.1:23000/semevosql/**, then:
 3. create a project and publish its semantic model;
 4. ask questions in natural language.
 
+The generated quick-start environment is intended for local evaluation. Backend, frontend, and demo database ports bind to `127.0.0.1` by default; set `SEMEVOSQL_BIND_HOST` only when an explicit network exposure policy is in place.
+
+## Deployment and execution boundary
+
+The application process never owns Docker daemon access. Generated Python runs through the separate execution worker and the versioned `semevosql/python-runner:1.0.0` image with no network, a read-only root filesystem, dropped Linux capabilities, process/memory/CPU limits, and a non-root runtime user. Runtime package installation is disabled. The worker still controls the Docker socket and must therefore be treated as a trusted internal control-plane component; do not expose its internal HTTP endpoint, and set `SEMEVOSQL_DOCKER_GID` to the Docker socket group on Linux when the host requires it.
+
+For Internet-facing deployments, keep SemEvoSQL bound to a private interface and terminate HTTPS at a reverse proxy or ingress that also applies the deployment's firewall, hostname, and certificate policy.
+
 ## Highlights
 
 - **Semantic-first NL2SQL** — business metrics, dimensions, relationships, time semantics, aliases, rules, and evidence live in a versioned Semantic Catalog.

@@ -28,7 +28,7 @@ public record QueryCaseHints(Set<String> modelCodes, Set<String> metricCodes, Se
 		Set<String> grainCodes, Set<String> relationshipCodes, Set<String> ruleCodes,
 		List<EnumBindingHint> enumBindings, List<FilterBindingHint> filterBindings, List<AssetBindingHint> assetBindings,
 		TimeBindingHint timeBinding, boolean strictAssetBinding, String intentType, List<String> sourceExampleIds,
-		double confidence, Map<String, Double> componentScores) {
+		double confidence, Map<String, Double> componentScores, ResultCompositionHint resultComposition) {
 
 	public QueryCaseHints {
 		modelCodes = Set.copyOf(modelCodes == null ? Set.of() : modelCodes);
@@ -42,6 +42,15 @@ public record QueryCaseHints(Set<String> modelCodes, Set<String> metricCodes, Se
 		assetBindings = List.copyOf(assetBindings == null ? List.of() : assetBindings);
 		sourceExampleIds = List.copyOf(sourceExampleIds == null ? List.of() : sourceExampleIds);
 		componentScores = Map.copyOf(componentScores == null ? Map.of() : componentScores);
+	}
+
+	public QueryCaseHints(Set<String> modelCodes, Set<String> metricCodes, Set<String> dimensionCodes,
+			Set<String> grainCodes, Set<String> relationshipCodes, Set<String> ruleCodes,
+			List<EnumBindingHint> enumBindings, List<FilterBindingHint> filterBindings,
+			List<AssetBindingHint> assetBindings, TimeBindingHint timeBinding, boolean strictAssetBinding, String intentType,
+			List<String> sourceExampleIds, double confidence, Map<String, Double> componentScores) {
+		this(modelCodes, metricCodes, dimensionCodes, grainCodes, relationshipCodes, ruleCodes, enumBindings, filterBindings,
+				assetBindings, timeBinding, strictAssetBinding, intentType, sourceExampleIds, confidence, componentScores, null);
 	}
 
 	public QueryCaseHints(Set<String> modelCodes, Set<String> metricCodes, Set<String> dimensionCodes,
@@ -77,7 +86,7 @@ public record QueryCaseHints(Set<String> modelCodes, Set<String> metricCodes, Se
 	public boolean emptyHints() {
 		return modelCodes.isEmpty() && metricCodes.isEmpty() && dimensionCodes.isEmpty() && grainCodes.isEmpty()
 				&& relationshipCodes.isEmpty() && ruleCodes.isEmpty() && enumBindings.isEmpty() && filterBindings.isEmpty()
-				&& assetBindings.isEmpty() && timeBinding == null;
+				&& assetBindings.isEmpty() && timeBinding == null && resultComposition == null;
 	}
 
 	public record EnumBindingHint(String rawText, String modelCode, String columnName, String valueCode,
@@ -92,6 +101,10 @@ public record QueryCaseHints(Set<String> modelCodes, Set<String> metricCodes, Se
 	/** Phrase-scoped binding used by runtime QUERY/USER/PROJECT aliases. */
 	public record AssetBindingHint(String rawText, String assetType, String assetKey, String modelCode, String sourceId,
 			double confidence) {
+	}
+
+	/** Current-query execution composition selected by the semantic planner. */
+	public record ResultCompositionHint(String type, String calculationExpression) {
 	}
 
 	public record TimeBindingHint(String rawText, String modelCode, String columnName, String sourceExampleId,

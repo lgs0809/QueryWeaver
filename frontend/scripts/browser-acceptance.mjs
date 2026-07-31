@@ -56,8 +56,20 @@ if (projectId) {
     {
       name: 'semantic governance',
       path: `/projects/${encodeURIComponent(projectId)}?section=release`,
-      includes: ['语义版本与知识更新', 'Semantic Versions', 'Corpus Revisions', 'ChangeSets'],
-      excludes: ['项目详情加载失败'],
+      includes: ['业务模型版本与资料更新', '业务模型版本', '资料修订', '变更记录'],
+      excludes: ['项目详情加载失败', 'Semantic Versions', 'Corpus Revisions'],
+    },
+    {
+      name: 'external agent integration',
+      path: `/projects/${encodeURIComponent(projectId)}?section=external`,
+      includes: ['外部 Agent 接入'],
+      excludes: ['绑定版本', 'Service Principal', 'Production MCP Tools', 'Project 必须处于 READY'],
+    },
+    {
+      name: 'semantic improvement',
+      path: `/projects/${encodeURIComponent(projectId)}?section=evolution`,
+      includes: ['业务模型建议'],
+      excludes: ['语义演进候选'],
     },
     {
       name: 'project chat',

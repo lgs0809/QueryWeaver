@@ -32,7 +32,7 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item disabled>
-                  {{ operator.role }} · {{ operator.source }}
+                  {{ roleLabel(operator.role) }}
                 </el-dropdown-item>
                 <el-dropdown-item v-if="canAdmin" @click="router.push('/admin/models')">
                   模型
@@ -72,6 +72,13 @@
   const readiness = ref();
   const readinessError = ref('');
   const roleRank = { VIEWER: 0, EDITOR: 1, REVIEWER: 2, PUBLISHER: 3, ADMIN: 4 };
+  const roleLabels = {
+    VIEWER: '查看者',
+    EDITOR: '编辑者',
+    REVIEWER: '审核者',
+    PUBLISHER: '发布者',
+    ADMIN: '管理员',
+  };
   const navigation = [
     { label: '项目', path: '/projects', icon: 'bi bi-folder2-open', modules: ['project'] },
     { label: '问数中心', path: '/chat', icon: 'bi bi-chat-square-text', modules: ['chat'] },
@@ -100,6 +107,7 @@
   };
   const visibleNavigation = computed(() => navigation.filter(item => hasRole(item.minimumRole)));
   const canAdmin = computed(() => hasRole('ADMIN'));
+  const roleLabel = role => roleLabels[role] || role;
   const isActive = modules => modules.includes(route.meta.module);
   const degradedMessage = computed(() => {
     if (readinessError.value)
